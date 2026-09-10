@@ -283,12 +283,6 @@
     celulasLayer.clearLayers();
     if (mostrarDeslocamento) {
       (celulas || []).forEach(function (cel) {
-        if (cel.hull && cel.hull.length >= 3) {
-          var pontosHull = cel.hull.map(function (p) { return [p.lat, p.lon]; });
-          L.polygon(pontosHull, {
-            color: "#f97316", weight: 1, opacity: 0.75, fillColor: "#f97316", fillOpacity: 0.12, renderer: canvasRenderer,
-          }).bindTooltip("Célula #" + cel.id + " — área de atividade").addTo(celulasLayer);
-        }
         var hist = cel.historico || [];
         var pts = hist.map(function (p) { return [p.lat, p.lon]; })
           .concat((cel.checkpoints || []).map(function (c) { return [c.lat, c.lon]; }));

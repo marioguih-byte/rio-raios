@@ -570,7 +570,7 @@ with st.sidebar:
                 st.success(f"Usando {len(df_stations)} estações da planilha enviada.")
 
     st.subheader("⚡ Raios ao vivo (GLM/GOES-19)")
-    raios_minutos = st.slider("Janela de tempo (min)", 5, 60, 5, step=5)
+    raios_minutos = 15
     intervalo_raios_seg = 120
     st.caption("🔄 Atualização automática: a cada 2 minutos")
     st.caption("🔊 O som e o pop-up automático de alerta ficam sempre ativos.")
