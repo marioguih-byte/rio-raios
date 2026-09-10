@@ -179,9 +179,8 @@ def montar_mensagem_proximidade_raio(nivel_km, nome_estacao, meteorologista):
             f"Válido até as {validade.strftime('%H:%M')}")
 
 def classificar_risco_raio(dist_min_km):
-    """Classifica o risco de uma unidade a partir da distância (km) até o
-    raio ativo mais próximo (ou None se não há nenhum raio na janela)."""
-    if dist_min_km is None:
+    """Classifica o risco somente quando existe raio dentro de 50 km."""
+    if dist_min_km is None or not np.isfinite(dist_min_km):
         return 0, "Sem raios próximos", "🟢", "#22c55e", None
     if dist_min_km <= 30:
         return 2, "Alto — raio a menos de 30 km", "🔴", "#ef4444", "vermelho"
@@ -190,19 +189,29 @@ def classificar_risco_raio(dist_min_km):
     return 0, "Sem raios próximos", "🟢", "#22c55e", None
 
 def calcular_status_estacoes(df_stations, raios_df):
-    """Pra cada unidade monitorada, calcula a distância até o raio ativo
-    mais próximo (dentro da janela de tempo atual) e classifica o risco.
-    Não depende de nenhuma previsão — é 100% baseado nos raios ao vivo."""
+    """Calcula a distância geodésica real até o raio mais próximo da janela atual."""
     linhas = []
     tem_raios = raios_df is not None and not raios_df.empty
+    if tem_raios:
+        raio_lat = pd.to_numeric(raios_df["lat"], errors="coerce").to_numpy(dtype=float)
+        raio_lon = pd.to_numeric(raios_df["lon"], errors="coerce").to_numpy(dtype=float)
+        valido = np.isfinite(raio_lat) & np.isfinite(raio_lon)
+        raio_lat = np.radians(raio_lat[valido])
+        raio_lon = np.radians(raio_lon[valido])
+
     for _, row in df_stations.iterrows():
         nome_completo = str(row["estacao"])
         nome = nome_completo.split(" - ")[0]
         lat, lon = float(row["lat"]), float(row["lon"])
         dist_min = None
-        if tem_raios:
-            dists = ((raios_df["lat"] - lat) ** 2 + (raios_df["lon"] - lon) ** 2) ** 0.5 * 111
-            dist_min = float(dists.min())
+        if tem_raios and len(raio_lat):
+            lat1 = math.radians(lat)
+            lon1 = math.radians(lon)
+            dlat = raio_lat - lat1
+            dlon = raio_lon - lon1
+            a = np.sin(dlat / 2.0) ** 2 + np.cos(lat1) * np.cos(raio_lat) * np.sin(dlon / 2.0) ** 2
+            dist_min = float((2.0 * 6371.0088 * np.arcsin(np.sqrt(np.clip(a, 0.0, 1.0)))).min())
+
         score, label, emoji, color, nivel_chave = classificar_risco_raio(dist_min)
         contatos = buscar_contatos_por_estacao(nome_completo)
         linhas.append({
@@ -528,7 +537,8 @@ with st.sidebar:
 
     st.subheader("⚡ Raios ao vivo (GLM/GOES-19)")
     raios_minutos = st.slider("Janela de tempo (min)", 5, 60, 15, step=5)
-    intervalo_raios_seg = st.slider("Intervalo de atualização (segundos)", 10, 120, 30, step=10)
+    intervalo_raios_seg = 120
+    st.caption("🔄 Atualização automática: a cada 2 minutos")
     st.caption("🔊 O som e o pop-up automático de alerta ficam sempre ativos.")
     arquivo_som = st.file_uploader("Trocar o som de alerta (opcional)", type=["mp3", "wav", "ogg", "m4a"])
     mostrar_deslocamento = st.checkbox("Mostrar deslocamento das células de tempestade", value=True)
@@ -652,12 +662,17 @@ def _renderizar_mapa_ao_vivo():
     estacoes_novas = []
     if not raios_df.empty:
         notificacoes_desta_rodada = []
+        agora_ts = time.time()
         for _, est in df_status.iterrows():
+            # Alerta só pode nascer de um raio REAL dentro de um dos
+            # intervalos operacionais: <=30 km (vermelho) ou <=50 km (amarelo).
             nivel_atual = est["nivel_chave"]
-            if nivel_atual is None: continue
+            dist_atual = est["dist_min_km"]
+            if nivel_atual not in ("vermelho", "amarelo") or pd.isna(dist_atual) or float(dist_atual) > 50:
+                continue
 
-            agora_ts = time.time()
-            existente = st.session_state.alertas_unidade.get(est["nome"])
+            chave_estacao = est["estacao"]
+            existente = st.session_state.alertas_unidade.get(chave_estacao)
             deve_notificar = False
             if existente is None:
                 deve_notificar = True
@@ -667,14 +682,16 @@ def _renderizar_mapa_ao_vivo():
                 deve_notificar = True
 
             if deve_notificar:
-                st.session_state.alertas_unidade[est["nome"]] = {
-                    "nivel": nivel_atual, "notificado_ts": agora_ts, "expira_ts": agora_ts + 3600,
+                st.session_state.alertas_unidade[chave_estacao] = {
+                    "nivel": nivel_atual, "dist_km": float(dist_atual),
+                    "notificado_ts": agora_ts, "expira_ts": agora_ts + 3600,
                 }
                 nivel_km = 30 if nivel_atual == "vermelho" else 50
                 texto = montar_mensagem_proximidade_raio(nivel_km, est["nome"], meteorologista)
                 st.session_state.alertas_raio_ativos.insert(0, {
-                    "id": f"{est['nome']}_{agora_ts}", "texto": texto, "estacao": est["nome"],
-                    "nivel": nivel_atual, "expira": agora_ts + 3600, "quem_recebeu": "",
+                    "id": f"{chave_estacao}_{agora_ts}", "texto": texto, "estacao": chave_estacao,
+                    "nivel": nivel_atual, "dist_km": float(dist_atual),
+                    "expira": agora_ts + 3600, "quem_recebeu": "",
                 })
                 notificacoes_desta_rodada.append(texto)
                 estacoes_novas.append(est["nome"])

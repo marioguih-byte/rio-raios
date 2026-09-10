@@ -154,7 +154,6 @@
     // inverter as cores de uma imagem de satélite, por exemplo).
     map.createPane("paneEscuro"); map.getPane("paneEscuro").style.zIndex = 200;
     map.createPane("paneClaro"); map.getPane("paneClaro").style.zIndex = 200;
-    map.createPane("paneSatelite"); map.getPane("paneSatelite").style.zIndex = 200;
 
     var tileEscuro = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "&copy; OpenStreetMap contributors", maxZoom: 19, pane: "paneEscuro",
@@ -162,13 +161,9 @@
     var tileClaro = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "&copy; OpenStreetMap contributors", maxZoom: 19, pane: "paneClaro",
     });
-    var tileSatelite = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
-      attribution: "Tiles &copy; Esri", maxZoom: 19, pane: "paneSatelite",
-    });
-
     tileEscuro.addTo(map);
     L.control.layers(
-      { "🌑 Escuro": tileEscuro, "☀️ Claro": tileClaro, "🛰️ Satélite": tileSatelite },
+      { "🌑 Escuro": tileEscuro, "☀️ Claro": tileClaro },
       null, { position: "topright", collapsed: true }
     ).addTo(map);
 
