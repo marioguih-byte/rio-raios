@@ -92,6 +92,7 @@
   var chavePorNome = {};
   var audio = null;
   var audioSrcAtual = null;
+  var canvasRenderer = L.canvas({ padding: 0.1 });
 
   function destravarSom() {
     if (!audio) return;
@@ -147,7 +148,7 @@
   }
 
   function iniciarMapa() {
-    map = L.map("map", { zoomControl: true, minZoom: 4, maxZoom: 14 });
+    map = L.map("map", { zoomControl: true, minZoom: 4, maxZoom: 14, preferCanvas: true });
 
     // Três opções de fundo — cada uma no seu próprio "pane", pra dar pra
     // aplicar o filtro escuro só na camada Escuro (não faz sentido
@@ -214,7 +215,7 @@
       var texto = (e.dist_min_km === null || e.dist_min_km === undefined)
         ? "sem raios na janela atual" : e.dist_min_km.toFixed(0) + " km do raio mais próximo";
       var marcador = L.circleMarker([e.lat, e.lon], {
-        radius: 8, color: e.risco_color, weight: 3, fill: true, fillColor: e.risco_color, fillOpacity: 0.9,
+        radius: 7, color: e.risco_color, weight: 2, fill: true, fillColor: e.risco_color, fillOpacity: 0.9, renderer: canvasRenderer,
       });
       marcador.bindTooltip(e.risco_emoji + " " + e.nome + " — " + texto);
       marcador.on("click", function () { abrirPainel(e.estacao); });
@@ -227,7 +228,7 @@
       opcoes += '<option value="' + String(e.nome).replace(/"/g, "&quot;") + '">';
 
       (aneis || []).forEach(function (a) {
-        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: a.cor, weight: 1.5, fill: false, dashArray: "6, 6", opacity: 0.85 })
+        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: a.cor, weight: 1, fill: false, dashArray: "6, 6", opacity: 0.65, renderer: canvasRenderer })
           .bindTooltip(e.nome + " — raio de " + a.km + " km")
           .addTo(aneisLayer);
       });
@@ -239,8 +240,7 @@
     raiosLayer.clearLayers();
     (raios || []).forEach(function (r) {
       var cor = corPorIdade(r.idade_min, janelaMin);
-      L.circleMarker([r.lat, r.lon], { radius: 3, color: cor, weight: 1, fill: true, fillColor: cor, fillOpacity: 0.8 })
-        .bindTooltip("⚡ " + r.hora + " · ~" + Math.round(r.idade_min) + " min atrás")
+      L.circleMarker([r.lat, r.lon], { radius: 2.5, color: cor, weight: 1, fill: true, fillColor: cor, fillOpacity: 0.75, renderer: canvasRenderer })
         .addTo(raiosLayer);
     });
 
@@ -250,14 +250,14 @@
         if (cel.hull && cel.hull.length >= 3) {
           var pontosHull = cel.hull.map(function (p) { return [p.lat, p.lon]; });
           L.polygon(pontosHull, {
-            color: "#f97316", weight: 1.5, opacity: 0.85, fillColor: "#f97316", fillOpacity: 0.16,
+            color: "#f97316", weight: 1, opacity: 0.75, fillColor: "#f97316", fillOpacity: 0.12, renderer: canvasRenderer,
           }).bindTooltip("Célula #" + cel.id + " — área de atividade").addTo(celulasLayer);
         }
         var hist = cel.historico || [];
         var pts = hist.map(function (p) { return [p.lat, p.lon]; })
           .concat((cel.checkpoints || []).map(function (c) { return [c.lat, c.lon]; }));
         if (pts.length > 1) {
-          L.polyline(pts, { color: "#e5e7eb", weight: 1.5, opacity: 0.55, dashArray: "6, 5" }).addTo(celulasLayer);
+          L.polyline(pts, { color: "#e5e7eb", weight: 1, opacity: 0.45, dashArray: "6, 5", renderer: canvasRenderer }).addTo(celulasLayer);
         }
         hist.forEach(function (p, i) {
           var atual = (i === hist.length - 1);
@@ -274,7 +274,7 @@
         });
         (cel.checkpoints || []).forEach(function (c, idx) {
           var op = Math.max(0.75 - idx * 0.18, 0.2);
-          L.circleMarker([c.lat, c.lon], { radius: 3.5, color: "#e5e7eb", weight: 1, fill: true, fillColor: "#e5e7eb", fillOpacity: op, opacity: op })
+          L.circleMarker([c.lat, c.lon], { radius: 3, color: "#e5e7eb", weight: 1, fill: true, fillColor: "#e5e7eb", fillOpacity: op, opacity: op, renderer: canvasRenderer })
             .bindTooltip("Célula #" + cel.id + " — alcance estimado em +" + c.min + " min")
             .addTo(celulasLayer);
         });

@@ -162,6 +162,10 @@ ESTACOES_PADRAO = [
 
 RAIOS_ALERTA_KM = [(30, "#3b82f6"), (50, "#22c55e"), (100, "#f97316"), (200, "#ef4444")]
 
+# Limite apenas para a visualização no navegador. Os cálculos de alerta
+# continuam usando TODOS os raios disponíveis na janela selecionada.
+MAX_RAIOS_NO_MAPA = 1000
+
 GLM_BUCKET = "noaa-goes19"
 GLM_BASE_URL = f"https://{GLM_BUCKET}.s3.amazonaws.com"
 SOUTH_AMERICA_BOUNDS = {"lat_min": -58.0, "lat_max": 13.5, "lon_min": -82.0, "lon_max": -33.0}
@@ -518,9 +522,39 @@ div[data-testid="stVerticalBlockBorderWrapper"] { border-radius: 12px !important
 if "alertas_raio_ativos" not in st.session_state: st.session_state.alertas_raio_ativos = []
 if "alertas_unidade" not in st.session_state: st.session_state.alertas_unidade = {}
 
+# Na primeira abertura, identifica imediatamente o meteorologista responsável.
+# O restante da interface só é exibido depois da confirmação do nome.
+if "meteorologista_nome" not in st.session_state or not str(st.session_state.get("meteorologista_nome", "")).strip():
+    @st.dialog("👤 Identificação do Meteorologista")
+    def _dialog_meteorologista_inicial():
+        st.markdown("### Bem-vindo ao BlueOcean")
+        st.write("Informe o nome do meteorologista responsável pelo monitoramento para iniciar a operação.")
+        nome = st.text_input(
+            "Nome do Meteorologista",
+            key="meteorologista_inicial_input",
+            placeholder="Digite seu nome",
+            label_visibility="visible",
+        )
+        if st.button("Entrar no monitoramento", type="primary", use_container_width=True):
+            nome = str(nome).strip()
+            if nome:
+                st.session_state.meteorologista_nome = nome
+                st.rerun()
+            else:
+                st.warning("Digite o nome do meteorologista para continuar.")
+
+    _dialog_meteorologista_inicial()
+    st.stop()
+
 with st.sidebar:
     st.header("⚙ Configuração")
-    meteorologista = st.text_input("Meteorologista responsável", value="")
+    meteorologista = st.text_input(
+        "Meteorologista responsável",
+        value=st.session_state.get("meteorologista_nome", ""),
+        key="meteorologista_responsavel",
+    )
+    if meteorologista.strip() != st.session_state.get("meteorologista_nome", ""):
+        st.session_state.meteorologista_nome = meteorologista.strip()
 
     st.subheader("📁 Unidades monitoradas")
     df_stations = pd.DataFrame(ESTACOES_PADRAO)
@@ -541,7 +575,7 @@ with st.sidebar:
     st.caption("🔄 Atualização automática: a cada 2 minutos")
     st.caption("🔊 O som e o pop-up automático de alerta ficam sempre ativos.")
     arquivo_som = st.file_uploader("Trocar o som de alerta (opcional)", type=["mp3", "wav", "ogg", "m4a"])
-    mostrar_deslocamento = st.checkbox("Mostrar deslocamento das células de tempestade", value=True)
+    mostrar_deslocamento = st.checkbox("Mostrar deslocamento das células de tempestade", value=False)
     st.caption("🔄 Só os raios (pontos, células e alertas) atualizam sozinhos — o mapa em si (zoom, posição, pop-ups abertos) não é recarregado.")
 
     st.subheader("📏 Anéis de distância no mapa")
@@ -604,7 +638,11 @@ def _preparar_payload_raios(raios_df, celulas_com_trajetoria):
     agora = datetime.now(timezone.utc)
     raios_out = []
     if raios_df is not None and not raios_df.empty:
-        for _, r in raios_df.iterrows():
+        # O processamento de alertas usa a série completa, mas o navegador
+        # recebe somente os raios mais recentes para evitar milhares de
+        # objetos Leaflet e consumo excessivo de memória.
+        raios_mapa = raios_df.sort_values("time", kind="stable").tail(MAX_RAIOS_NO_MAPA)
+        for _, r in raios_mapa.iterrows():
             idade_min = max((agora - r["time"]).total_seconds() / 60, 0) if pd.notna(r["time"]) else 0
             raios_out.append({
                 "lat": float(r["lat"]), "lon": float(r["lon"]),
