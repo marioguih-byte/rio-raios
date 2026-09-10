@@ -164,7 +164,7 @@ RAIOS_ALERTA_KM = [(30, "#3b82f6"), (50, "#22c55e"), (100, "#f97316"), (200, "#e
 
 # Limite apenas para a visualização no navegador. Os cálculos de alerta
 # continuam usando TODOS os raios disponíveis na janela selecionada.
-MAX_RAIOS_NO_MAPA = 1000
+MAX_RAIOS_NO_MAPA = 5000
 
 GLM_BUCKET = "noaa-goes19"
 GLM_BASE_URL = f"https://{GLM_BUCKET}.s3.amazonaws.com"
