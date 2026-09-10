@@ -6,7 +6,6 @@
 <style>
   html, body { margin: 0; padding: 0; height: 100%; background: #0b0f16; }
   #map { position: relative; width: 100%; height: 650px; background: #0b0f16; }
-  .leaflet-paneEscuro-pane { filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9) saturate(0.7); }
   .leaflet-container { background: #0b0f16 !important; }
   .raio-celula-icon { background: transparent !important; border: none !important; }
 
@@ -150,22 +149,42 @@
   function iniciarMapa() {
     map = L.map("map", { zoomControl: true, minZoom: 4, maxZoom: 14, preferCanvas: true });
 
-    // Três opções de fundo — cada uma no seu próprio "pane", pra dar pra
-    // aplicar o filtro escuro só na camada Escuro (não faz sentido
-    // inverter as cores de uma imagem de satélite, por exemplo).
-    map.createPane("paneEscuro"); map.getPane("paneEscuro").style.zIndex = 200;
-    map.createPane("paneClaro"); map.getPane("paneClaro").style.zIndex = 200;
+    // Fundos do mapa. A visualização de satélite foi removida.
+    // O fundo "Preto total" é propositalmente sem tiles: mantém apenas
+    // a base preta, deixando os raios e as unidades em destaque.
+    map.createPane("paneFundo");
+    map.getPane("paneFundo").style.zIndex = 200;
 
-    var tileEscuro = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "&copy; OpenStreetMap contributors", maxZoom: 19, pane: "paneEscuro",
+    var fundoPreto = L.layerGroup();
+    var fundoEscuro = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+      attribution: "&copy; OpenStreetMap contributors &copy; CARTO", maxZoom: 20,
+      subdomains: "abcd", pane: "paneFundo", crossOrigin: true,
     });
-    var tileClaro = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "&copy; OpenStreetMap contributors", maxZoom: 19, pane: "paneClaro",
+    var fundoClaro = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "&copy; OpenStreetMap contributors", maxZoom: 19,
+      subdomains: "abc", pane: "paneFundo", crossOrigin: true,
     });
-    tileEscuro.addTo(map);
+    var fundoCinza = L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+      attribution: "&copy; OpenStreetMap contributors &copy; CARTO", maxZoom: 20,
+      subdomains: "abcd", pane: "paneFundo", crossOrigin: true,
+    });
+    var fundoTopo = L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", {
+      attribution: "Map data &copy; OpenStreetMap contributors, SRTM | Map style &copy; OpenTopoMap", maxZoom: 17,
+      subdomains: "abc", pane: "paneFundo", crossOrigin: true,
+    });
+
+    // O preto total é o padrão para reduzir carga visual e destacar os raios.
+    fundoPreto.addTo(map);
     L.control.layers(
-      { "🌑 Escuro": tileEscuro, "☀️ Claro": tileClaro },
-      null, { position: "topright", collapsed: true }
+      {
+        "⬛ Preto total": fundoPreto,
+        "🌑 Preto / escuro": fundoEscuro,
+        "🌫️ Cinza": fundoCinza,
+        "☀️ Claro": fundoClaro,
+        "⛰️ Topográfico": fundoTopo,
+      },
+      null,
+      { position: "topright", collapsed: true }
     ).addTo(map);
 
     var bb = { lat_min: -34.0, lat_max: 5.5, lon_min: -74.5, lon_max: -32.0 };

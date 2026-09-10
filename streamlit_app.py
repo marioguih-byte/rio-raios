@@ -570,7 +570,7 @@ with st.sidebar:
                 st.success(f"Usando {len(df_stations)} estações da planilha enviada.")
 
     st.subheader("⚡ Raios ao vivo (GLM/GOES-19)")
-    raios_minutos = st.slider("Janela de tempo (min)", 5, 60, 15, step=5)
+    raios_minutos = st.slider("Janela de tempo (min)", 5, 60, 5, step=5)
     intervalo_raios_seg = 120
     st.caption("🔄 Atualização automática: a cada 2 minutos")
     st.caption("🔊 O som e o pop-up automático de alerta ficam sempre ativos.")
@@ -805,10 +805,35 @@ with col_lado:
                     else:
                         for _, e in em_risco.iterrows():
                             with st.container(border=True):
-                                st.markdown(f"{e['risco_emoji']} **{e['nome']}** — <span style='color:{e['risco_color']}'>{e['risco_label']}</span>", unsafe_allow_html=True)
-                                if e["contatos"]:
-                                    numeros = ", ".join(n["numero"] for n in e["contatos"]["numeros"][:2])
-                                    st.caption(f"📞 {numeros}")
+                                chave_ui = f"unidade_{e['estacao']}"
+                                if st.button(
+                                    f"{e['risco_emoji']} {e['nome']}",
+                                    key=chave_ui,
+                                    use_container_width=True,
+                                    help="Clique para visualizar os contatos da unidade",
+                                ):
+                                    st.session_state["unidade_contatos_selecionada"] = e["estacao"]
+                                    st.rerun(scope="fragment")
+
+                                st.markdown(
+                                    f"<span style='color:{e['risco_color']}'>{e['risco_label']}</span>",
+                                    unsafe_allow_html=True,
+                                )
+
+                                if st.session_state.get("unidade_contatos_selecionada") == e["estacao"]:
+                                    contatos = e["contatos"]
+                                    if contatos and contatos.get("numeros"):
+                                        st.markdown(
+                                            f"<div style='margin-top:8px;padding:10px;border-radius:8px;"
+                                            f"background:#111827;border:1px solid #263244;'>"
+                                            f"<b style='color:#3fc2c2;'>📞 Contatos — {contatos.get('nome', e['nome'])}</b></div>",
+                                            unsafe_allow_html=True,
+                                        )
+                                        for item in contatos["numeros"]:
+                                            desc = f" — {item['descricao']}" if item.get("descricao") else ""
+                                            st.caption(f"☎️ {item['numero']}{desc}")
+                                    else:
+                                        st.info("Nenhum contato cadastrado para esta unidade.")
 
             with tab_alertas:
                 if not st.session_state.alertas_raio_ativos:
