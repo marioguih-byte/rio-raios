@@ -408,9 +408,8 @@ def atualizar_celulas_raio(grupos, agora_ts):
         alvo["historico"].append({"lat": lat, "lon": lon, "t": agora_ts, "n": len(grupo)})
         if len(alvo["historico"]) > 6: alvo["historico"] = alvo["historico"][-6:]
         alvo["ultima_atualizacao"] = agora_ts
-        alvo["hull_atual"] = _hull_convexo(grupo)
         usadas.add(alvo["id"])
-    celulas = [c for c in celulas if agora_ts - c["ultima_atualizacao"] <= 600]
+    celulas = [c for c in celulas if agora_ts - c["ultima_atualizacao"] <= 900]
     st.session_state.celulas_raio = celulas
     return celulas
 
@@ -658,7 +657,6 @@ def _preparar_payload_raios(raios_df, celulas_com_trajetoria):
             "checkpoints": traj["checkpoints"],
             "vel_kmh": round(traj["vel_kmh"], 1),
             "rumo_texto": traj["rumo_texto"],
-            "hull": cel.get("hull_atual", []),
         })
     return {"raios": raios_out, "celulas": celulas_out}
 
