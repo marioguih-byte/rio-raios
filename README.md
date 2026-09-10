@@ -1,28 +1,56 @@
 # BlueOcean — Monitor de Raios (versão web)
 
 Versão do painel focada **só em raios** (GLM/GOES-19) — sem rajada de vento,
-precipitação ou CAPE. Layout redesenhado.
+precipitação ou CAPE.
 
-## O que mudou em relação à versão anterior
+## Atualização "sutil" — o mapa não recarrega mais
 
-- Removidas todas as variáveis de previsão (rajada de vento, chuva, CAPE) e
-  a busca no Open-Meteo. O app não depende mais de nenhuma data/modelo — é
-  só monitoramento de raios ao vivo.
-- O status de cada unidade (🟢/🟡/🔴) agora é calculado direto pela
-  distância até o raio ativo mais próximo, não por um "risco combinado".
-- Layout novo: cabeçalho com indicador do status geral (quantas unidades
-  em alerta agora), fonte Inter, cores revisadas.
-- Cada alerta na aba **📋 Alertas** agora tem um campo **"Quem recebeu o
-  alerta:"** — você digita o nome de quem confirmou o recebimento (por
-  telefone, por exemplo) e ele entra automaticamente na mensagem, logo
-  antes da linha "Válido até as...". Continua sendo copiar e colar (`st.code`
-  com botão de copiar) pro WhatsApp — nada é enviado automaticamente por
-  aqui.
-- O painel que abre ao clicar numa unidade agora mostra status e contatos
-  (sem o gráfico horário, que dependia das variáveis removidas).
+Antes, cada atualização de raios reconstruía o mapa inteiro (o Leaflet, os
+tiles, tudo), o que causava um "flash" visível a cada ciclo. Agora o mapa
+é um **componente Streamlit de verdade** (`bo_mapa_component/`, uma pasta
+nova que precisa ir junto no deploy) — ele monta **uma única vez** e, a
+cada ciclo, o Python só manda os dados novos pra ele (via o protocolo
+oficial de componentes do Streamlit); o JS do lado do mapa apenas
+redesenha os pontos de raio e as unidades, sem recarregar tiles, sem
+perder zoom, sem popup fechando sozinho. A única coisa que muda
+visualmente a cada ciclo é um fade rápido no textinho de status
+("⚡ raios atualizados às..."), propositalmente sutil.
+
+Isso também resolve de vez o problema de confiabilidade de antes: esse
+componente é servido pelo mecanismo oficial do Streamlit pra componentes
+(diferente do "static file serving" ad-hoc, que só é confiável pra
+arquivos gravados durante a execução — aquele era o motivo dos raios às
+vezes sumirem do mapa).
+
+**Importante pro deploy**: a pasta `bo_mapa_component/` (com o
+`index.html` dentro) precisa subir pro GitHub junto com o
+`streamlit_app.py`, mantendo essa mesma estrutura de pastas — sem ela o
+mapa não carrega.
+
+## Cores dos anéis
+
+Ajustadas pra bater com o exemplo que você mandou: 30 km azul, 50 km
+verde, 100 km laranja, 200 km vermelho.
+
+## Outras correções desta rodada (mantidas)
+
+- **Fundo do mapa**: OpenStreetMap padrão (sempre gratuito, sem key) com
+  filtro CSS escuro — a CartoDB passou a exigir API key em agosto/2026.
+- **Legenda** fixa no canto do mapa com as cores de status (🔴🟡🟢) e dos
+  anéis.
+- Som de alerta embutido como base64 no componente (não depende de
+  arquivo estático nem de conexão externa pra tocar).
+
+## O que mudou em relação à versão anterior (rajada/chuva/CAPE)
+
+- Removidas todas as variáveis de previsão e a busca no Open-Meteo.
+- O status de cada unidade (🟢/🟡/🔴) é calculado direto pela distância
+  até o raio ativo mais próximo.
+- Cada alerta na aba **📋 Alertas** tem um campo **"Quem recebeu o
+  alerta:"** que entra automaticamente na mensagem, pronta pra copiar e
+  colar. Nada é enviado automaticamente por aqui.
 - O boletim em PDF virou um "Boletim de Raios": unidades em alerta agora +
-  lista de alertas gerados (já com "Quem recebeu o alerta" preenchido, se
-  informado).
+  lista de alertas gerados.
 
 ## Passo a passo pra colocar no ar (grátis)
 
@@ -38,9 +66,10 @@ git remote add origin https://github.com/SEU_USUARIO/blueocean-web.git
 git push -u origin main
 ```
 
-Se preferir sem terminal: no repositório existente no GitHub, é só
-substituir o `streamlit_app.py` e o `README.md` pelos novos (upload de
-arquivo, mesmo nome, sobrescreve).
+Se preferir sem terminal: no repositório existente no GitHub, suba (upload
+de arquivo, mesmo nome, sobrescreve) o `streamlit_app.py`, o `README.md`,
+o `.streamlit/config.toml` **e a pasta nova `bo_mapa_component/` com o
+`index.html` dentro** — essa pasta é obrigatória, sem ela o mapa quebra.
 
 ### 2. Publique/atualize no Streamlit Cloud
 
