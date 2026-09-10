@@ -575,7 +575,7 @@ with st.sidebar:
     st.caption("🔄 Atualização automática: a cada 2 minutos")
     st.caption("🔊 O som e o pop-up automático de alerta ficam sempre ativos.")
     arquivo_som = st.file_uploader("Trocar o som de alerta (opcional)", type=["mp3", "wav", "ogg", "m4a"])
-    mostrar_deslocamento = st.checkbox("Mostrar deslocamento das células de tempestade", value=False)
+    mostrar_deslocamento = st.checkbox("Mostrar deslocamento das células de tempestade", value=True)
     st.caption("🔄 Só os raios (pontos, células e alertas) atualizam sozinhos — o mapa em si (zoom, posição, pop-ups abertos) não é recarregado.")
 
     st.subheader("📏 Anéis de distância no mapa")

@@ -6,7 +6,9 @@
 <style>
   html, body { margin: 0; padding: 0; height: 100%; background: #0b0f16; }
   #map { position: relative; width: 100%; height: 650px; background: #0b0f16; }
-  .leaflet-container { background: #0b0f16 !important; }
+  .leaflet-container { background: #000 !important; }
+  .bo-preto-contorno .leaflet-tile-pane img { filter: invert(1) grayscale(1) contrast(1.35); }
+  .bo-branco .leaflet-tile-pane img { filter: grayscale(1) contrast(0.95); }
   .raio-celula-icon { background: transparent !important; border: none !important; }
   /* O mapa escuro usa tiles públicos do OpenStreetMap com tratamento visual local,
      evitando provedores que exibem "API KEY REQUIRED". */
@@ -154,40 +156,23 @@
   function iniciarMapa() {
     map = L.map("map", { zoomControl: true, minZoom: 4, maxZoom: 14, preferCanvas: true });
 
-    // Fundos do mapa. A visualização de satélite foi removida.
-    // O fundo "Preto total" é propositalmente sem tiles: mantém apenas
-    // a base preta, deixando os raios e as unidades em destaque.
-    map.createPane("paneFundo");
-    map.getPane("paneFundo").style.zIndex = 200;
-
-    var fundoPreto = L.layerGroup();
-    var fundoEscuro = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    // Fundos do mapa: somente preto com contornos e branco. Sem satélite e sem API key.
+    var fundoPreto = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "&copy; OpenStreetMap contributors", maxZoom: 19,
-      subdomains: "abc", pane: "paneFundo", crossOrigin: true,
-      className: "map-dark-osm",
+      subdomains: "abc", pane: "paneFundo", className: "bo-preto-contorno", crossOrigin: true
     });
-    var fundoClaro = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    var fundoBranco = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "&copy; OpenStreetMap contributors", maxZoom: 19,
-      subdomains: "abc", pane: "paneFundo", crossOrigin: true,
-    });
-    var fundoCinza = L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-      attribution: "&copy; OpenStreetMap contributors &copy; CARTO", maxZoom: 20,
-      subdomains: "abcd", pane: "paneFundo", crossOrigin: true,
-    });
-    var fundoTopo = L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", {
-      attribution: "Map data &copy; OpenStreetMap contributors, SRTM | Map style &copy; OpenTopoMap", maxZoom: 17,
-      subdomains: "abc", pane: "paneFundo", crossOrigin: true,
+      subdomains: "abc", pane: "paneFundo", className: "bo-branco", crossOrigin: true
     });
 
-    // O preto total é o padrão para reduzir carga visual e destacar os raios.
+    // Preto com contorno é o padrão. O filtro transforma o fundo claro do OSM
+    // em preto e as linhas/limites em branco, mantendo um mapa B/W limpo.
     fundoPreto.addTo(map);
     L.control.layers(
       {
-        "⬛ Preto total": fundoPreto,
-        "🌑 Preto / escuro": fundoEscuro,
-        "🌫️ Cinza": fundoCinza,
-        "☀️ Claro": fundoClaro,
-        "⛰️ Topográfico": fundoTopo,
+        "⬛ Preto com contorno": fundoPreto,
+        "⬜ Branco": fundoBranco
       },
       null,
       { position: "topright", collapsed: true }
@@ -240,7 +225,7 @@
       var texto = (e.dist_min_km === null || e.dist_min_km === undefined)
         ? "sem raios na janela atual" : e.dist_min_km.toFixed(0) + " km do raio mais próximo";
       var marcador = L.circleMarker([e.lat, e.lon], {
-        radius: 7, color: e.risco_color, weight: 2, fill: true, fillColor: e.risco_color, fillOpacity: 0.9, renderer: canvasRenderer,
+        radius: 7, pane: "markerPane", color: e.risco_color, weight: 2, fill: true, fillColor: e.risco_color, fillOpacity: 0.9, renderer: canvasRenderer,
       });
       // Tooltip somente durante o hover; nunca fica preso após sair do marcador.
       marcador.bindTooltip(e.risco_emoji + " " + e.nome + " — " + texto, {
@@ -252,6 +237,7 @@
       });
       marcador.on("mouseover", function () { this.openTooltip(); });
       marcador.on("mouseout", function () { this.closeTooltip(); });
+      marcador.on("remove", function () { this.closeTooltip(); });
       marcador.on("click", function (ev) {
         if (ev && ev.originalEvent) ev.originalEvent.stopPropagation();
         this.closeTooltip();
@@ -266,7 +252,7 @@
       opcoes += '<option value="' + String(e.nome).replace(/"/g, "&quot;") + '">';
 
       (aneis || []).forEach(function (a) {
-        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: a.cor, weight: 1, fill: false, dashArray: "6, 6", opacity: 0.65, renderer: canvasRenderer })
+        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: a.cor, weight: 1, fill: false, dashArray: "6, 6", opacity: 0.65, interactive: false, renderer: canvasRenderer })
           .addTo(aneisLayer);
       });
     });
