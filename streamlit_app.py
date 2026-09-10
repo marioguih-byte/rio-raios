@@ -2,12 +2,12 @@
 # BLUEOCEAN — MONITOR DE RAIOS (versão web / Streamlit)
 # Versão focada só em raios (GLM/GOES-19), por Mário Henrique.
 # ======================================================================
+import base64
 import io
 import json
 import math
 import os
 import re
-import shutil
 import time
 import unicodedata
 import xml.etree.ElementTree as ET
@@ -28,83 +28,30 @@ st.set_page_config(page_title="BlueOcean — Monitor de Raios", layout="wide", p
 EMPRESA = "BlueOcean"
 
 # ======================================================================
-# ARQUIVOS ESTÁTICOS (necessário pro mapa ler os raios via JS sem
-# precisar recarregar a página inteira — ver seção "RAIOS AO VIVO")
+# ÁUDIO DE ALERTA
 # ======================================================================
+# Importante: o "static file serving" do Streamlit Community Cloud só
+# garante servir de forma confiável os arquivos que já vêm no repositório
+# do GitHub — arquivos GRAVADOS em disco durante a execução do app (como
+# o raios_live.json que essa versão usava antes) não têm entrega
+# garantida e foi isso que fazia o mapa às vezes não mostrar os raios.
+# Por isso o som de alerta agora vai embutido direto no HTML do mapa,
+# como um data URI em base64 — não depende de nenhum arquivo estático
+# servido por HTTP.
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-STATIC_DIR = os.path.join(APP_DIR, "static")
-os.makedirs(STATIC_DIR, exist_ok=True)
-
 SOM_ALERTA_NOME = "alerta_raio.wav"
-_som_origem = os.path.join(APP_DIR, "data", SOM_ALERTA_NOME)
-_som_destino = os.path.join(STATIC_DIR, SOM_ALERTA_NOME)
-if os.path.exists(_som_origem) and not os.path.exists(_som_destino):
-    try:
-        shutil.copyfile(_som_origem, _som_destino)
-    except Exception:
-        pass
 
-RAIOS_JSON_PATH = os.path.join(STATIC_DIR, "raios_live.json")
+
+@st.cache_data(show_spinner=False)
+def _som_padrao_data_uri():
+    caminho = os.path.join(APP_DIR, "data", SOM_ALERTA_NOME)
+    with open(caminho, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode("ascii")
+    return f"data:audio/wav;base64,{b64}"
 
 
 def utc_para_brasilia(dt_utc):
     return dt_utc - timedelta(hours=3)
-
-
-def _escrever_raios_json(raios_df, celulas_com_trajetoria, atualizado_em_utc, alertas_unidade=None, erro=None, intervalo_raios_seg=30):
-    """Grava o estado atual dos raios num JSON estático que o JS do mapa
-    fica lendo periodicamente. É isso que permite atualizar só os raios
-    sem re-renderizar o mapa (e sem perder zoom / popups abertos)."""
-    agora = datetime.now(timezone.utc)
-    raios_out = []
-    if raios_df is not None and not raios_df.empty:
-        for _, r in raios_df.iterrows():
-            idade_min = max((agora - r["time"]).total_seconds() / 60, 0) if pd.notna(r["time"]) else 0
-            raios_out.append({
-                "lat": float(r["lat"]), "lon": float(r["lon"]),
-                "idade_min": round(idade_min, 1),
-                "hora": utc_para_brasilia(r["time"]).strftime("%H:%M:%S") if pd.notna(r["time"]) else "?",
-            })
-    celulas_out = []
-    for cel in celulas_com_trajetoria:
-        traj = cel["trajetoria"]
-        celulas_out.append({
-            "id": cel["id"],
-            "historico": [{"lat": p["lat"], "lon": p["lon"]} for p in cel["historico"]],
-            "checkpoints": traj["checkpoints"],
-            "vel_kmh": round(traj["vel_kmh"], 1),
-            "rumo_texto": traj["rumo_texto"],
-        })
-    alertas_out = []
-    agora_ts = time.time()
-    # "novo" fica True só por uma janela curtinha (pouco mais que um ciclo
-    # de atualização) logo depois do Python decidir notificar. Isso é o
-    # que o JS usa pra saber se deve tocar som/abrir pop-up agora — como a
-    # decisão de verdade mora aqui (sobrevive à reconstrução do mapa), o
-    # som não repete toda vez que a página é recarregada por outro motivo.
-    janela_novo_seg = max(intervalo_raios_seg * 1.5, 20)
-    for nome, a in (alertas_unidade or {}).items():
-        if a["expira_ts"] <= agora_ts: continue
-        alertas_out.append({
-            "estacao": nome,
-            "nivel": a["nivel"],
-            "notificado_ts": a["notificado_ts"],
-            "novo": (agora_ts - a["notificado_ts"]) < janela_novo_seg,
-            "expira_brasilia": utc_para_brasilia(datetime.fromtimestamp(a["expira_ts"], tz=timezone.utc)).strftime("%H:%M:%S"),
-        })
-    payload = {
-        "raios": raios_out,
-        "celulas": celulas_out,
-        "alertas": alertas_out,
-        "atualizado_em_utc": atualizado_em_utc.isoformat() if atualizado_em_utc else None,
-        "atualizado_em_brasilia": utc_para_brasilia(atualizado_em_utc).strftime("%H:%M:%S") if atualizado_em_utc else None,
-        "erro": erro,
-    }
-    try:
-        with open(RAIOS_JSON_PATH, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False)
-    except Exception:
-        pass
 
 # ======================================================================
 # CONTATOS POR UNIDADE
@@ -549,22 +496,20 @@ with st.sidebar:
     distancias_aneis = st.multiselect("Distâncias (km)", [30, 50, 100, 200], default=[30, 50, 100, 200], disabled=not mostrar_aneis)
 
 # --------------------------------------------------------------
-# Som de alerta personalizado: se a pessoa subiu um arquivo, salva ele
-# no static/ (pra poder ser tocado pelo JS do mapa) e passa a usar esse
-# em vez do padrão. Fica valendo enquanto durar a sessão.
+# Som de alerta personalizado: se a pessoa subiu um arquivo, ele vira um
+# data URI (base64) embutido direto no HTML do mapa — sem gravar nada em
+# disco, então não depende do static file serving do Streamlit Cloud.
+# Fica valendo enquanto durar a sessão.
 # --------------------------------------------------------------
-som_alerta_nome_ativo = SOM_ALERTA_NOME
+_MIME_SOM = {".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg", ".m4a": "audio/mp4"}
 if arquivo_som is not None:
     ext = os.path.splitext(arquivo_som.name)[1].lower() or ".mp3"
     conteudo = arquivo_som.getvalue()
-    hash_conteudo = abs(hash(conteudo)) % (10**10)
-    nome_custom = f"alerta_custom_{hash_conteudo}{ext}"
-    caminho_custom = os.path.join(STATIC_DIR, nome_custom)
-    if not os.path.exists(caminho_custom):
-        with open(caminho_custom, "wb") as f:
-            f.write(conteudo)
-    som_alerta_nome_ativo = nome_custom
+    b64 = base64.b64encode(conteudo).decode("ascii")
+    som_data_uri = f"data:{_MIME_SOM.get(ext, 'audio/mpeg')};base64,{b64}"
     st.sidebar.audio(arquivo_som, format=f"audio/{ext.lstrip('.')}")
+else:
+    som_data_uri = _som_padrao_data_uri()
 
 df_status_atual = st.session_state.get("_fragment_df_status")
 if df_status_atual is not None and not df_status_atual.empty:
@@ -599,11 +544,45 @@ def _dialog_alerta_raio():
         st.warning("Foi detectado um raio próximo de uma unidade monitorada. Copie a mensagem abaixo:")
     st.code(texto, language=None)
 
-def _atualizar_dados_raios():
+def _preparar_payload_raios(raios_df, celulas_com_trajetoria):
+    """Monta os pontos de raio e as células de tempestade no formato que o
+    JS do mapa desenha — embutido direto no HTML (ver nota acima sobre por
+    que não gravamos mais isso num arquivo estático à parte)."""
+    agora = datetime.now(timezone.utc)
+    raios_out = []
+    if raios_df is not None and not raios_df.empty:
+        for _, r in raios_df.iterrows():
+            idade_min = max((agora - r["time"]).total_seconds() / 60, 0) if pd.notna(r["time"]) else 0
+            raios_out.append({
+                "lat": float(r["lat"]), "lon": float(r["lon"]),
+                "idade_min": round(idade_min, 1),
+                "hora": utc_para_brasilia(r["time"]).strftime("%H:%M:%S") if pd.notna(r["time"]) else "?",
+            })
+    celulas_out = []
+    for cel in celulas_com_trajetoria:
+        traj = cel["trajetoria"]
+        celulas_out.append({
+            "id": cel["id"],
+            "historico": [{"lat": p["lat"], "lon": p["lon"]} for p in cel["historico"]],
+            "checkpoints": traj["checkpoints"],
+            "vel_kmh": round(traj["vel_kmh"], 1),
+            "rumo_texto": traj["rumo_texto"],
+        })
+    return {"raios": raios_out, "celulas": celulas_out}
+
+def _renderizar_mapa_ao_vivo():
     """Busca os raios, agrupa em células, calcula o status de cada unidade
-    e checa se alguma cruzou pra amarelo/vermelho. Quando isso acontece, a
-    mensagem de alerta é gerada e fica disponível na aba 📋 Alertas, pronta
-    pra copiar e colar (com o campo "Quem recebeu o alerta" preenchível)."""
+    e desenha o mapa inteiro já com os dados embutidos no HTML.
+
+    Importante: essa versão não lê mais nenhum arquivo estático via fetch()
+    — no Streamlit Community Cloud, arquivos GRAVADOS em disco durante a
+    execução do app não têm entrega garantida pelo static file serving
+    (só os arquivos que já vêm no repositório do GitHub são servidos de
+    forma confiável). Era por isso que às vezes o mapa não mostrava os
+    raios. Agora o mapa é reconstruído a cada ciclo (a cada N segundos,
+    configurável na barra lateral) já com os dados prontos — e guarda o
+    zoom/posição no localStorage do navegador pra não "pular" a cada
+    atualização."""
     raios_df = pd.DataFrame()
     celulas_com_trajetoria = []
     erro = None
@@ -626,6 +605,7 @@ def _atualizar_dados_raios():
     df_status = calcular_status_estacoes(df_stations, raios_df)
     st.session_state["_fragment_df_status"] = df_status
 
+    estacoes_novas = []
     if not raios_df.empty:
         notificacoes_desta_rodada = []
         for _, est in df_status.iterrows():
@@ -653,6 +633,7 @@ def _atualizar_dados_raios():
                     "nivel": nivel_atual, "expira": agora_ts + 3600, "quem_recebeu": "",
                 })
                 notificacoes_desta_rodada.append(texto)
+                estacoes_novas.append(est["nome"])
 
         if notificacoes_desta_rodada:
             separador = "\n\n" + ("─" * 30) + "\n\n"
@@ -660,10 +641,6 @@ def _atualizar_dados_raios():
             st.session_state.dialog_raio_ts = time.time()
 
     st.session_state.alertas_raio_ativos = [a for a in st.session_state.alertas_raio_ativos if a["expira"] > time.time()]
-    st.session_state["_fragment_raios_df"] = raios_df
-    st.session_state["_fragment_celulas"] = celulas_com_trajetoria
-
-    _escrever_raios_json(raios_df, celulas_com_trajetoria, st.session_state.get("ultima_atualizacao_raios"), st.session_state.alertas_unidade, erro, intervalo_raios_seg)
 
     dialog_ts = st.session_state.get("dialog_raio_ts")
     janela_dialog_seg = max(intervalo_raios_seg * 1.5, 20)
@@ -673,15 +650,18 @@ def _atualizar_dados_raios():
     ultima_att = st.session_state.get("ultima_atualizacao_raios")
     if ultima_att is not None:
         hora_brasilia = utc_para_brasilia(ultima_att).strftime("%H:%M:%S")
-        st.caption(f"⚡ Raios (GLM/GOES-19) atualizados às **{hora_brasilia}** · a cada {intervalo_raios_seg}s, sem recarregar o mapa")
+        status_texto = f"⚡ raios atualizados às {hora_brasilia}"
+        st.caption(f"⚡ Raios (GLM/GOES-19) atualizados às **{hora_brasilia}** · atualiza automaticamente a cada {intervalo_raios_seg}s")
+    else:
+        status_texto = "⚡ carregando raios…"
     erro_raios = st.session_state.get("ultimo_erro_raios")
-    if erro_raios: st.warning(f"GLM indisponível no momento: {erro_raios}")
+    if erro_raios:
+        status_texto = f"⚠️ GLM indisponível: {erro_raios}"
+        st.warning(f"GLM indisponível no momento: {erro_raios}")
 
-def _construir_mapa():
-    df_status = st.session_state.get("_fragment_df_status", pd.DataFrame())
-    if df_status.empty:
-        df_status = calcular_status_estacoes(df_stations, pd.DataFrame())
+    _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas, status_texto)
 
+def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas, status_texto):
     bb = BRAZIL_BOUNDS
     center_lat = (bb["lat_min"] + bb["lat_max"]) / 2
     center_lon = (bb["lon_min"] + bb["lon_max"]) / 2
@@ -858,28 +838,28 @@ window.addEventListener("load", function() {{
     m.get_root().html.add_child(folium.Element(legenda_html))
 
     # --------------------------------------------------------------
-    # JS que atualiza SÓ os raios (pontos + células de deslocamento),
-    # lendo periodicamente static/raios_live.json — o resto do mapa
-    # (tiles, estações, anéis, zoom, pop-ups abertos) fica intocado.
-    # Quando um raio cai no range de perigo (30/50 km) de uma unidade,
-    # abre o pop-up daquela unidade no mapa e toca o som de alerta.
+    # Raios ao vivo + células de tempestade: os dados já vêm embutidos
+    # aqui (nada de fetch nem de arquivo estático — ver nota no topo da
+    # função _renderizar_mapa_ao_vivo). Guarda o zoom/posição no
+    # localStorage do navegador pra não "pular" a cada reconstrução do
+    # mapa, e toca o som/abre o pop-up só das unidades que acabaram de
+    # entrar em alerta nesse ciclo (decidido no Python, não no JS).
     # --------------------------------------------------------------
     map_var = m.get_name()
     raios_fg_var = raios_fg.get_name()
     js_payload = {
-        "estacoes": estacoes_para_js,
         "marcadores": marcadores_js,
-        "intervaloMs": int(intervalo_raios_seg) * 1000,
         "janelaMin": raios_minutos,
-        "somUrl": f"app/static/{som_alerta_nome_ativo}",
-        "jsonUrl": "app/static/raios_live.json",
+        "somUrl": som_data_uri,
+        "dadosRaios": _preparar_payload_raios(raios_df, celulas_com_trajetoria),
+        "estacoesNovas": estacoes_novas,
         "mostrarDeslocamento": bool(mostrar_deslocamento),
-        "tocarSom": True,
+        "tocarSom": bool(estacoes_novas),
     }
     js_payload_str = json.dumps(js_payload, ensure_ascii=False).replace("</", "<\\/")
+    status_texto_html = json.dumps(status_texto, ensure_ascii=False)
     script_html = f"""
 <div id="raios-status-bar" style="position:absolute; z-index:1000; top:8px; left:50px; background:rgba(15,15,20,0.75); color:#e5e7eb; padding:4px 10px; border-radius:6px; font:12px sans-serif;">
-  ⚡ carregando raios…
 </div>
 <style>
 .raio-celula-icon {{ background: transparent !important; border: none !important; }}
@@ -892,8 +872,23 @@ window.addEventListener("load", function() {{
     var celulasLayer = L.layerGroup().addTo(map);
     var audio = new Audio(cfg.somUrl);
     audio.preload = "auto";
-    var vistosNotificacao = {{}};
     var statusEl = document.getElementById("raios-status-bar");
+    if (statusEl) statusEl.textContent = {status_texto_html};
+
+    // Guarda e restaura o zoom/posição no localStorage — como o mapa
+    // reconstrói a cada ciclo (embutindo os dados novos de raios), isso
+    // evita que a visão "pule" de volta pro Brasil inteiro toda vez.
+    var VIEW_KEY = "blueocean_raios_view_v1";
+    try {{
+        var salvo = JSON.parse(localStorage.getItem(VIEW_KEY) || "null");
+        if (salvo && typeof salvo.lat === "number") {{ map.setView([salvo.lat, salvo.lng], salvo.zoom); }}
+    }} catch (e) {{}}
+    map.on("moveend zoomend", function() {{
+        try {{
+            var c = map.getCenter();
+            localStorage.setItem(VIEW_KEY, JSON.stringify({{lat: c.lat, lng: c.lng, zoom: map.getZoom()}}));
+        }} catch (e) {{}}
+    }});
 
     function destravarSom() {{
         audio.play().then(function() {{ audio.pause(); audio.currentTime = 0; }}).catch(function() {{}});
@@ -914,26 +909,6 @@ window.addEventListener("load", function() {{
         if (fracao < 0.33) return "#ff2828";
         if (fracao < 0.66) return "#f97316";
         return "#eab308";
-    }}
-
-    function checarPerigo(alertas) {{
-        (alertas || []).forEach(function(a) {{
-            if (!a.novo) return;
-            var jaVisto = vistosNotificacao[a.estacao];
-            if (jaVisto === a.notificado_ts) return;
-            vistosNotificacao[a.estacao] = a.notificado_ts;
-
-            if (cfg.tocarSom) {{
-                var nomeVar = cfg.marcadores[a.estacao];
-                var marcador = nomeVar ? window[nomeVar] : null;
-                if (marcador && marcador.openPopup) {{
-                    marcador.openPopup();
-                    if (map.panTo) map.panTo(marcador.getLatLng());
-                }}
-                audio.currentTime = 0;
-                audio.play().catch(function() {{}});
-            }}
-        }});
     }}
 
     function desenharRaios(data) {{
@@ -976,32 +951,20 @@ window.addEventListener("load", function() {{
         }}
     }}
 
-    function buscarJson(tentativa) {{
-        return fetch(cfg.jsonUrl + "?t=" + Date.now())
-            .then(function(r) {{ if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }})
-            .catch(function(e) {{
-                // Uma falha isolada (rede/cache) não deve virar aviso — só
-                // tenta de novo uma vez antes de mostrar o erro pra valer.
-                if (tentativa < 1) return new Promise(function(res) {{ setTimeout(function() {{ res(buscarJson(tentativa + 1)); }}, 1200); }});
-                throw e;
-            }});
-    }}
+    desenharRaios(cfg.dadosRaios);
 
-    function atualizar() {{
-        buscarJson(0)
-            .then(function(data) {{
-                desenharRaios(data);
-                checarPerigo(data.alertas || []);
-                if (statusEl) {{
-                    var txt = data.erro ? ("⚠️ GLM indisponível: " + data.erro) : ("⚡ raios atualizados às " + (data.atualizado_em_brasilia || "—"));
-                    statusEl.childNodes[0].nodeValue = txt + " ";
-                }}
-            }})
-            .catch(function(e) {{ if (statusEl) statusEl.childNodes[0].nodeValue = "⚠️ não foi possível ler os raios "; }});
+    if (cfg.tocarSom) {{
+        (cfg.estacoesNovas || []).forEach(function(nome) {{
+            var nomeVar = cfg.marcadores[nome];
+            var marcador = nomeVar ? window[nomeVar] : null;
+            if (marcador && marcador.openPopup) {{
+                marcador.openPopup();
+                if (map.panTo) map.panTo(marcador.getLatLng());
+            }}
+            audio.currentTime = 0;
+            audio.play().catch(function() {{}});
+        }});
     }}
-
-    atualizar();
-    setInterval(atualizar, cfg.intervaloMs);
 }});
 </script>
 """
@@ -1010,8 +973,7 @@ window.addEventListener("load", function() {{
     components.html(m._repr_html_(), height=650)
 
 with col_mapa:
-    st.fragment(run_every=intervalo_raios_seg)(_atualizar_dados_raios)()
-    _construir_mapa()
+    st.fragment(run_every=intervalo_raios_seg)(_renderizar_mapa_ao_vivo)()
 
 with col_lado:
     with st.container(key="painel_lateral"):
