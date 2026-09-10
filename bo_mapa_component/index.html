@@ -8,6 +8,11 @@
   #map { position: relative; width: 100%; height: 650px; background: #0b0f16; }
   .leaflet-container { background: #0b0f16 !important; }
   .raio-celula-icon { background: transparent !important; border: none !important; }
+  /* O mapa escuro usa tiles públicos do OpenStreetMap com tratamento visual local,
+     evitando provedores que exibem "API KEY REQUIRED". */
+  .map-dark-osm .leaflet-tile-pane {
+    filter: invert(100%) hue-rotate(180deg) brightness(0.55) saturate(0.35) contrast(1.15);
+  }
 
   #raios-status-bar { position: absolute; z-index: 1000; top: 8px; left: 50px; background: rgba(15,15,20,0.75);
     color: #e5e7eb; padding: 4px 10px; border-radius: 6px; font: 12px sans-serif; transition: opacity 0.4s ease; }
@@ -156,9 +161,10 @@
     map.getPane("paneFundo").style.zIndex = 200;
 
     var fundoPreto = L.layerGroup();
-    var fundoEscuro = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-      attribution: "&copy; OpenStreetMap contributors &copy; CARTO", maxZoom: 20,
-      subdomains: "abcd", pane: "paneFundo", crossOrigin: true,
+    var fundoEscuro = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "&copy; OpenStreetMap contributors", maxZoom: 19,
+      subdomains: "abc", pane: "paneFundo", crossOrigin: true,
+      className: "map-dark-osm",
     });
     var fundoClaro = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "&copy; OpenStreetMap contributors", maxZoom: 19,
@@ -236,8 +242,21 @@
       var marcador = L.circleMarker([e.lat, e.lon], {
         radius: 7, color: e.risco_color, weight: 2, fill: true, fillColor: e.risco_color, fillOpacity: 0.9, renderer: canvasRenderer,
       });
-      marcador.bindTooltip(e.risco_emoji + " " + e.nome + " — " + texto);
-      marcador.on("click", function () { abrirPainel(e.estacao); });
+      // Tooltip somente durante o hover; nunca fica preso após sair do marcador.
+      marcador.bindTooltip(e.risco_emoji + " " + e.nome + " — " + texto, {
+        sticky: false,
+        permanent: false,
+        interactive: false,
+        autoClose: true,
+        closeOnClick: true
+      });
+      marcador.on("mouseover", function () { this.openTooltip(); });
+      marcador.on("mouseout", function () { this.closeTooltip(); });
+      marcador.on("click", function (ev) {
+        if (ev && ev.originalEvent) ev.originalEvent.stopPropagation();
+        this.closeTooltip();
+        abrirPainel(e.estacao);
+      });
       marcador.addTo(stationsLayer);
 
       marcadoresPorNome[e.nome] = marcador;
@@ -248,7 +267,6 @@
 
       (aneis || []).forEach(function (a) {
         L.circle([e.lat, e.lon], { radius: a.km * 1000, color: a.cor, weight: 1, fill: false, dashArray: "6, 6", opacity: 0.65, renderer: canvasRenderer })
-          .bindTooltip(e.nome + " — raio de " + a.km + " km")
           .addTo(aneisLayer);
       });
     });
