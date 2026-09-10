@@ -201,7 +201,7 @@ ESTACOES_PADRAO = [
     {"estacao": "Porto Paracuru", "lat": -3.40115, "lon": -39.0109},
 ]
 
-RAIOS_ALERTA_KM = [(30, "#ef4444"), (50, "#eab308"), (100, "#f97316"), (150, "#3b82f6"), (200, "#991b1b")]
+RAIOS_ALERTA_KM = [(30, "#ef4444"), (50, "#eab308"), (100, "#f97316"), (200, "#3b82f6")]
 
 GLM_BUCKET = "noaa-goes19"
 GLM_BASE_URL = f"https://{GLM_BUCKET}.s3.amazonaws.com"
@@ -546,7 +546,7 @@ with st.sidebar:
 
     st.subheader("📏 Anéis de distância no mapa")
     mostrar_aneis = st.checkbox("Mostrar anéis de distância ao redor das unidades", value=True)
-    distancias_aneis = st.multiselect("Distâncias (km)", [30, 50, 100, 150, 200], default=[30, 50], disabled=not mostrar_aneis)
+    distancias_aneis = st.multiselect("Distâncias (km)", [30, 50, 100, 200], default=[30, 50, 100, 200], disabled=not mostrar_aneis)
 
 # --------------------------------------------------------------
 # Som de alerta personalizado: se a pessoa subiu um arquivo, salva ele
@@ -685,8 +685,21 @@ def _construir_mapa():
     bb = BRAZIL_BOUNDS
     center_lat = (bb["lat_min"] + bb["lat_max"]) / 2
     center_lon = (bb["lon_min"] + bb["lon_max"]) / 2
-    m = folium.Map(location=[center_lat, center_lon], tiles="CartoDB dark_matter", control_scale=True, min_lat=bb["lat_min"], max_lat=bb["lat_max"], min_lon=bb["lon_min"], max_lon=bb["lon_max"], max_bounds=True, min_zoom=4, max_zoom=14, maxBoundsViscosity=1.0)
+    # As tiles gratuitas da CartoDB (dark_matter) passaram a exigir uma API
+    # key da CARTO no final de agosto/2026 — sem key, elas vêm com uma
+    # marca d'água "API KEY REQUIRED" por cima do mapa. Pra não depender de
+    # nenhuma conta/chave, usamos o OpenStreetMap padrão (sempre gratuito,
+    # sem key) e aplicamos um filtro CSS só nas tiles pra manter o visual
+    # escuro do app — os marcadores/raios ficam numa camada separada e não
+    # são afetados pelo filtro.
+    m = folium.Map(location=[center_lat, center_lon], tiles="OpenStreetMap", control_scale=True, min_lat=bb["lat_min"], max_lat=bb["lat_max"], min_lon=bb["lon_min"], max_lon=bb["lon_max"], max_bounds=True, min_zoom=4, max_zoom=14, maxBoundsViscosity=1.0)
     m.fit_bounds([[bb["lat_min"], bb["lon_min"]], [bb["lat_max"], bb["lon_max"]]])
+    m.get_root().html.add_child(folium.Element("""
+<style>
+.leaflet-container { background: #0b0f16 !important; }
+.leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9) saturate(0.7); }
+</style>
+"""))
 
     aneis_fg = folium.FeatureGroup(name="📏 Anéis de distância", show=mostrar_aneis)
     marcadores_js = {}
@@ -823,6 +836,28 @@ window.addEventListener("load", function() {{
     m.get_root().html.add_child(folium.Element(busca_html))
 
     # --------------------------------------------------------------
+    # Legenda fixa no canto — cores dos anéis de distância + status das
+    # unidades, pra não precisar adivinhar o que cada cor significa.
+    # --------------------------------------------------------------
+    itens_aneis = "".join(
+        f'<div style="display:flex; align-items:center; gap:6px; margin-top:2px;">'
+        f'<span style="width:12px; height:0; border-top:2px dashed {cor}; display:inline-block;"></span>'
+        f'<span>{raio_km} km</span></div>'
+        for raio_km, cor in RAIOS_ALERTA_KM if raio_km in distancias_aneis
+    ) if mostrar_aneis else ""
+    legenda_html = f"""
+<div id="legenda-mapa" style="position:absolute; z-index:1000; bottom:22px; left:8px; background:rgba(15,15,20,0.8);
+     color:#e5e7eb; padding:8px 10px; border-radius:8px; font:11px 'Segoe UI', sans-serif; line-height:1.5;">
+  <div style="font-weight:700; color:#3fc2c2; margin-bottom:3px;">Status da unidade</div>
+  <div>🔴 Alto — raio a menos de 30 km</div>
+  <div>🟡 Médio — raio a menos de 50 km</div>
+  <div>🟢 Sem raios próximos</div>
+  {"<div style='font-weight:700; color:#3fc2c2; margin:6px 0 2px;'>Anéis de distância</div>" + itens_aneis if itens_aneis else ""}
+</div>
+"""
+    m.get_root().html.add_child(folium.Element(legenda_html))
+
+    # --------------------------------------------------------------
     # JS que atualiza SÓ os raios (pontos + células de deslocamento),
     # lendo periodicamente static/raios_live.json — o resto do mapa
     # (tiles, estações, anéis, zoom, pop-ups abertos) fica intocado.
@@ -941,9 +976,19 @@ window.addEventListener("load", function() {{
         }}
     }}
 
+    function buscarJson(tentativa) {{
+        return fetch(cfg.jsonUrl + "?t=" + Date.now())
+            .then(function(r) {{ if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }})
+            .catch(function(e) {{
+                // Uma falha isolada (rede/cache) não deve virar aviso — só
+                // tenta de novo uma vez antes de mostrar o erro pra valer.
+                if (tentativa < 1) return new Promise(function(res) {{ setTimeout(function() {{ res(buscarJson(tentativa + 1)); }}, 1200); }});
+                throw e;
+            }});
+    }}
+
     function atualizar() {{
-        fetch(cfg.jsonUrl + "?t=" + Date.now())
-            .then(function(r) {{ return r.json(); }})
+        buscarJson(0)
             .then(function(data) {{
                 desenharRaios(data);
                 checarPerigo(data.alertas || []);
