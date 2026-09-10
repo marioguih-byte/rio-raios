@@ -7,7 +7,7 @@
   html, body { margin: 0; padding: 0; height: 100%; background: #0b0f16; }
   #map { position: relative; width: 100%; height: 650px; background: #0b0f16; }
   .leaflet-container { background: #000 !important; }
-  .leaflet-tile.bo-preto-contorno { filter: invert(1) grayscale(1) contrast(1.45) brightness(0.62); }
+  .bo-preto-contorno .leaflet-tile { filter: invert(1) grayscale(1) contrast(1.65) brightness(0.58); }
   .leaflet-tile.bo-branco { filter: grayscale(1) contrast(0.95); }
   .raio-celula-icon { background: transparent !important; border: none !important; }
   /* O mapa escuro usa tiles públicos do OpenStreetMap com tratamento visual local,
@@ -265,7 +265,7 @@
       opcoes += '<option value="' + String(e.nome).replace(/"/g, "&quot;") + '">';
 
       (aneis || []).forEach(function (a) {
-        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: a.cor, weight: 1, fill: false, dashArray: "6, 6", opacity: 0.65, interactive: false, renderer: canvasRenderer })
+        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: a.cor, weight: 2.5, fill: false, dashArray: "8, 7", opacity: 0.78, interactive: false, renderer: canvasRenderer })
           .addTo(aneisLayer);
       });
     });
