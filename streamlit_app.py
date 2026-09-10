@@ -4,7 +4,6 @@
 # ======================================================================
 import base64
 import io
-import json
 import math
 import os
 import re
@@ -14,7 +13,6 @@ import xml.etree.ElementTree as ET
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-import folium
 import numpy as np
 import pandas as pd
 import requests
@@ -26,6 +24,20 @@ from urllib3.util.retry import Retry
 st.set_page_config(page_title="BlueOcean — Monitor de Raios", layout="wide", page_icon="⚡")
 
 EMPRESA = "BlueOcean"
+
+# ======================================================================
+# COMPONENTE DO MAPA — atualiza os raios sem recarregar o mapa
+# ======================================================================
+# Componente bidirecional de verdade (não é st.components.v1.html): o
+# frontend (bo_mapa_component/index.html) fica montado uma única vez, e a
+# cada ciclo o Python só manda um "render event" com os dados novos — o
+# Leaflet do lado do JS só redesenha as camadas de raios/unidades, sem
+# recriar o mapa, sem recarregar tiles, sem nenhum "flash" de carregamento.
+_APP_DIR_COMPONENTE = os.path.dirname(os.path.abspath(__file__))
+_mapa_raios_component = components.declare_component(
+    "bo_mapa_raios", path=os.path.join(_APP_DIR_COMPONENTE, "bo_mapa_component")
+)
+
 
 # ======================================================================
 # ÁUDIO DE ALERTA
@@ -148,7 +160,7 @@ ESTACOES_PADRAO = [
     {"estacao": "Porto Paracuru", "lat": -3.40115, "lon": -39.0109},
 ]
 
-RAIOS_ALERTA_KM = [(30, "#ef4444"), (50, "#eab308"), (100, "#f97316"), (200, "#3b82f6")]
+RAIOS_ALERTA_KM = [(30, "#3b82f6"), (50, "#22c55e"), (100, "#f97316"), (200, "#ef4444")]
 
 GLM_BUCKET = "noaa-goes19"
 GLM_BASE_URL = f"https://{GLM_BUCKET}.s3.amazonaws.com"
@@ -330,6 +342,36 @@ def clusterizar_raios(raios_df, dist_km=18, min_pts=3):
     for i in range(n): grupos_map[_find(i)].append(pontos[i])
     return [g for g in grupos_map.values() if len(g) >= min_pts]
 
+def _hull_convexo(pontos):
+    """Casco convexo (monotone chain) de uma lista de dicts {lat, lon} —
+    usado pra desenhar o contorno "nublado" ao redor de cada célula de
+    raios, em vez de só os pontos soltos. Expande um pouco pra fora do
+    centro pra dar aquele efeito de área/nuvem em vez de polígono
+    apertadinho nos pontos."""
+    pts = sorted({(p["lon"], p["lat"]) for p in pontos})
+    if len(pts) < 3:
+        return [{"lat": p[1], "lon": p[0]} for p in pts]
+
+    def cruz(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    inferior = []
+    for p in pts:
+        while len(inferior) >= 2 and cruz(inferior[-2], inferior[-1], p) <= 0:
+            inferior.pop()
+        inferior.append(p)
+    superior = []
+    for p in reversed(pts):
+        while len(superior) >= 2 and cruz(superior[-2], superior[-1], p) <= 0:
+            superior.pop()
+        superior.append(p)
+    casco = inferior[:-1] + superior[:-1]
+
+    cx = sum(p[0] for p in casco) / len(casco)
+    cy = sum(p[1] for p in casco) / len(casco)
+    fator = 1.18
+    return [{"lat": cy + (p[1] - cy) * fator, "lon": cx + (p[0] - cx) * fator} for p in casco]
+
 def atualizar_celulas_raio(grupos, agora_ts):
     celulas = st.session_state.get("celulas_raio", [])
     usadas = set()
@@ -353,6 +395,7 @@ def atualizar_celulas_raio(grupos, agora_ts):
         alvo["historico"].append({"lat": lat, "lon": lon, "t": agora_ts, "n": len(grupo)})
         if len(alvo["historico"]) > 6: alvo["historico"] = alvo["historico"][-6:]
         alvo["ultima_atualizacao"] = agora_ts
+        alvo["hull_atual"] = _hull_convexo(grupo)
         usadas.add(alvo["id"])
     celulas = [c for c in celulas if agora_ts - c["ultima_atualizacao"] <= 600]
     st.session_state.celulas_raio = celulas
@@ -567,6 +610,7 @@ def _preparar_payload_raios(raios_df, celulas_com_trajetoria):
             "checkpoints": traj["checkpoints"],
             "vel_kmh": round(traj["vel_kmh"], 1),
             "rumo_texto": traj["rumo_texto"],
+            "hull": cel.get("hull_atual", []),
         })
     return {"raios": raios_out, "celulas": celulas_out}
 
@@ -662,315 +706,30 @@ def _renderizar_mapa_ao_vivo():
     _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas, status_texto)
 
 def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas, status_texto):
-    bb = BRAZIL_BOUNDS
-    center_lat = (bb["lat_min"] + bb["lat_max"]) / 2
-    center_lon = (bb["lon_min"] + bb["lon_max"]) / 2
-    # As tiles gratuitas da CartoDB (dark_matter) passaram a exigir uma API
-    # key da CARTO no final de agosto/2026 — sem key, elas vêm com uma
-    # marca d'água "API KEY REQUIRED" por cima do mapa. Pra não depender de
-    # nenhuma conta/chave, usamos o OpenStreetMap padrão (sempre gratuito,
-    # sem key) e aplicamos um filtro CSS só nas tiles pra manter o visual
-    # escuro do app — os marcadores/raios ficam numa camada separada e não
-    # são afetados pelo filtro.
-    m = folium.Map(location=[center_lat, center_lon], tiles="OpenStreetMap", control_scale=True, min_lat=bb["lat_min"], max_lat=bb["lat_max"], min_lon=bb["lon_min"], max_lon=bb["lon_max"], max_bounds=True, min_zoom=4, max_zoom=14, maxBoundsViscosity=1.0)
-    m.fit_bounds([[bb["lat_min"], bb["lon_min"]], [bb["lat_max"], bb["lon_max"]]])
-    m.get_root().html.add_child(folium.Element("""
-<style>
-.leaflet-container { background: #0b0f16 !important; }
-.leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9) saturate(0.7); }
-</style>
-"""))
-
-    aneis_fg = folium.FeatureGroup(name="📏 Anéis de distância", show=mostrar_aneis)
-    marcadores_js = {}
-    estacoes_para_js = []
-    dados_estacoes = {}
-    marcadores_bind_js = []
-
-    for _, e in df_status.iterrows():
-        texto_valor = f"{e['dist_min_km']:.0f} km do raio mais próximo" if e["dist_min_km"] is not None else "sem raios na janela atual"
-        marcador_estacao = folium.CircleMarker(location=[e["lat"], e["lon"]], radius=8, color=e["risco_color"], weight=3, fill=True, fill_color=e["risco_color"], fill_opacity=0.9, tooltip=f"{e['risco_emoji']} {e['nome']} — {texto_valor}")
-        marcador_estacao.add_to(m)
-        marcadores_js[e["nome"]] = marcador_estacao.get_name()
-        estacoes_para_js.append({"nome": e["nome"], "lat": e["lat"], "lon": e["lon"]})
-
-        dados_estacoes[e["estacao"]] = {
-            "nome": e["nome"], "risco_emoji": e["risco_emoji"], "risco_label": e["risco_label"],
-            "risco_color": e["risco_color"], "dist_min_km": e["dist_min_km"], "contatos": e["contatos"],
+    estacoes_payload = [
+        {
+            "nome": e["nome"], "estacao": e["estacao"], "lat": e["lat"], "lon": e["lon"],
+            "risco_emoji": e["risco_emoji"], "risco_label": e["risco_label"], "risco_color": e["risco_color"],
+            "dist_min_km": e["dist_min_km"], "contatos": e["contatos"],
         }
-        marcadores_bind_js.append(f"{marcador_estacao.get_name()}.on('click', function() {{ window.blueoceanAbrirPainel({json.dumps(e['estacao'])}); }});")
+        for _, e in df_status.iterrows()
+    ]
+    aneis_payload = [{"km": km, "cor": cor} for km, cor in RAIOS_ALERTA_KM if mostrar_aneis and km in distancias_aneis]
+    raios_payload = _preparar_payload_raios(raios_df, celulas_com_trajetoria)
 
-        if mostrar_aneis:
-            for raio_km, cor_raio in RAIOS_ALERTA_KM:
-                if raio_km not in distancias_aneis: continue
-                folium.Circle(location=[e["lat"], e["lon"]], radius=raio_km * 1000, color=cor_raio, weight=1.5, fill=False, dash_array="6, 6", opacity=0.85, tooltip=f"{e['nome']} — raio de {raio_km} km").add_to(aneis_fg)
-    aneis_fg.add_to(m)
-
-    raios_fg = folium.FeatureGroup(name="⚡ Raios ao vivo", show=True)
-    raios_fg.add_to(m)
-    folium.LayerControl(collapsed=True).add_to(m)
-
-    # --------------------------------------------------------------
-    # Painel de status — abre ao clicar numa unidade: risco atual,
-    # distância do raio mais próximo e contatos. 100% em JS, sem
-    # precisar mandar nada de volta pro Python (dados já embutidos).
-    # --------------------------------------------------------------
-    painel_estacao_html = """
-<div id="painel_estacao" style="display:none; position:absolute; top:44px; left:50px; z-index:1000; width:290px;
-     max-height:calc(100% - 90px); overflow-y:auto; background:#12161ff2; color:#f0f2f5; padding:12px 14px;
-     border:1px solid #3fc2c2; border-radius:8px; font-family:'Segoe UI', Arial, sans-serif; box-shadow:0 4px 14px rgba(0,0,0,0.5);">
-  <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-    <div id="painel_estacao_nome" style="font-size:14px; font-weight:bold; color:#3fc2c2; padding-right:8px;">—</div>
-    <span onclick="document.getElementById('painel_estacao').style.display='none';"
-          style="cursor:pointer; color:#ff6b5e; font-weight:bold; flex-shrink:0;">✕</span>
-  </div>
-  <div id="painel_estacao_resumo" style="font-size:12px; color:#c4cbd6; margin:10px 0;">—</div>
-  <div id="painel_estacao_contatos" style="font-size:11.5px; margin-top:6px;"></div>
-</div>
-"""
-    m.get_root().html.add_child(folium.Element(painel_estacao_html))
-
-    dados_estacoes_json = json.dumps(dados_estacoes, ensure_ascii=False).replace("</", "<\\/")
-    marcadores_bind_str = "\n".join(marcadores_bind_js)
-    painel_estacao_script = f"""
-<script>
-(function() {{
-    var dadosEstacoes = {dados_estacoes_json};
-
-    function renderizarContatos(contatos) {{
-        var corpo = document.getElementById("painel_estacao_contatos");
-        if (!contatos || !contatos.numeros || !contatos.numeros.length) {{
-            corpo.innerHTML = "";
-            return;
-        }}
-        var html = "<hr style='border-color:#2a2f3a;'/><b style='color:#3fc2c2;'>📞 " + contatos.nome + "</b><br/>";
-        contatos.numeros.slice(0, 3).forEach(function(item) {{
-            html += item.numero;
-            if (item.descricao) html += " <i style='color:#8b93a3;'>(" + item.descricao + ")</i>";
-            html += "<br/>";
-        }});
-        corpo.innerHTML = html;
-    }}
-
-    window.blueoceanAbrirPainel = function(chave) {{
-        var d = dadosEstacoes[chave];
-        if (!d) return;
-        document.getElementById("painel_estacao").style.display = "block";
-        document.getElementById("painel_estacao_nome").textContent = (d.risco_emoji || "") + " " + d.nome;
-        var distTxt = (d.dist_min_km === null || d.dist_min_km === undefined) ? "sem raios na janela atual" : d.dist_min_km.toFixed(0) + " km do raio mais próximo";
-        document.getElementById("painel_estacao_resumo").innerHTML =
-            "Status: <b style='color:" + d.risco_color + ";'>" + d.risco_label + "</b><br/>" + distTxt;
-        renderizarContatos(d.contatos);
-    }};
-
-    function ligarMarcadores() {{
-        {marcadores_bind_str}
-    }}
-    if (document.readyState === "complete") {{ ligarMarcadores(); }}
-    else {{ window.addEventListener("load", ligarMarcadores); }}
-}})();
-</script>
-"""
-    m.get_root().html.add_child(folium.Element(painel_estacao_script))
-
-    # --------------------------------------------------------------
-    # Busca de unidade 100% em JS: digitar/escolher aqui só dá zoom +
-    # abre o pop-up da unidade no mapa já carregado.
-    # --------------------------------------------------------------
-    map_var_busca = m.get_name()
-    estacoes_busca_json = json.dumps(estacoes_para_js, ensure_ascii=False).replace("</", "<\\/")
-    marcadores_busca_json = json.dumps(marcadores_js, ensure_ascii=False).replace("</", "<\\/")
-    options_html = "".join(f'<option value="{e["nome"]}">' for e in estacoes_para_js)
-    busca_html = f"""
-<div id="busca-unidade-bar" style="position:absolute; z-index:1000; top:8px; right:50px; background:rgba(15,15,20,0.75); padding:4px 8px; border-radius:6px;">
-  <input id="busca-unidade-input" list="busca-unidade-lista" placeholder="🔎 Buscar unidade…" autocomplete="off"
-    style="width:180px; font:12px sans-serif; padding:3px 6px; border-radius:4px; border:1px solid #374151; background:#111827; color:#e5e7eb;">
-  <datalist id="busca-unidade-lista">{options_html}</datalist>
-</div>
-<script>
-window.addEventListener("load", function() {{
-    var mapaBusca = window["{map_var_busca}"];
-    var estacoesBusca = {estacoes_busca_json};
-    var marcadoresBusca = {marcadores_busca_json};
-    var inputBusca = document.getElementById("busca-unidade-input");
-    if (!inputBusca) return;
-
-    function irParaUnidade(nome) {{
-        var est = estacoesBusca.find(function(e) {{ return e.nome === nome; }});
-        if (!est || !mapaBusca) return;
-        mapaBusca.flyTo([est.lat, est.lon], 10, {{animate: true, duration: 0.8}});
-        var nomeVar = marcadoresBusca[nome];
-        var marcador = nomeVar ? window[nomeVar] : null;
-        if (marcador && marcador.openPopup) {{
-            setTimeout(function() {{ marcador.openPopup(); }}, 400);
-        }}
-    }}
-
-    inputBusca.addEventListener("change", function() {{ irParaUnidade(inputBusca.value); }});
-    inputBusca.addEventListener("keydown", function(ev) {{
-        if (ev.key === "Enter") irParaUnidade(inputBusca.value);
-    }});
-}});
-</script>
-"""
-    m.get_root().html.add_child(folium.Element(busca_html))
-
-    # --------------------------------------------------------------
-    # Legenda fixa no canto — cores dos anéis de distância + status das
-    # unidades, pra não precisar adivinhar o que cada cor significa.
-    # --------------------------------------------------------------
-    itens_aneis = "".join(
-        f'<div style="display:flex; align-items:center; gap:6px; margin-top:2px;">'
-        f'<span style="width:12px; height:0; border-top:2px dashed {cor}; display:inline-block;"></span>'
-        f'<span>{raio_km} km</span></div>'
-        for raio_km, cor in RAIOS_ALERTA_KM if raio_km in distancias_aneis
-    ) if mostrar_aneis else ""
-    legenda_html = f"""
-<div id="legenda-mapa" style="position:absolute; z-index:1000; bottom:22px; left:8px; background:rgba(15,15,20,0.8);
-     color:#e5e7eb; padding:8px 10px; border-radius:8px; font:11px 'Segoe UI', sans-serif; line-height:1.5;">
-  <div style="font-weight:700; color:#3fc2c2; margin-bottom:3px;">Status da unidade</div>
-  <div>🔴 Alto — raio a menos de 30 km</div>
-  <div>🟡 Médio — raio a menos de 50 km</div>
-  <div>🟢 Sem raios próximos</div>
-  {"<div style='font-weight:700; color:#3fc2c2; margin:6px 0 2px;'>Anéis de distância</div>" + itens_aneis if itens_aneis else ""}
-</div>
-"""
-    m.get_root().html.add_child(folium.Element(legenda_html))
-
-    # --------------------------------------------------------------
-    # Raios ao vivo + células de tempestade: os dados já vêm embutidos
-    # aqui (nada de fetch nem de arquivo estático — ver nota no topo da
-    # função _renderizar_mapa_ao_vivo). Guarda o zoom/posição no
-    # localStorage do navegador pra não "pular" a cada reconstrução do
-    # mapa, e toca o som/abre o pop-up só das unidades que acabaram de
-    # entrar em alerta nesse ciclo (decidido no Python, não no JS).
-    # --------------------------------------------------------------
-    map_var = m.get_name()
-    raios_fg_var = raios_fg.get_name()
-    js_payload = {
-        "marcadores": marcadores_js,
-        "janelaMin": raios_minutos,
-        "somUrl": som_data_uri,
-        "dadosRaios": _preparar_payload_raios(raios_df, celulas_com_trajetoria),
-        "estacoesNovas": estacoes_novas,
-        "mostrarDeslocamento": bool(mostrar_deslocamento),
-        "tocarSom": bool(estacoes_novas),
-    }
-    js_payload_str = json.dumps(js_payload, ensure_ascii=False).replace("</", "<\\/")
-    status_texto_html = json.dumps(status_texto, ensure_ascii=False)
-    script_html = f"""
-<div id="raios-status-bar" style="position:absolute; z-index:1000; top:8px; left:50px; background:rgba(15,15,20,0.75); color:#e5e7eb; padding:4px 10px; border-radius:6px; font:12px sans-serif;">
-</div>
-<style>
-.raio-celula-icon {{ background: transparent !important; border: none !important; }}
-</style>
-<script>
-window.addEventListener("load", function() {{
-    var cfg = {js_payload_str};
-    var map = window["{map_var}"];
-    var raiosLayer = window["{raios_fg_var}"];
-    var celulasLayer = L.layerGroup().addTo(map);
-    var audio = new Audio(cfg.somUrl);
-    audio.preload = "auto";
-    var statusEl = document.getElementById("raios-status-bar");
-    if (statusEl) statusEl.textContent = {status_texto_html};
-
-    // Guarda e restaura o zoom/posição no localStorage — como o mapa
-    // reconstrói a cada ciclo (embutindo os dados novos de raios), isso
-    // evita que a visão "pule" de volta pro Brasil inteiro toda vez.
-    var VIEW_KEY = "blueocean_raios_view_v1";
-    try {{
-        var salvo = JSON.parse(localStorage.getItem(VIEW_KEY) || "null");
-        if (salvo && typeof salvo.lat === "number") {{ map.setView([salvo.lat, salvo.lng], salvo.zoom); }}
-    }} catch (e) {{}}
-    map.on("moveend zoomend", function() {{
-        try {{
-            var c = map.getCenter();
-            localStorage.setItem(VIEW_KEY, JSON.stringify({{lat: c.lat, lng: c.lng, zoom: map.getZoom()}}));
-        }} catch (e) {{}}
-    }});
-
-    function destravarSom() {{
-        audio.play().then(function() {{ audio.pause(); audio.currentTime = 0; }}).catch(function() {{}});
-        document.removeEventListener("click", destravarSom, true);
-        document.removeEventListener("keydown", destravarSom, true);
-        window.top.document.removeEventListener("click", destravarSom, true);
-        window.top.document.removeEventListener("keydown", destravarSom, true);
-    }}
-    document.addEventListener("click", destravarSom, true);
-    document.addEventListener("keydown", destravarSom, true);
-    try {{
-        window.top.document.addEventListener("click", destravarSom, true);
-        window.top.document.addEventListener("keydown", destravarSom, true);
-    }} catch (e) {{}}
-
-    function corPorIdade(idadeMin) {{
-        var fracao = Math.min(idadeMin / Math.max(cfg.janelaMin, 1), 1);
-        if (fracao < 0.33) return "#ff2828";
-        if (fracao < 0.66) return "#f97316";
-        return "#eab308";
-    }}
-
-    function desenharRaios(data) {{
-        raiosLayer.clearLayers();
-        (data.raios || []).forEach(function(r) {{
-            var cor = corPorIdade(r.idade_min);
-            L.circleMarker([r.lat, r.lon], {{radius: 3, color: cor, weight: 1, fill: true, fillColor: cor, fillOpacity: 0.8}})
-                .bindTooltip("⚡ " + r.hora + " · ~" + Math.round(r.idade_min) + " min atrás")
-                .addTo(raiosLayer);
-        }});
-
-        celulasLayer.clearLayers();
-        if (cfg.mostrarDeslocamento) {{
-            (data.celulas || []).forEach(function(cel) {{
-                var hist = cel.historico || [];
-                var pts = hist.map(function(p) {{ return [p.lat, p.lon]; }})
-                    .concat((cel.checkpoints || []).map(function(c) {{ return [c.lat, c.lon]; }}));
-                if (pts.length > 1) {{
-                    L.polyline(pts, {{color: "#e5e7eb", weight: 1.5, opacity: 0.55, dashArray: "6, 5"}}).addTo(celulasLayer);
-                }}
-                hist.forEach(function(p, i) {{
-                    var atual = (i === hist.length - 1);
-                    var tam = atual ? 18 : 13;
-                    var icone = L.divIcon({{
-                        className: "raio-celula-icon",
-                        html: '<div style="font-weight:900; font-size:' + tam + 'px; color:' + (atual ? "#ef4444" : "#eab308") + '; text-shadow:0 0 4px #000,0 0 7px #000; line-height:1;">✕</div>',
-                        iconSize: [tam + 6, tam + 6], iconAnchor: [(tam + 6) / 2, (tam + 6) / 2]
-                    }});
-                    var marc = L.marker([p.lat, p.lon], {{icon: icone}});
-                    if (atual) marc.bindTooltip("Célula #" + cel.id + " · ~" + Math.round(cel.vel_kmh) + " km/h para " + cel.rumo_texto);
-                    marc.addTo(celulasLayer);
-                }});
-                (cel.checkpoints || []).forEach(function(c, idx) {{
-                    var op = Math.max(0.75 - idx * 0.18, 0.2);
-                    L.circleMarker([c.lat, c.lon], {{radius: 3.5, color: "#e5e7eb", weight: 1, fill: true, fillColor: "#e5e7eb", fillOpacity: op, opacity: op}})
-                        .bindTooltip("Célula #" + cel.id + " — alcance estimado em +" + c.min + " min")
-                        .addTo(celulasLayer);
-                }});
-            }});
-        }}
-    }}
-
-    desenharRaios(cfg.dadosRaios);
-
-    if (cfg.tocarSom) {{
-        (cfg.estacoesNovas || []).forEach(function(nome) {{
-            var nomeVar = cfg.marcadores[nome];
-            var marcador = nomeVar ? window[nomeVar] : null;
-            if (marcador && marcador.openPopup) {{
-                marcador.openPopup();
-                if (map.panTo) map.panTo(marcador.getLatLng());
-            }}
-            audio.currentTime = 0;
-            audio.play().catch(function() {{}});
-        }});
-    }}
-}});
-</script>
-"""
-    m.get_root().html.add_child(folium.Element(script_html))
-
-    components.html(m._repr_html_(), height=650)
+    _mapa_raios_component(
+        estacoes=estacoes_payload,
+        raios=raios_payload["raios"],
+        celulas=raios_payload["celulas"],
+        aneis=aneis_payload,
+        janela_min=raios_minutos,
+        mostrar_deslocamento=bool(mostrar_deslocamento),
+        status_texto=status_texto,
+        estacoes_novas=estacoes_novas,
+        tocar_som=bool(estacoes_novas),
+        som_data_uri=som_data_uri,
+        key="bo_mapa_raios_live",
+    )
 
 with col_mapa:
     st.fragment(run_every=intervalo_raios_seg)(_renderizar_mapa_ao_vivo)()
