@@ -164,7 +164,12 @@ ESTACOES_PADRAO = [
     {"estacao": "Porto Paracuru", "lat": -3.40115, "lon": -39.0109},
 ]
 
-RAIOS_ALERTA_KM = [(30, "#3b82f6"), (50, "#22c55e"), (100, "#f97316"), (200, "#ef4444")]
+# Cores dos anéis: tons que não se confundem com as cores dos raios (vermelho/laranja/amarelo/verde),
+# com o GOES-East nem com o mapa; no mapa cada anel ganha também um contorno escuro por baixo.
+RAIOS_ALERTA_KM = [(30, "#00e5ff"), (50, "#ff2bd6"), (100, "#ffffff"), (200, "#b388ff")]
+
+# Tamanho (raio em pixels) das bolinhas de raio no mapa.
+TAMANHO_BOLINHA_RAIO = 5.0
 
 # Limite apenas para a visualização no navegador (por faixa de idade de 5 min,
 # pra que os raios mais antigos também apareçam). Os cálculos de alerta
@@ -572,7 +577,6 @@ with st.sidebar:
     st.caption("🔄 Atualização automática: a cada 2 minutos")
     st.caption("🔊 O som e o pop-up automático de alerta ficam sempre ativos.")
     arquivo_som = st.file_uploader("Trocar o som de alerta (opcional)", type=["mp3", "wav", "ogg", "m4a"])
-    tamanho_raio = st.slider("Tamanho das bolinhas de raio", 2.0, 16.0, 6.5, 0.5)
     mostrar_deslocamento = st.checkbox("Mostrar deslocamento das células de tempestade", value=True)
 
     st.subheader("📏 Anéis de distância no mapa")
@@ -788,7 +792,7 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
         celulas=raios_payload["celulas"],
         aneis=aneis_payload,
         janela_min=raios_minutos,
-        tamanho_raio=float(tamanho_raio),
+        tamanho_raio=TAMANHO_BOLINHA_RAIO,
         mostrar_deslocamento=bool(mostrar_deslocamento),
         status_texto=status_texto,
         estacoes_novas=estacoes_novas,

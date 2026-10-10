@@ -49,6 +49,12 @@ mapa não carrega.
   **O arquivo `boletins_bo.py` precisa subir pro GitHub junto com o
   `streamlit_app.py`.**
 
+## Ajustes (última rodada)
+
+- **Bolinhas de raio** com tamanho fixo (5); a opção de ajuste foi removida.
+- **Anéis mais visíveis:** 30 km ciano · 50 km magenta · 100 km branco · 200 km lilás, cada um com
+  contorno escuro por baixo, pra aparecerem sobre o GOES-East, o satélite e o mapa claro.
+
 ## Ajustes (rodada atual)
 
 - **Mapa:** as demais regiões voltaram a aparecer (levemente esmaecidas fora do Brasil); a vista

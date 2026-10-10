@@ -581,7 +581,11 @@
       opcoes += '<option value="' + String(e.nome).replace(/"/g, "&quot;") + '">';
 
       (aneis || []).forEach(function (a) {
-        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: a.cor, weight: 4.5, fill: false, dashArray: "12, 9", opacity: 0.95, interactive: false, renderer: canvasRenderer })
+        // contorno escuro por baixo + traço colorido por cima: o anel aparece no mapa claro,
+        // no satélite e por cima das cores do GOES-East
+        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: "#0b1220", weight: 8, fill: false, opacity: 0.6, interactive: false, renderer: canvasRenderer })
+          .addTo(aneisLayer);
+        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: a.cor, weight: 4.5, fill: false, dashArray: "12, 9", opacity: 1, interactive: false, renderer: canvasRenderer })
           .addTo(aneisLayer);
       });
     });
@@ -593,7 +597,7 @@
     (raios || []).forEach(function (r) {
       if (!visivel(r.lat, r.lon)) return;
       var cor = corPorIdade(r.idade_min);
-      L.circleMarker([r.lat, r.lon], { radius: tamanho || 6.5, color: "#111827", weight: 1.2, fill: true, fillColor: cor, fillOpacity: 0.95, renderer: canvasRenderer })
+      L.circleMarker([r.lat, r.lon], { radius: tamanho || 5, color: "#111827", weight: 1.2, fill: true, fillColor: cor, fillOpacity: 0.95, renderer: canvasRenderer })
         .addTo(raiosLayer);
     });
 
@@ -657,7 +661,7 @@
   function atualizarLegenda(aneis) {
     var itens = (aneis || []).map(function (a) {
       return '<div style="display:flex; align-items:center; gap:6px; margin-top:2px;">' +
-        '<span style="width:12px; height:0; border-top:3px dashed ' + a.cor + '; display:inline-block;"></span>' +
+        '<span style="width:16px; height:0; border-top:3px dashed ' + a.cor + '; display:inline-block; box-shadow:0 0 0 2px rgba(11,18,32,0.9); background:rgba(11,18,32,0.9);"></span>' +
         '<span>' + a.km + ' km</span></div>';
     }).join("");
     var tit = 'font-weight:700; color:#3fc2c2; margin:7px 0 2px;';
