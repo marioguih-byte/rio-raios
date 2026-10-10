@@ -162,6 +162,9 @@
   }
   function visivel(lat, lon) { return noBrasil(lat, lon) || pertoDeUnidade(lat, lon); }
   var canvasRenderer = L.canvas({ padding: 0.1 });
+  // Pontos das unidades ficam numa camada própria, acima dos anéis, dos raios e das células,
+  // pra a borda preta nunca ser coberta.
+  var canvasEstacoes = L.canvas({ pane: "estacoesPane", padding: 0.1 });
 
   function destravarSom() {
     if (!audio) return;
@@ -486,6 +489,8 @@
     L.polygon([mundo].concat(buracos), { pane: "mascaraBR", renderer: L.svg({ pane: "mascaraBR" }), stroke: false,
       fillColor: "#0b0f16", fillOpacity: 0.28, interactive: false }).addTo(map);
 
+    map.createPane("estacoesPane");
+    map.getPane("estacoesPane").style.zIndex = 620;
     if (!map.getPane("markerPane")) { map.createPane("markerPane"); }
     map.getPane("markerPane").style.zIndex = 650;
 
@@ -550,7 +555,7 @@
       var texto = (e.dist_min_km === null || e.dist_min_km === undefined)
         ? "sem raios na janela atual" : e.dist_min_km.toFixed(0) + " km do raio mais próximo";
       var marcador = L.circleMarker([e.lat, e.lon], {
-        radius: 8, pane: "markerPane", color: "#0b0f16", weight: 1.6, opacity: 0.85, fill: true, fillColor: e.risco_color, fillOpacity: 1, renderer: canvasRenderer,
+        radius: 8, color: "#000000", weight: 2.2, opacity: 1, fill: true, fillColor: e.risco_color, fillOpacity: 1, renderer: canvasEstacoes,
       });
       // Tooltip somente durante o hover; nunca fica preso após sair do marcador.
       marcador.bindTooltip(e.risco_emoji + " " + e.nome + " — " + texto, {

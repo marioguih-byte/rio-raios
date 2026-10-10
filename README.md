@@ -49,6 +49,16 @@ mapa não carrega.
   **O arquivo `boletins_bo.py` precisa subir pro GitHub junto com o
   `streamlit_app.py`.**
 
+## Removido
+
+- Botão "Baixar boletim de raios em PDF" (e a dependência `reportlab`).
+- A legenda "— mesmo formato do script de boletins" na seção de boletins.
+
+## Pontos das unidades
+
+- Os pontos ficam numa camada própria **acima dos anéis, dos raios e das células**, com borda preta
+  sólida — antes o contorno escuro dos anéis e os raios cobriam a borda.
+
 ## Identidade visual
 
 - Cabeçalho: logo do **RIO** (`data/logo_rio.webp`) e título "RIO — Rede Inteligente de Observação

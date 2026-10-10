@@ -485,59 +485,6 @@ def montar_texto_copia(alerta):
     return "\n".join(linhas)
 
 # ======================================================================
-# BOLETIM EM PDF
-# ======================================================================
-def gerar_boletim_pdf_bytes(df_status, alertas_ativos, meteorologista_nome=""):
-    from reportlab.lib import colors
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-    from reportlab.lib.units import cm
-    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
-
-    buf = io.BytesIO()
-    styles = getSampleStyleSheet()
-    estilo_titulo = ParagraphStyle("T", parent=styles["Title"], textColor=colors.HexColor("#0d1117"))
-    estilo_secao = ParagraphStyle("S", parent=styles["Heading2"], textColor=colors.HexColor("#0f5c5c"), spaceBefore=14, spaceAfter=6)
-    estilo_normal = styles["Normal"]
-    estilo_alerta = ParagraphStyle("A", parent=styles["Normal"], fontSize=9.5, backColor=colors.HexColor("#f5f5f5"), borderPadding=6, spaceAfter=8)
-
-    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=1.6 * cm, bottomMargin=1.6 * cm, leftMargin=1.6 * cm, rightMargin=1.6 * cm)
-    story = []
-    agora_brasilia = utc_para_brasilia(datetime.now(timezone.utc))
-
-    story.append(Paragraph(f"Boletim de Raios — {EMPRESA}", estilo_titulo))
-    story.append(Paragraph(
-        f"Gerado em: <b>{agora_brasilia.strftime('%d/%m/%Y %H:%M')}</b> (horário de Brasília)<br/>"
-        f"Fonte: GLM / GOES-19 (raios ao vivo)<br/>"
-        f"Meteorologista: <b>{meteorologista_nome or '(não informado)'}</b>",
-        estilo_normal,
-    ))
-    story.append(Spacer(1, 10))
-
-    story.append(Paragraph("Unidades em alerta agora", estilo_secao))
-    em_risco = df_status[df_status["risco_score"] > 0].sort_values(["risco_score", "dist_min_km"], ascending=[False, True])
-    if not em_risco.empty:
-        linhas = [["Nível", "Unidade", "Distância do raio mais próximo"]]
-        for _, e in em_risco.iterrows():
-            linhas.append([e["risco_label"].split(" — ")[0].upper(), e["nome"], f"{e['dist_min_km']:.0f} km"])
-        t = Table(linhas, colWidths=[2.6 * cm, 9 * cm, 6 * cm])
-        t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#ef4444")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white), ("FONTSIZE", (0, 0), (-1, -1), 9), ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#ccc")), ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f2f2f2")])]))
-        story.append(t)
-    else:
-        story.append(Paragraph("Nenhuma unidade em alerta amarelo/vermelho no momento.", estilo_normal))
-    story.append(Spacer(1, 12))
-
-    story.append(Paragraph("Alertas ativos (mensagens geradas)", estilo_secao))
-    emoji_pat = re.compile("[\U0001F300-\U0001FAFF\u2600-\u27BF\U0001F1E6-\U0001F1FF\u2190-\u21FF\uFE0F\u200d]+")
-    if alertas_ativos:
-        for a in alertas_ativos:
-            story.append(Paragraph(emoji_pat.sub("", montar_texto_copia(a)).strip(), estilo_alerta))
-    else:
-        story.append(Paragraph("Nenhum alerta ativo.", estilo_normal))
-    doc.build(story)
-    return buf.getvalue()
-
-# ======================================================================
 # INTERFACE STREAMLIT
 # ======================================================================
 st.markdown("""
@@ -919,15 +866,6 @@ with col_lado:
 
         st.fragment(run_every=intervalo_raios_seg)(_corpo_painel_lateral)()
 
-st.divider()
-col_pdf, _ = st.columns([1, 3])
-with col_pdf:
-    df_status_pdf = st.session_state.get("_fragment_df_status", pd.DataFrame())
-    if df_status_pdf.empty:
-        df_status_pdf = calcular_status_estacoes(df_stations, pd.DataFrame())
-    pdf_bytes = gerar_boletim_pdf_bytes(df_status_pdf, st.session_state.alertas_raio_ativos, meteorologista_nome=meteorologista)
-    agora_arquivo = utc_para_brasilia(datetime.now(timezone.utc)).strftime("%Y%m%d_%H%M")
-    st.download_button("📄 Baixar boletim de raios em PDF", data=pdf_bytes, file_name=f"boletim_raios_{agora_arquivo}.pdf", mime="application/pdf", use_container_width=True)
 
 # ======================================================================
 # BOLETINS DE PREVISÃO (formato WhatsApp)
@@ -957,7 +895,7 @@ _boletins_rodando = bool(_estado_boletins and _estado_boletins["rodando"])
 
 def _secao_boletins(unidades_base):
     st.subheader("📨 Boletins de previsão")
-    st.caption("ENSEMBLE (média consenso) entre ECMWF, ICON e GFS do Open-Meteo — mesmo formato do script de boletins.")
+    st.caption("ENSEMBLE (média consenso) entre ECMWF, ICON e GFS do Open-Meteo.")
 
     estado = st.session_state.get("boletins_estado")
     rodando = bool(estado and estado["rodando"])
