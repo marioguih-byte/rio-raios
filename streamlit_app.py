@@ -164,9 +164,15 @@ ESTACOES_PADRAO = [
     {"estacao": "Porto Paracuru", "lat": -3.40115, "lon": -39.0109},
 ]
 
-# Cores dos anéis: tons que não se confundem com as cores dos raios (vermelho/laranja/amarelo/verde),
-# com o GOES-East nem com o mapa; no mapa cada anel ganha também um contorno escuro por baixo.
-RAIOS_ALERTA_KM = [(30, "#00e5ff"), (50, "#ff2bd6"), (100, "#ffffff"), (200, "#b388ff")]
+# Anéis de distância (km) e paletas de cor. No mapa cada anel ganha também um contorno
+# escuro por baixo, pra se destacar do mapa e do GOES-East.
+DISTANCIAS_ANEIS_KM = [30, 50, 100, 200]
+PALETAS_ANEIS = {
+    "Padrão (azul · verde · laranja · vermelho)": ["#2f6bff", "#00c853", "#ff8f00", "#ff1744"],
+    "Alto contraste (ciano · magenta · branco · lilás)": ["#00e5ff", "#ff2bd6", "#ffffff", "#b388ff"],
+    "Vivas (azul · lima · amarelo · rosa)": ["#00b0ff", "#76ff03", "#ffea00", "#ff4081"],
+}
+PALETA_PERSONALIZADA = "Personalizada"
 
 # Tamanho (raio em pixels) das bolinhas de raio no mapa.
 TAMANHO_BOLINHA_RAIO = 5.0
@@ -581,6 +587,13 @@ with st.sidebar:
 
     st.subheader("📏 Anéis de distância no mapa")
     mostrar_aneis = st.checkbox("Mostrar anéis de distância ao redor das unidades", value=True)
+    paleta_escolhida = st.selectbox("Cores dos anéis", list(PALETAS_ANEIS) + [PALETA_PERSONALIZADA], disabled=not mostrar_aneis)
+    if paleta_escolhida == PALETA_PERSONALIZADA:
+        _base_pers = list(PALETAS_ANEIS.values())[0]
+        cores_aneis = [st.color_picker(f"Anel de {km} km", _base_pers[i], key=f"cor_anel_{km}", disabled=not mostrar_aneis)
+                       for i, km in enumerate(DISTANCIAS_ANEIS_KM)]
+    else:
+        cores_aneis = PALETAS_ANEIS[paleta_escolhida]
 
 # --------------------------------------------------------------
 # Som de alerta personalizado: se a pessoa subiu um arquivo, ele vira um
@@ -619,6 +632,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 col_mapa, col_lado = st.columns([2.4, 1])
+st.session_state["_run_completo"] = True
 
 @st.dialog("⚡ Raio próximo de unidade(s)!")
 def _dialog_alerta_raio():
@@ -751,14 +765,9 @@ def _renderizar_mapa_ao_vivo():
         if notificacoes_desta_rodada:
             separador = "\n\n" + ("─" * 30) + "\n\n"
             st.session_state.dialog_raio_texto = separador.join(notificacoes_desta_rodada)
-            st.session_state.dialog_raio_ts = time.time()
+            st.session_state.dialog_raio_pendente = True
 
     st.session_state.alertas_raio_ativos = [a for a in st.session_state.alertas_raio_ativos if a["expira"] > time.time()]
-
-    dialog_ts = st.session_state.get("dialog_raio_ts")
-    janela_dialog_seg = max(intervalo_raios_seg * 1.5, 20)
-    if dialog_ts and (time.time() - dialog_ts) < janela_dialog_seg and st.session_state.get("dialog_raio_texto"):
-        _dialog_alerta_raio()
 
     ultima_att = st.session_state.get("ultima_atualizacao_raios")
     if ultima_att is not None:
@@ -774,6 +783,12 @@ def _renderizar_mapa_ao_vivo():
 
     _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas, status_texto)
 
+    # Alerta novo surgiu numa atualização automática (só o fragmento rodou): pede uma
+    # execução completa pra o pop-up ser aberto UMA vez no nível do script — assim ele
+    # fica aberto até ser fechado e não reaparece nas atualizações seguintes.
+    if st.session_state.get("dialog_raio_pendente") and not st.session_state.get("_run_completo"):
+        st.rerun()
+
 def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas, status_texto):
     estacoes_payload = [
         {
@@ -783,7 +798,7 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
         }
         for _, e in df_status.iterrows()
     ]
-    aneis_payload = [{"km": km, "cor": cor} for km, cor in RAIOS_ALERTA_KM if mostrar_aneis]
+    aneis_payload = [{"km": km, "cor": cor} for km, cor in zip(DISTANCIAS_ANEIS_KM, cores_aneis) if mostrar_aneis]
     raios_payload = _preparar_payload_raios(raios_df, celulas_com_trajetoria)
 
     _mapa_raios_component(
@@ -803,6 +818,12 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
 
 with col_mapa:
     st.fragment(run_every=intervalo_raios_seg)(_renderizar_mapa_ao_vivo)()
+
+# Pop-up do alerta: mostrado uma única vez por alerta novo.
+if st.session_state.get("dialog_raio_pendente"):
+    st.session_state["dialog_raio_pendente"] = False
+    _dialog_alerta_raio()
+st.session_state["_run_completo"] = False
 
 with col_lado:
     with st.container(key="painel_lateral"):
@@ -911,7 +932,7 @@ _boletins_rodando = bool(_estado_boletins and _estado_boletins["rodando"])
 
 
 def _secao_boletins(unidades_base):
-    st.subheader("📨 Boletins de previsão (WhatsApp)")
+    st.subheader("📨 Boletins de previsão")
     st.caption("ENSEMBLE (média consenso) entre ECMWF, ICON e GFS do Open-Meteo — mesmo formato do script de boletins.")
 
     estado = st.session_state.get("boletins_estado")

@@ -127,7 +127,6 @@
   var chavePorNome = {};
   var audio = null;
   var audioSrcAtual = null;
-  var primeiraRenderizacao = true;
 
   // Só aparecem raios dentro do Brasil. Exceção: raios a até ~55 km de uma unidade
   // monitorada (pra um raio no mar perto de uma unidade litorânea, que gera alerta, não sumir).
@@ -593,21 +592,29 @@
   }
 
   function redesenharRaios(raios, celulas, janelaMin, mostrarDeslocamento, tamanho) {
-    raiosLayer.clearLayers();
+    // Atualização sutil: as camadas novas entram no mapa primeiro e só depois as antigas saem,
+    // então nunca há um instante com o mapa "vazio" (sem piscar).
+    var novoRaios = L.layerGroup();
+    var novasCelulas = L.layerGroup();
     (raios || []).forEach(function (r) {
       if (!visivel(r.lat, r.lon)) return;
       var cor = corPorIdade(r.idade_min);
       L.circleMarker([r.lat, r.lon], { radius: tamanho || 5, color: "#111827", weight: 1.2, fill: true, fillColor: cor, fillOpacity: 0.95, renderer: canvasRenderer })
-        .addTo(raiosLayer);
+        .addTo(novoRaios);
     });
 
-    celulasLayer.clearLayers();
     if (mostrarDeslocamento) {
       (celulas || []).forEach(function (cel) {
         var h = cel.historico || [];
-        if (h.length && visivel(h[h.length - 1].lat, h[h.length - 1].lon)) desenharCelula(cel);
+        if (h.length && visivel(h[h.length - 1].lat, h[h.length - 1].lon)) desenharCelula(cel, novasCelulas);
       });
     }
+    novoRaios.addTo(map);
+    novasCelulas.addTo(map);
+    map.removeLayer(raiosLayer);
+    map.removeLayer(celulasLayer);
+    raiosLayer = novoRaios;
+    celulasLayer = novasCelulas;
   }
 
   // ---------------- deslocamento das células de tempestade ----------------
@@ -629,7 +636,7 @@
     });
   }
 
-  function desenharCelula(cel) {
+  function desenharCelula(cel, alvo) {
     var hist = cel.historico || [];
     if (!hist.length) return;
     var cps = cel.checkpoints || [];
@@ -638,15 +645,15 @@
 
     if (pts.length > 1) {
       // contorno escuro suave por baixo pra a linha clara aparecer no mapa claro e no satélite
-      L.polyline(pts, Object.assign({ color: "#0f172a", weight: 5, opacity: 0.35 }, opt)).addTo(celulasLayer);
-      L.polyline(pts, Object.assign({ color: "#f8fafc", weight: 2.4, opacity: 0.95, dashArray: "7, 7" }, opt)).addTo(celulasLayer);
+      L.polyline(pts, Object.assign({ color: "#0f172a", weight: 5, opacity: 0.35 }, opt)).addTo(alvo);
+      L.polyline(pts, Object.assign({ color: "#f8fafc", weight: 2.4, opacity: 0.95, dashArray: "7, 7" }, opt)).addTo(alvo);
     }
 
     cps.forEach(function (c, idx) {
       var op = Math.max(0.95 - idx * 0.2, 0.35);
       L.circleMarker([c.lat, c.lon], { radius: 4, color: "#0f172a", weight: 1.5, fill: true, fillColor: "#f8fafc", fillOpacity: op, opacity: op, renderer: canvasRenderer })
         .bindTooltip("Célula #" + cel.id + " — alcance estimado em +" + c.min + " min")
-        .addTo(celulasLayer);
+        .addTo(alvo);
     });
 
     hist.forEach(function (p, i) {
@@ -654,7 +661,7 @@
       var t = hist.length > 1 ? i / (hist.length - 1) : 1;
       var marc = L.marker([p.lat, p.lon], { icon: iconeX(corCelula(t), atual ? 26 : 19), zIndexOffset: atual ? 500 : 0 });
       if (atual) marc.bindTooltip("Célula #" + cel.id + " · ~" + Math.round(cel.vel_kmh) + " km/h para " + cel.rumo_texto);
-      marc.addTo(celulasLayer);
+      marc.addTo(alvo);
     });
   }
 
@@ -704,19 +711,12 @@
       audioSrcAtual = args.som_data_uri;
     }
 
-    // Na primeira renderização (site recém-aberto) os alertas que já existiam não abrem o painel
-    // nem mexem no mapa; só alertas que surgirem depois disso fazem isso.
-    if (args.tocar_som && args.estacoes_novas && args.estacoes_novas.length) {
-      args.estacoes_novas.forEach(function (nome) {
-        if (!primeiraRenderizacao) {
-          var marcador = marcadoresPorNome[nome];
-          if (marcador && map) map.panTo(marcador.getLatLng());
-          abrirPainel(chavePorNome[nome]);
-        }
-        if (audio) { audio.currentTime = 0; audio.play().catch(function () {}); }
-      });
+    // Alerta novo: só toca o som (o aviso em texto aparece no pop-up do Streamlit).
+    // O painel da unidade abre apenas quando a pessoa clica na unidade.
+    if (args.tocar_som && args.estacoes_novas && args.estacoes_novas.length && audio) {
+      audio.currentTime = 0;
+      audio.play().catch(function () {});
     }
-    primeiraRenderizacao = false;
 
     Streamlit.setFrameHeight(650);
   }

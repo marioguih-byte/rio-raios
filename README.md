@@ -49,6 +49,18 @@ mapa não carrega.
   **O arquivo `boletins_bo.py` precisa subir pro GitHub junto com o
   `streamlit_app.py`.**
 
+## Ajustes (mais recentes)
+
+- **Anéis:** voltaram às cores azul · verde · laranja · vermelho, em tons mais vivos, com contorno
+  escuro por baixo. Na barra lateral dá pra trocar a paleta (Padrão, Alto contraste, Vivas) ou
+  escolher uma cor para cada anel (Personalizada).
+- **Alertas:** o pop-up do alerta aparece uma única vez por alerta novo (antes reaparecia nas
+  primeiras atualizações) e fica aberto até ser fechado. O alerta **não abre mais o painel da
+  unidade nem move o mapa**; o painel só abre ao clicar na unidade.
+- **Atualização sutil:** os raios e as células são redesenhados sem esvaziar o mapa (as camadas novas
+  entram antes de as antigas saírem).
+- Título da seção de boletins agora é "Boletins de previsão".
+
 ## Ajustes (última rodada)
 
 - **Bolinhas de raio** com tamanho fixo (5); a opção de ajuste foi removida.
