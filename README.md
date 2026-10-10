@@ -49,6 +49,19 @@ mapa não carrega.
   **O arquivo `boletins_bo.py` precisa subir pro GitHub junto com o
   `streamlit_app.py`.**
 
+## Ajustes mais recentes
+
+- **Contorno das UFs em todo o Brasil** (inclui o limite externo) e **mapa só do Brasil**:
+  o que está fora do território fica coberto por uma máscara escura e o zoom/arraste é limitado ao país.
+- **Tamanho das bolinhas de raio** ajustável na barra lateral.
+- **Raios antigos voltaram a aparecer** (0–20 min): antes o mapa só recebia os 5000 raios mais
+  novos, que cabiam todos na faixa de 0–5 min. Agora cada faixa de 5 min é enviada.
+- **Alertas já ativos não abrem o painel ao abrir o site**; só alertas novos abrem.
+- **Deslocamento das células**: linha única de trajetória (percorrida + prevista tracejada), marcas
+  de +30/60/90 min, seta e ✕ na posição atual com velocidade/rumo.
+- **Painel da unidade**: contatos primeiro, depois as informações.
+- Removidos: título/legenda "Unidades monitoradas" da barra lateral e o 1º contato do Porto Açu.
+
 ## Ajustes da última rodada
 
 - **Legenda retrátil**, recolhida por padrão (clique em "▸ Legenda" no canto do mapa).
