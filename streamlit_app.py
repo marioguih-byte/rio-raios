@@ -565,18 +565,7 @@ with st.sidebar:
 
     st.subheader("📁 Unidades monitoradas")
     df_stations = pd.DataFrame(ESTACOES_PADRAO)
-    planilha_custom = False
     st.caption(f"{len(df_stations)} unidades já cadastradas no app.")
-    with st.expander("Usar outra planilha (opcional)"):
-        arquivo_estacoes = st.file_uploader("Envie um .xlsx (colunas: estacao, lat, lon)", type=["xlsx"])
-        if arquivo_estacoes is not None:
-            df_custom = pd.read_excel(arquivo_estacoes)
-            if df_custom.shape[1] != 3: st.error(f"Esperava 3 colunas (estação/lat/lon), encontrei {df_custom.shape[1]}.")
-            else:
-                df_custom.columns = ["estacao", "lat", "lon"]
-                df_stations = df_custom
-                planilha_custom = True
-                st.success(f"Usando {len(df_stations)} estações da planilha enviada.")
 
     st.subheader("⚡ Raios ao vivo (GLM/GOES-19)")
     raios_minutos = 20  # janela exibida no mapa (cores: 0–5 · 5–10 · 10–15 · 15–20 min)
@@ -589,7 +578,6 @@ with st.sidebar:
 
     st.subheader("📏 Anéis de distância no mapa")
     mostrar_aneis = st.checkbox("Mostrar anéis de distância ao redor das unidades", value=True)
-    distancias_aneis = st.multiselect("Distâncias (km)", [30, 50, 100, 200], default=[30, 50, 100, 200], disabled=not mostrar_aneis)
 
 # --------------------------------------------------------------
 # Som de alerta personalizado: se a pessoa subiu um arquivo, ele vira um
@@ -782,7 +770,7 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
         }
         for _, e in df_status.iterrows()
     ]
-    aneis_payload = [{"km": km, "cor": cor} for km, cor in RAIOS_ALERTA_KM if mostrar_aneis and km in distancias_aneis]
+    aneis_payload = [{"km": km, "cor": cor} for km, cor in RAIOS_ALERTA_KM if mostrar_aneis]
     raios_payload = _preparar_payload_raios(raios_df, celulas_com_trajetoria)
 
     _mapa_raios_component(
@@ -902,10 +890,7 @@ def _worker_boletins(estado, unidades, dias):
     estado["rodando"] = False
 
 
-if planilha_custom:
-    unidades_boletim = {str(r.estacao): (float(r.lat), float(r.lon)) for r in df_stations.itertuples()}
-else:
-    unidades_boletim = dict(boletins_bo.UNIDADES)
+unidades_boletim = dict(boletins_bo.UNIDADES)
 
 _estado_boletins = st.session_state.get("boletins_estado")
 _boletins_rodando = bool(_estado_boletins and _estado_boletins["rodando"])

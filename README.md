@@ -49,6 +49,21 @@ mapa não carrega.
   **O arquivo `boletins_bo.py` precisa subir pro GitHub junto com o
   `streamlit_app.py`.**
 
+## Ajustes da última rodada
+
+- **Legenda retrátil**, recolhida por padrão (clique em "▸ Legenda" no canto do mapa).
+- **Sem upload de planilha:** o app usa sempre as 40 unidades cadastradas.
+- **Anéis:** ficou só a caixa "Mostrar anéis de distância" (30/50/100/200 km sempre juntos).
+- **Divisão de UFs** no mapa (limites entre estados, ligável/desligável no controle de camadas).
+- **Bolinhas de raio maiores.**
+- **Deslocamento das células redesenhado:** trilha percorrida (mais forte = mais recente),
+  marcador pulsante com velocidade/rumo, trajetória prevista com marcas de +30/+60/+90 min,
+  seta de direção e cone de incerteza.
+- **Painel da unidade** (clique no marcador) em formato de painel completo: cartões de resumo
+  (status, raio mais próximo, rajada e chuva de hoje+amanhã e das próximas 6 h), tabela por
+  modelo (ECMWF/ICON/GFS), gráficos de rajada (com faixas 40/61 km/h) e de chuva, e contatos.
+  Fecha com ✕ ou Esc.
+
 ## Cores dos anéis
 
 Ajustadas pra bater com o exemplo que você mandou: 30 km azul, 50 km
