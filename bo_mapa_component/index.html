@@ -6,15 +6,8 @@
 <style>
   html, body { margin: 0; padding: 0; height: 100%; background: #0b0f16; }
   #map { position: relative; width: 100%; height: 650px; background: #0b0f16; }
-  .leaflet-container { background: #000 !important; }
-  .bo-preto-contorno .leaflet-tile { filter: invert(1) grayscale(1) contrast(1.65) brightness(0.58); }
-  .leaflet-tile.bo-branco { filter: grayscale(1) contrast(0.95); }
+  .leaflet-container { background: #cfd6dc !important; }
   .raio-celula-icon { background: transparent !important; border: none !important; }
-  /* O mapa escuro usa tiles públicos do OpenStreetMap com tratamento visual local,
-     evitando provedores que exibem "API KEY REQUIRED". */
-  .map-dark-osm .leaflet-tile-pane {
-    filter: invert(100%) hue-rotate(180deg) brightness(0.55) saturate(0.35) contrast(1.15);
-  }
 
   #raios-status-bar { position: absolute; z-index: 1000; top: 8px; left: 50px; background: rgba(15,15,20,0.75);
     color: #e5e7eb; padding: 4px 10px; border-radius: 6px; font: 12px sans-serif; transition: opacity 0.4s ease; }
@@ -24,7 +17,7 @@
   #busca-unidade-input { width: 180px; font: 12px sans-serif; padding: 3px 6px; border-radius: 4px;
     border: 1px solid #374151; background: #111827; color: #e5e7eb; }
 
-  #painel_estacao { display: none; position: absolute; top: 44px; left: 50px; z-index: 1000; width: 290px;
+  #painel_estacao { display: none; position: absolute; top: 44px; left: 50px; z-index: 1000; width: 370px;
     max-height: calc(100% - 90px); overflow-y: auto; background: #12161ff2; color: #f0f2f5; padding: 12px 14px;
     border: 1px solid #3fc2c2; border-radius: 8px; font-family: 'Segoe UI', Arial, sans-serif;
     box-shadow: 0 4px 14px rgba(0,0,0,0.5); }
@@ -32,6 +25,17 @@
   #painel_estacao_fechar { cursor: pointer; color: #ff6b5e; font-weight: bold; flex-shrink: 0; }
   #painel_estacao_resumo { font-size: 12px; color: #c4cbd6; margin: 10px 0; }
   #painel_estacao_contatos { font-size: 11.5px; margin-top: 6px; }
+
+  #prev_titulo { font-size: 11px; color: #8b93a3; margin: 4px 0 6px; }
+  #prev_dias button { background: #1f2733; color: #c4cbd6; border: 1px solid #374151; border-radius: 5px;
+    padding: 3px 9px; margin-right: 5px; font: 11px 'Segoe UI', sans-serif; cursor: pointer; }
+  #prev_dias button.ativo { background: #3fc2c2; color: #0b0f16; border-color: #3fc2c2; font-weight: 700; }
+  #prev_tabela { margin: 8px 0 4px; font-size: 11.5px; }
+  #prev_tabela table { width: 100%; border-collapse: collapse; }
+  #prev_tabela th { color: #8b93a3; font-weight: normal; text-align: right; }
+  #prev_tabela td { text-align: right; padding: 1px 0; }
+  #prev_tabela th:first-child, #prev_tabela td:first-child { text-align: left; }
+  #painel_estacao canvas { display: block; margin-top: 6px; }
 
   #legenda-mapa { position: absolute; z-index: 1000; bottom: 22px; left: 8px; background: rgba(15,15,20,0.8);
     color: #e5e7eb; padding: 8px 10px; border-radius: 8px; font: 11px 'Segoe UI', sans-serif; line-height: 1.5; }
@@ -56,11 +60,18 @@
     </div>
     <div id="painel_estacao_resumo">—</div>
     <div id="painel_estacao_contatos"></div>
+    <hr style="border-color:#2a2f3a;" />
+    <div id="prev_titulo">Previsão Open-Meteo · ECMWF / ICON / GFS</div>
+    <div id="prev_dias"></div>
+    <div id="prev_tabela"></div>
+    <canvas id="prev_canvas_vento" width="340" height="140"></canvas>
+    <canvas id="prev_canvas_chuva" width="340" height="130"></canvas>
   </div>
   <div id="legenda-mapa"></div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
 (function () {
   "use strict";
@@ -91,7 +102,7 @@
   };
 
   var map = null;
-  var stationsLayer, aneisLayer, raiosLayer, celulasLayer;
+  var stationsLayer, aneisLayer, raiosLayer, celulasLayer, goesLayer;
   var marcadoresPorNome = {};
   var coordsPorNome = {};
   var dadosPorChave = {};
@@ -107,16 +118,12 @@
     document.removeEventListener("keydown", destravarSom, true);
   }
 
-  function corPorIdade(idadeMin, janelaMin) {
-    // Gradiente mais rico (vermelho = mais recente → azul = mais antigo
-    // dentro da janela), parecido com um radar de raios de verdade.
-    var fracao = Math.min(idadeMin / Math.max(janelaMin, 1), 1);
-    if (fracao < 0.15) return "#ff1f3d";
-    if (fracao < 0.30) return "#ff7a1a";
-    if (fracao < 0.45) return "#ffc400";
-    if (fracao < 0.60) return "#8be04e";
-    if (fracao < 0.80) return "#22d3ee";
-    return "#3b82f6";
+  function corPorIdade(idadeMin) {
+    // Vermelho 0–5 min · laranja 5–10 · amarelo 10–15 · verde 15–20.
+    if (idadeMin < 5) return "#ef1c1c";
+    if (idadeMin < 10) return "#f97316";
+    if (idadeMin < 15) return "#facc15";
+    return "#22c55e";
   }
 
   function irParaUnidade(nome) {
@@ -125,6 +132,130 @@
     map.flyTo([c.lat, c.lon], 10, { animate: true, duration: 0.8 });
     var marcador = marcadoresPorNome[nome];
     if (marcador) setTimeout(function () { abrirPainel(chavePorNome[nome]); }, 350);
+  }
+
+
+  // ----------------------------------------------------------------
+  // Previsão do Open-Meteo (rajada de vento e precipitação) para ECMWF,
+  // ICON e GFS — buscada direto do navegador só quando a unidade é
+  // clicada (1 requisição por unidade, guardada em cache por 30 min).
+  // ----------------------------------------------------------------
+  var MODELOS_PREV = [
+    { id: "ecmwf_ifs025", label: "ECMWF", cor: "#60a5fa" },
+    { id: "icon_seamless", label: "ICON", cor: "#34d399" },
+    { id: "gfs_seamless", label: "GFS", cor: "#fbbf24" },
+  ];
+  var cachePrev = {};
+  var prevAtual = { chave: null, dados: null, dia: 0, token: 0 };
+  var chartVento = null, chartChuva = null;
+
+  function limparGraficos() {
+    if (chartVento) { chartVento.destroy(); chartVento = null; }
+    if (chartChuva) { chartChuva.destroy(); chartChuva = null; }
+  }
+
+  function normalizarPrevisao(j) {
+    var h = (j && j.hourly) || {};
+    var tempos = h.time || [];
+    var datas = [];
+    tempos.forEach(function (t) { var d = t.slice(0, 10); if (datas.indexOf(d) < 0) datas.push(d); });
+    var modelos = [];
+    MODELOS_PREV.forEach(function (m) {
+      var g = h["wind_gusts_10m_" + m.id], p = h["precipitation_" + m.id];
+      if (!g && !p) return;
+      modelos.push({ id: m.id, label: m.label, cor: m.cor, gusts: g || [], precip: p || [] });
+    });
+    return { tempos: tempos, datas: datas, modelos: modelos };
+  }
+
+  function fmtDataCurta(iso) { return iso.slice(8, 10) + "/" + iso.slice(5, 7); }
+
+  function renderPrevisao() {
+    var dados = prevAtual.dados;
+    var elTab = document.getElementById("prev_tabela");
+    var elDias = document.getElementById("prev_dias");
+    if (!dados || !dados.modelos.length) {
+      elTab.innerHTML = "<i style='color:#9ca3af;'>Sem dados dos modelos para esta unidade.</i>";
+      elDias.innerHTML = ""; limparGraficos(); return;
+    }
+    var dia = Math.min(prevAtual.dia, dados.datas.length - 1);
+    var dataSel = dados.datas[dia];
+    elDias.innerHTML = "";
+    dados.datas.forEach(function (d, i) {
+      var b = document.createElement("button");
+      b.textContent = (i === 0 ? "Hoje " : i === 1 ? "Amanhã " : "") + fmtDataCurta(d);
+      if (i === dia) b.className = "ativo";
+      b.addEventListener("click", function () { prevAtual.dia = i; renderPrevisao(); });
+      elDias.appendChild(b);
+    });
+
+    var idx = [];
+    dados.tempos.forEach(function (t, i) { if (t.slice(0, 10) === dataSel) idx.push(i); });
+    var labels = idx.map(function (i) { return dados.tempos[i].slice(11, 16); });
+    function serie(arr) { return idx.map(function (i) { var v = arr[i]; return (v === undefined || v === null) ? null : v; }); }
+
+    var html = "<table><tr><th>Modelo</th><th>Rajada máx.</th><th>Chuva acum.</th></tr>";
+    var datasetsV = [], datasetsC = [];
+    dados.modelos.forEach(function (m) {
+      var gs = serie(m.gusts), ps = serie(m.precip);
+      var gv = gs.filter(function (v) { return v !== null; }), pv = ps.filter(function (v) { return v !== null; });
+      var gmax = gv.length ? Math.max.apply(null, gv) : null;
+      var psum = pv.length ? pv.reduce(function (a, b) { return a + b; }, 0) : null;
+      html += "<tr><td style='color:" + m.cor + "; font-weight:bold;'>● " + m.label + "</td><td>" +
+        (gmax === null ? "—" : gmax.toFixed(0) + " km/h") + "</td><td>" + (psum === null ? "—" : psum.toFixed(1) + " mm") + "</td></tr>";
+      datasetsV.push({ label: m.label, data: gs, borderColor: m.cor, backgroundColor: "transparent", tension: 0.3, borderWidth: 2, pointRadius: 1.5, spanGaps: false });
+      datasetsC.push({ label: m.label, data: ps, backgroundColor: m.cor + "cc", borderColor: m.cor, borderWidth: 1 });
+    });
+    elTab.innerHTML = html + "</table>";
+
+    limparGraficos();
+    if (!window.Chart) return;
+    function opcoes(titulo) {
+      return {
+        responsive: false, animation: false, interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: { display: true, labels: { color: "#8b93a3", font: { size: 9 }, boxWidth: 10 } },
+          title: { display: true, text: titulo, color: "#c9d1d9", font: { size: 10 } },
+        },
+        scales: {
+          x: { ticks: { color: "#8b93a3", font: { size: 8 }, maxTicksLimit: 8 }, grid: { color: "#2a2f3a" } },
+          y: { min: 0, beginAtZero: true, ticks: { color: "#8b93a3", font: { size: 9 } }, grid: { color: "#2a2f3a" } },
+        },
+      };
+    }
+    chartVento = new Chart(document.getElementById("prev_canvas_vento"),
+      { type: "line", data: { labels: labels, datasets: datasetsV }, options: opcoes("Rajada de vento (km/h)") });
+    chartChuva = new Chart(document.getElementById("prev_canvas_chuva"),
+      { type: "bar", data: { labels: labels, datasets: datasetsC }, options: opcoes("Precipitação (mm/h)") });
+  }
+
+  function carregarPrevisao(chave) {
+    var d = dadosPorChave[chave];
+    if (!d) return;
+    prevAtual.chave = chave; prevAtual.dia = 0;
+    var token = ++prevAtual.token;
+    var c = cachePrev[chave];
+    if (c && (Date.now() - c.ts) < 30 * 60 * 1000) { prevAtual.dados = c.data; renderPrevisao(); return; }
+
+    prevAtual.dados = null; limparGraficos();
+    document.getElementById("prev_dias").innerHTML = "";
+    document.getElementById("prev_tabela").innerHTML = "<i style='color:#9ca3af;'>Carregando previsão do Open-Meteo…</i>";
+    var url = "https://api.open-meteo.com/v1/forecast?latitude=" + d.lat.toFixed(5) + "&longitude=" + d.lon.toFixed(5) +
+      "&hourly=wind_gusts_10m,precipitation&models=" + MODELOS_PREV.map(function (m) { return m.id; }).join(",") +
+      "&wind_speed_unit=kmh&timezone=America%2FSao_Paulo&forecast_days=2";
+    fetch(url)
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function (j) {
+        var dados = normalizarPrevisao(j);
+        cachePrev[chave] = { ts: Date.now(), data: dados };
+        if (token !== prevAtual.token) return;
+        prevAtual.dados = dados; renderPrevisao();
+      })
+      .catch(function (e) {
+        if (token !== prevAtual.token) return;
+        document.getElementById("prev_tabela").innerHTML =
+          "<span style='color:#ff8a80;'>Não foi possível obter a previsão do Open-Meteo agora (" + e.message + "). Clique na unidade de novo para tentar outra vez.</span>";
+      });
   }
 
   function abrirPainel(chave) {
@@ -151,39 +282,35 @@
       });
       corpo.innerHTML = html;
     }
+    carregarPrevisao(chave);
   }
 
   function iniciarMapa() {
-    map = L.map("map", { zoomControl: true, minZoom: 4, maxZoom: 14, preferCanvas: true });
+    map = L.map("map", { zoomControl: true, minZoom: 4, maxZoom: 17, preferCanvas: true });
 
-    // Fundos: somente preto com contorno branco e branco em escala de cinza.
-    // Os tiles são OSM público, sem chave de API. Cada camada tem seu próprio
-    // pane para evitar o mapa ficar invisível ao alternar entre fundos.
-    map.createPane("tilePanePreto");
-    map.getPane("tilePanePreto").style.zIndex = 200;
-    map.createPane("tilePaneBranco");
-    map.getPane("tilePaneBranco").style.zIndex = 201;
-
-    var fundoPreto = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "&copy; OpenStreetMap contributors", maxZoom: 19,
-      subdomains: "abc", pane: "tilePanePreto", className: "bo-preto-contorno"
+    // Fundos: OpenStreetMap (padrão) e Satélite (Esri World Imagery) — ambos
+    // públicos, sem chave de API. GOES-East (NASA GIBS, infravermelho limpo,
+    // banda 13) entra como camada sobreposta, ligada por padrão.
+    var fundoOSM = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "&copy; OpenStreetMap contributors", maxZoom: 19, subdomains: "abc"
     });
-    var fundoBranco = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "&copy; OpenStreetMap contributors", maxZoom: 19,
-      subdomains: "abc", pane: "tilePaneBranco", className: "bo-branco"
+    var fundoSatelite = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+      attribution: "Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community", maxZoom: 19
+    });
+    goesLayer = L.tileLayer.wms("https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi", {
+      layers: "GOES-East_ABI_Band13_Clean_Infrared", format: "image/png", transparent: true, version: "1.1.1",
+      opacity: 0.6, zIndex: 10, attribution: "GOES-East ABI &copy; NOAA/NASA GIBS"
     });
 
-    // Preto com contorno é o padrão. O filtro transforma o fundo claro do OSM
-    // em preto e as linhas/limites em branco, mantendo um mapa B/W limpo.
-    fundoPreto.addTo(map);
+    fundoOSM.addTo(map);
+    goesLayer.addTo(map);
     L.control.layers(
-      {
-        "⬛ Preto com contorno": fundoPreto,
-        "⬜ Branco": fundoBranco
-      },
-      null,
+      { "🗺️ OpenStreetMap": fundoOSM, "🛰️ Satélite (Esri)": fundoSatelite },
+      { "🛰️ GOES-East (IR banda 13)": goesLayer },
       { position: "topright", collapsed: true }
     ).addTo(map);
+    // GOES-East atualiza a cada 10 min: força o Leaflet a rebuscar os tiles.
+    setInterval(function () { try { goesLayer.setParams({ _t: Date.now() }, false); } catch (e) {} }, 600000);
 
     var bb = { lat_min: -34.0, lat_max: 5.5, lon_min: -74.5, lon_max: -32.0 };
     map.fitBounds([[bb.lat_min, bb.lon_min], [bb.lat_max, bb.lon_max]]);
@@ -265,7 +392,7 @@
       opcoes += '<option value="' + String(e.nome).replace(/"/g, "&quot;") + '">';
 
       (aneis || []).forEach(function (a) {
-        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: a.cor, weight: 2.5, fill: false, dashArray: "8, 7", opacity: 0.78, interactive: false, renderer: canvasRenderer })
+        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: a.cor, weight: 4.5, fill: false, dashArray: "12, 9", opacity: 0.95, interactive: false, renderer: canvasRenderer })
           .addTo(aneisLayer);
       });
     });
@@ -275,8 +402,8 @@
   function redesenharRaios(raios, celulas, janelaMin, mostrarDeslocamento) {
     raiosLayer.clearLayers();
     (raios || []).forEach(function (r) {
-      var cor = corPorIdade(r.idade_min, janelaMin);
-      L.circleMarker([r.lat, r.lon], { radius: 2.5, color: cor, weight: 1, fill: true, fillColor: cor, fillOpacity: 0.75, renderer: canvasRenderer })
+      var cor = corPorIdade(r.idade_min);
+      L.circleMarker([r.lat, r.lon], { radius: 3.5, color: "#111827", weight: 0.8, fill: true, fillColor: cor, fillOpacity: 0.95, renderer: canvasRenderer })
         .addTo(raiosLayer);
     });
 
@@ -287,7 +414,7 @@
         var pts = hist.map(function (p) { return [p.lat, p.lon]; })
           .concat((cel.checkpoints || []).map(function (c) { return [c.lat, c.lon]; }));
         if (pts.length > 1) {
-          L.polyline(pts, { color: "#e5e7eb", weight: 1, opacity: 0.45, dashArray: "6, 5", renderer: canvasRenderer }).addTo(celulasLayer);
+          L.polyline(pts, { color: "#374151", weight: 2, opacity: 0.7, dashArray: "6, 5", renderer: canvasRenderer }).addTo(celulasLayer);
         }
         hist.forEach(function (p, i) {
           var atual = (i === hist.length - 1);
@@ -304,7 +431,7 @@
         });
         (cel.checkpoints || []).forEach(function (c, idx) {
           var op = Math.max(0.75 - idx * 0.18, 0.2);
-          L.circleMarker([c.lat, c.lon], { radius: 3, color: "#e5e7eb", weight: 1, fill: true, fillColor: "#e5e7eb", fillOpacity: op, opacity: op, renderer: canvasRenderer })
+          L.circleMarker([c.lat, c.lon], { radius: 3.5, color: "#374151", weight: 1, fill: true, fillColor: "#374151", fillOpacity: op, opacity: op, renderer: canvasRenderer })
             .bindTooltip("Célula #" + cel.id + " — alcance estimado em +" + c.min + " min")
             .addTo(celulasLayer);
         });
@@ -319,7 +446,10 @@
         '<span>' + a.km + ' km</span></div>';
     }).join("");
     var html = '<div style="font-weight:700; color:#3fc2c2; margin-bottom:3px;">Status da unidade</div>' +
-      '<div>🔴 Alto — raio a menos de 30 km</div><div>🟡 Médio — raio a menos de 50 km</div><div>🟢 Sem raios próximos</div>';
+      '<div>🔴 Alto — raio a menos de 30 km</div><div>🟡 Médio — raio a menos de 50 km</div><div>🟢 Sem raios próximos</div>' +
+      '<div style="font-weight:700; color:#3fc2c2; margin:6px 0 2px;">⚡ Idade do raio</div>' +
+      '<div><span style="color:#ef1c1c;">●</span> 0–5 min &nbsp;<span style="color:#f97316;">●</span> 5–10 min</div>' +
+      '<div><span style="color:#facc15;">●</span> 10–15 min &nbsp;<span style="color:#22c55e;">●</span> 15–20 min</div>';
     if (itens) html += '<div style="font-weight:700; color:#3fc2c2; margin:6px 0 2px;">Anéis de distância</div>' + itens;
     document.getElementById("legenda-mapa").innerHTML = html;
   }

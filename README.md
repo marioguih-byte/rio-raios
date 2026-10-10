@@ -27,6 +27,28 @@ vezes sumirem do mapa).
 `streamlit_app.py`, mantendo essa mesma estrutura de pastas — sem ela o
 mapa não carrega.
 
+## Novidades desta versão
+
+- **Raios por idade:** vermelho 0–5 min · laranja 5–10 · amarelo 10–15 · verde
+  15–20, com legenda no mapa. O mapa agora mostra 20 min de raios; os
+  **alertas e o rastreio de células continuam usando a janela de 15 min**
+  de antes, então a sensibilidade dos alertas não mudou.
+- **Anéis de distância** das unidades mais grossos.
+- **Mapa de fundo:** OpenStreetMap (padrão) e Satélite (Esri), no controle de
+  camadas do canto superior direito do mapa.
+- **GOES-East** (infravermelho limpo, banda 13, via NASA GIBS) ligado por
+  padrão como camada sobreposta; dá pra desligar no mesmo controle.
+- **Pop-up da unidade** (clique no marcador): rajada de vento e precipitação
+  horárias do Open-Meteo para **ECMWF, ICON e GFS** (botões Hoje/Amanhã, tabela
+  de máximo/acumulado e dois gráficos). A consulta é feita pelo navegador só
+  quando a unidade é clicada e fica em cache por 30 min.
+- **Boletins WhatsApp:** seção no fim da página que usa o `boletins_bo.py`
+  (o mesmo script de boletins, sem alterações): ensemble ECMWF+ICON+GFS,
+  filtro por nome, nº de dias, download consolidado (.txt) e um .txt por
+  unidade (.zip). A geração roda em segundo plano, sem travar o mapa.
+  **O arquivo `boletins_bo.py` precisa subir pro GitHub junto com o
+  `streamlit_app.py`.**
+
 ## Cores dos anéis
 
 Ajustadas pra bater com o exemplo que você mandou: 30 km azul, 50 km

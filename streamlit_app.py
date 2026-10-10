@@ -7,9 +7,11 @@ import io
 import math
 import os
 import re
+import threading
 import time
 import unicodedata
 import xml.etree.ElementTree as ET
+import zipfile
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
@@ -20,6 +22,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+import boletins_bo  # script de boletins (WhatsApp), incorporado sem alterações
 
 st.set_page_config(page_title="BlueOcean — Monitor de Raios", layout="wide", page_icon="⚡")
 
@@ -165,6 +169,10 @@ RAIOS_ALERTA_KM = [(30, "#3b82f6"), (50, "#22c55e"), (100, "#f97316"), (200, "#e
 # Limite apenas para a visualização no navegador. Os cálculos de alerta
 # continuam usando TODOS os raios disponíveis na janela selecionada.
 MAX_RAIOS_NO_MAPA = 5000
+
+# Janela usada nos alertas e no rastreio de células (mantida em 15 min).
+# O mapa mostra 20 min de raios, mas isso não muda a sensibilidade dos alertas.
+JANELA_ALERTA_MIN = 15
 
 GLM_BUCKET = "noaa-goes19"
 GLM_BASE_URL = f"https://{GLM_BUCKET}.s3.amazonaws.com"
@@ -557,6 +565,7 @@ with st.sidebar:
 
     st.subheader("📁 Unidades monitoradas")
     df_stations = pd.DataFrame(ESTACOES_PADRAO)
+    planilha_custom = False
     st.caption(f"{len(df_stations)} unidades já cadastradas no app.")
     with st.expander("Usar outra planilha (opcional)"):
         arquivo_estacoes = st.file_uploader("Envie um .xlsx (colunas: estacao, lat, lon)", type=["xlsx"])
@@ -566,10 +575,11 @@ with st.sidebar:
             else:
                 df_custom.columns = ["estacao", "lat", "lon"]
                 df_stations = df_custom
+                planilha_custom = True
                 st.success(f"Usando {len(df_stations)} estações da planilha enviada.")
 
     st.subheader("⚡ Raios ao vivo (GLM/GOES-19)")
-    raios_minutos = 15
+    raios_minutos = 20  # janela exibida no mapa (cores: 0–5 · 5–10 · 10–15 · 15–20 min)
     intervalo_raios_seg = 120
     st.caption("🔄 Atualização automática: a cada 2 minutos")
     st.caption("🔊 O som e o pop-up automático de alerta ficam sempre ativos.")
@@ -684,19 +694,24 @@ def _renderizar_mapa_ao_vivo():
         erro = str(e)
         st.session_state.ultimo_erro_raios = erro
 
-    if mostrar_deslocamento and not raios_df.empty:
-        grupos = clusterizar_raios(raios_df)
+    raios_alerta = raios_df
+    if not raios_df.empty:
+        corte_alerta = datetime.now(timezone.utc) - timedelta(minutes=JANELA_ALERTA_MIN)
+        raios_alerta = raios_df[raios_df["time"] >= corte_alerta]
+
+    if mostrar_deslocamento and not raios_alerta.empty:
+        grupos = clusterizar_raios(raios_alerta)
         agora_ts = time.time()
         celulas = atualizar_celulas_raio(grupos, agora_ts)
         for cel in celulas:
             traj = calcular_trajetoria_celula(cel)
             if traj is not None: celulas_com_trajetoria.append({**cel, "trajetoria": traj})
 
-    df_status = calcular_status_estacoes(df_stations, raios_df)
+    df_status = calcular_status_estacoes(df_stations, raios_alerta)
     st.session_state["_fragment_df_status"] = df_status
 
     estacoes_novas = []
-    if not raios_df.empty:
+    if not raios_alerta.empty:
         notificacoes_desta_rodada = []
         agora_ts = time.time()
         for _, est in df_status.iterrows():
@@ -866,3 +881,95 @@ with col_pdf:
     pdf_bytes = gerar_boletim_pdf_bytes(df_status_pdf, st.session_state.alertas_raio_ativos, meteorologista_nome=meteorologista)
     agora_arquivo = utc_para_brasilia(datetime.now(timezone.utc)).strftime("%Y%m%d_%H%M")
     st.download_button("📄 Baixar boletim de raios em PDF", data=pdf_bytes, file_name=f"boletim_raios_{agora_arquivo}.pdf", mime="application/pdf", use_container_width=True)
+
+# ======================================================================
+# BOLETINS DE PREVISÃO (formato WhatsApp)
+# Usa o script boletins_bo.py exatamente como foi enviado (funções
+# baixar / consenso / boletim_unidade etc. sem alterações). A geração roda
+# numa thread em segundo plano: não trava o mapa nem é interrompida pelas
+# atualizações automáticas dos raios.
+# ======================================================================
+def _worker_boletins(estado, unidades, dias):
+    total = len(unidades)
+    for i, (nome, (lat, lon)) in enumerate(unidades.items(), 1):
+        estado["atual"] = nome
+        try:
+            estado["resultados"][nome] = boletins_bo.boletim_unidade(nome, lat, lon, dias)
+        except Exception as e:
+            estado["erros"].append((nome, str(e)))
+        estado["feitos"] = i
+        time.sleep(0.3)
+    estado["rodando"] = False
+
+
+if planilha_custom:
+    unidades_boletim = {str(r.estacao): (float(r.lat), float(r.lon)) for r in df_stations.itertuples()}
+else:
+    unidades_boletim = dict(boletins_bo.UNIDADES)
+
+_estado_boletins = st.session_state.get("boletins_estado")
+_boletins_rodando = bool(_estado_boletins and _estado_boletins["rodando"])
+
+
+def _secao_boletins(unidades_base):
+    st.subheader("📨 Boletins de previsão (WhatsApp)")
+    st.caption("ENSEMBLE (média consenso) entre ECMWF, ICON e GFS do Open-Meteo — mesmo formato do script de boletins.")
+
+    estado = st.session_state.get("boletins_estado")
+    rodando = bool(estado and estado["rodando"])
+
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        filtro = st.text_input("Filtro (só unidades cujo nome contém…)", key="bol_filtro", placeholder="ex.: Macaé", disabled=rodando)
+    with c2:
+        dias = st.number_input("Dias de previsão", min_value=1, max_value=7, value=boletins_bo.DIAS_PREVISAO, key="bol_dias", disabled=rodando)
+
+    unidades = {n: c for n, c in unidades_base.items() if not filtro or filtro.lower() in n.lower()}
+    st.caption(f"{len(unidades)} unidade(s) selecionada(s).")
+
+    if st.button(f"📨 Gerar boletins ({len(unidades)})", key="bol_gerar", type="primary", disabled=(not unidades) or rodando):
+        novo = {"rodando": True, "resultados": {}, "erros": [], "feitos": 0, "total": len(unidades), "atual": "",
+                "data": utc_para_brasilia(datetime.now(timezone.utc)).strftime("%Y%m%d")}
+        st.session_state["boletins_estado"] = novo
+        threading.Thread(target=_worker_boletins, args=(novo, unidades, int(dias)), daemon=True).start()
+        st.rerun()
+
+    if not estado: return
+
+    if rodando:
+        st.progress(min(estado["feitos"] / max(estado["total"], 1), 1.0),
+                    text=f"[{estado['feitos']}/{estado['total']}] {estado['atual']}")
+        return
+
+    resultados, erros = estado["resultados"], estado["erros"]
+    for nome, msg in erros: st.error(f"ERRO em {nome}: {msg}")
+    if not resultados: return
+
+    consolidado = "\n\n".join(resultados.values())
+    nome_consolidado = f"boletins_{estado['data']}.txt"
+    buf_zip = io.BytesIO()
+    with zipfile.ZipFile(buf_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+        for nome, txt in resultados.items(): zf.writestr(f"{boletins_bo.slug(nome)}.txt", txt)
+        zf.writestr(nome_consolidado, consolidado)
+
+    d1, d2 = st.columns(2)
+    with d1:
+        st.download_button("⬇️ Arquivo consolidado (.txt)", data=consolidado.encode("utf-8"), file_name=nome_consolidado, mime="text/plain", key="bol_dl_txt", use_container_width=True)
+    with d2:
+        st.download_button("⬇️ Um .txt por unidade (.zip)", data=buf_zip.getvalue(), file_name=f"boletins_{estado['data']}.zip", mime="application/zip", key="bol_dl_zip", use_container_width=True)
+
+    escolha = st.selectbox("Ver boletim da unidade", list(resultados), key="bol_ver")
+    st.code(resultados[escolha], language=None)
+
+
+# Fragmento próprio: interagir com os boletins não reconstrói o mapa. Enquanto
+# a geração roda, ele se atualiza sozinho a cada 2 s pra mostrar o progresso e,
+# quando termina, faz um rerun completo pra parar o auto-refresh.
+def _boletins_fragmento(unidades_base):
+    _secao_boletins(unidades_base)
+    est = st.session_state.get("boletins_estado")
+    if _boletins_rodando and est is not None and not est["rodando"]:
+        st.rerun()
+
+st.divider()
+st.fragment(run_every=2 if _boletins_rodando else None)(_boletins_fragmento)(unidades_boletim)
