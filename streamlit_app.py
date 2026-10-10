@@ -574,7 +574,6 @@ with st.sidebar:
     arquivo_som = st.file_uploader("Trocar o som de alerta (opcional)", type=["mp3", "wav", "ogg", "m4a"])
     tamanho_raio = st.slider("Tamanho das bolinhas de raio", 2.0, 16.0, 6.5, 0.5)
     mostrar_deslocamento = st.checkbox("Mostrar deslocamento das células de tempestade", value=True)
-    st.caption("🔄 Só os raios (pontos, células e alertas) atualizam sozinhos — o mapa em si (zoom, posição, pop-ups abertos) não é recarregado.")
 
     st.subheader("📏 Anéis de distância no mapa")
     mostrar_aneis = st.checkbox("Mostrar anéis de distância ao redor das unidades", value=True)

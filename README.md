@@ -49,6 +49,16 @@ mapa não carrega.
   **O arquivo `boletins_bo.py` precisa subir pro GitHub junto com o
   `streamlit_app.py`.**
 
+## Ajustes (rodada atual)
+
+- **Mapa:** as demais regiões voltaram a aparecer (levemente esmaecidas fora do Brasil); a vista
+  inicial segue focada no Brasil.
+- **Raios fora do Brasil não são mostrados** (exceção: raios a até ~55 km de uma unidade, pra um
+  raio no mar perto de uma unidade litorânea não sumir do mapa).
+- **Deslocamento das células** de volta ao estilo original: ✕ por posição (verde = mais antiga →
+  amarelo → vermelho = atual) ligados por linha tracejada até os pontos previstos (+30/60/90 min).
+- Removido o texto "Só os raios ... atualizam sozinhos" da barra lateral.
+
 ## Ajustes mais recentes
 
 - **Contorno das UFs em todo o Brasil** (inclui o limite externo) e **mapa só do Brasil**:

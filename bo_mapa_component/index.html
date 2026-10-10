@@ -49,13 +49,8 @@
   #legenda-mapa.aberta #legenda-corpo { display: block; }
 
   /* ---------- deslocamento das células ---------- */
-  .cel-x-icon, .cel-seta-icon { background: transparent !important; border: none !important; }
-  .cel-x { width: 24px; height: 24px; border-radius: 50%; background: #ef4444; border: 2.5px solid #fff; color: #fff;
-    font: 900 13px/19px 'Segoe UI', Arial, sans-serif; text-align: center; box-shadow: 0 1px 6px rgba(0,0,0,0.6); }
-  .cel-seta { font-size: 19px; line-height: 19px; text-align: center; color: #111827; text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 5px #fff; }
-  .leaflet-tooltip.cel-tip { background: rgba(17,24,39,0.94); color: #fff; border: 1px solid #64748b; border-radius: 10px;
-    padding: 2px 8px; font: 600 11px 'Segoe UI', sans-serif; box-shadow: 0 1px 5px rgba(0,0,0,0.45); }
-  .leaflet-tooltip.cel-tip::before { display: none; }
+  .cel-x-icon { background: transparent !important; border: none !important; }
+  .cel-x-icon svg { display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.55)); }
 
   .leaflet-control-layers { background: rgba(15,15,20,0.9) !important; color: #e5e7eb; border: 1px solid #374151 !important;
     font: 12px 'Segoe UI', sans-serif; }
@@ -133,6 +128,40 @@
   var audio = null;
   var audioSrcAtual = null;
   var primeiraRenderizacao = true;
+
+  // Só aparecem raios dentro do Brasil. Exceção: raios a até ~55 km de uma unidade
+  // monitorada (pra um raio no mar perto de uma unidade litorânea, que gera alerta, não sumir).
+  var BR_BBOX = BR_ANEIS.map(function (r) {
+    var a = 999, b = -999, c = 999, d = -999;
+    r.forEach(function (p) { if (p[0] < a) a = p[0]; if (p[0] > b) b = p[0]; if (p[1] < c) c = p[1]; if (p[1] > d) d = p[1]; });
+    return [a, b, c, d];
+  });
+  function dentroDoRing(lat, lon, ring) {
+    var dentro = false;
+    for (var i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      var xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+      if (((yi > lat) !== (yj > lat)) && (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi)) dentro = !dentro;
+    }
+    return dentro;
+  }
+  function noBrasil(lat, lon) {
+    for (var k = 0; k < BR_ANEIS.length; k++) {
+      var bx = BR_BBOX[k];
+      if (lon < bx[0] || lon > bx[1] || lat < bx[2] || lat > bx[3]) continue;
+      if (dentroDoRing(lat, lon, BR_ANEIS[k])) return true;
+    }
+    return false;
+  }
+  function pertoDeUnidade(lat, lon) {
+    for (var nome in coordsPorNome) {
+      var c = coordsPorNome[nome];
+      if (Math.abs(c.lat - lat) > 0.5 || Math.abs(c.lon - lon) > 0.6) continue;
+      var dl = (c.lat - lat) * 111, dn = (c.lon - lon) * 111 * Math.cos(lat * Math.PI / 180);
+      if (Math.sqrt(dl * dl + dn * dn) <= 55) return true;
+    }
+    return false;
+  }
+  function visivel(lat, lon) { return noBrasil(lat, lon) || pertoDeUnidade(lat, lon); }
   var canvasRenderer = L.canvas({ padding: 0.1 });
 
   function destravarSom() {
@@ -447,16 +476,16 @@
 
     var bb = { lat_min: -34.0, lat_max: 5.5, lon_min: -74.5, lon_max: -32.0 };
     map.fitBounds([[bb.lat_min, bb.lon_min], [bb.lat_max, bb.lon_max]]);
-    map.setMaxBounds([[bb.lat_min - 1.5, bb.lon_min - 1.5], [bb.lat_max + 1.5, bb.lon_max + 1.5]]);
+    map.setMaxBounds([[bb.lat_min - 8, bb.lon_min - 8], [bb.lat_max + 8, bb.lon_max + 8]]);
 
-    // Só o Brasil: tudo fora do território fica coberto por uma máscara escura.
+    // Foco no Brasil: o resto do mapa continua visível, só levemente esmaecido fora do território.
     map.createPane("mascaraBR");
     var paneMasc = map.getPane("mascaraBR");
     paneMasc.style.zIndex = 260; paneMasc.style.pointerEvents = "none";
     var mundo = [[-85, -181], [-85, 181], [85, 181], [85, -181]];
     var buracos = BR_ANEIS.map(function (r) { return r.map(function (p) { return [p[1], p[0]]; }); });
     L.polygon([mundo].concat(buracos), { pane: "mascaraBR", renderer: L.svg({ pane: "mascaraBR" }), stroke: false,
-      fillColor: "#0b0f16", fillOpacity: 0.97, interactive: false }).addTo(map);
+      fillColor: "#0b0f16", fillOpacity: 0.28, interactive: false }).addTo(map);
 
     if (!map.getPane("markerPane")) { map.createPane("markerPane"); }
     map.getPane("markerPane").style.zIndex = 650;
@@ -562,6 +591,7 @@
   function redesenharRaios(raios, celulas, janelaMin, mostrarDeslocamento, tamanho) {
     raiosLayer.clearLayers();
     (raios || []).forEach(function (r) {
+      if (!visivel(r.lat, r.lon)) return;
       var cor = corPorIdade(r.idade_min);
       L.circleMarker([r.lat, r.lon], { radius: tamanho || 6.5, color: "#111827", weight: 1.2, fill: true, fillColor: cor, fillOpacity: 0.95, renderer: canvasRenderer })
         .addTo(raiosLayer);
@@ -569,66 +599,59 @@
 
     celulasLayer.clearLayers();
     if (mostrarDeslocamento) {
-      (celulas || []).forEach(function (cel) { desenharCelula(cel); });
+      (celulas || []).forEach(function (cel) {
+        var h = cel.historico || [];
+        if (h.length && visivel(h[h.length - 1].lat, h[h.length - 1].lon)) desenharCelula(cel);
+      });
     }
   }
 
   // ---------------- deslocamento das células de tempestade ----------------
-  // Uma linha de trajetória: trecho já percorrido (contínuo, mais forte quanto
-  // mais recente) + trecho previsto (tracejado) com marcas de +30/+60/+90 min e
-  // seta no fim. A posição atual é um ✕ vermelho com etiqueta de velocidade e rumo.
-  var CASING = "#ffffff", NUCLEO = "#111827";
-  var SETAS_RUMO = { N: "↑", NE: "↗", E: "→", SE: "↘", S: "↓", SW: "↙", W: "←", NW: "↖" };
-
-  function rumoGraus(a, b) {
-    var r = Math.PI / 180, dl = (b.lon - a.lon) * r, la1 = a.lat * r, la2 = b.lat * r;
-    var y = Math.sin(dl) * Math.cos(la2), x = Math.cos(la1) * Math.sin(la2) - Math.sin(la1) * Math.cos(la2) * Math.cos(dl);
-    return (Math.atan2(y, x) / r + 360) % 360;
+  // Um ✕ por posição da célula (verde = mais antiga → amarelo → vermelho = atual) ligados
+  // por uma linha tracejada que segue até os pontos previstos (+30/+60/+90 min).
+  var STOPS_CEL = [[34, 214, 140], [255, 224, 26], [255, 72, 40]];
+  function corCelula(t) {
+    var x = Math.max(0, Math.min(1, t)) * (STOPS_CEL.length - 1), i = Math.min(Math.floor(x), STOPS_CEL.length - 2), f = x - i;
+    var a = STOPS_CEL[i], b = STOPS_CEL[i + 1];
+    return "rgb(" + [0, 1, 2].map(function (k) { return Math.round(a[k] + (b[k] - a[k]) * f); }).join(",") + ")";
+  }
+  function iconeX(cor, tam) {
+    var tr = '<path d="M5 5L19 19M19 5L5 19" fill="none" stroke-linecap="round"';
+    return L.divIcon({
+      className: "cel-x-icon", iconSize: [tam, tam], iconAnchor: [tam / 2, tam / 2],
+      html: '<svg width="' + tam + '" height="' + tam + '" viewBox="0 0 24 24" style="overflow:visible">' +
+        tr + ' stroke="#0f172a" stroke-opacity="0.6" stroke-width="7"/>' +
+        tr + ' stroke="' + cor + '" stroke-width="4.2"/></svg>'
+    });
   }
 
   function desenharCelula(cel) {
     var hist = cel.historico || [];
-    if (hist.length < 2) return;
-    var atual = hist[hist.length - 1];
+    if (!hist.length) return;
     var cps = cel.checkpoints || [];
+    var pts = hist.map(function (p) { return [p.lat, p.lon]; }).concat(cps.map(function (c) { return [c.lat, c.lon]; }));
     var opt = { renderer: canvasRenderer, interactive: false, lineCap: "round", lineJoin: "round" };
 
-    // trecho percorrido
-    for (var i = 1; i < hist.length; i++) {
-      var seg = [[hist[i - 1].lat, hist[i - 1].lon], [hist[i].lat, hist[i].lon]];
-      var f = i / (hist.length - 1);
-      L.polyline(seg, Object.assign({ color: CASING, weight: 7, opacity: 0.85 }, opt)).addTo(celulasLayer);
-      L.polyline(seg, Object.assign({ color: NUCLEO, weight: 3.5, opacity: 0.45 + 0.55 * f }, opt)).addTo(celulasLayer);
+    if (pts.length > 1) {
+      // contorno escuro suave por baixo pra a linha clara aparecer no mapa claro e no satélite
+      L.polyline(pts, Object.assign({ color: "#0f172a", weight: 5, opacity: 0.35 }, opt)).addTo(celulasLayer);
+      L.polyline(pts, Object.assign({ color: "#f8fafc", weight: 2.4, opacity: 0.95, dashArray: "7, 7" }, opt)).addTo(celulasLayer);
     }
-    hist.slice(0, -1).forEach(function (p) {
-      L.circleMarker([p.lat, p.lon], { radius: 3.5, color: NUCLEO, weight: 2, fill: true, fillColor: CASING, fillOpacity: 1,
-        renderer: canvasRenderer, interactive: false }).addTo(celulasLayer);
+
+    cps.forEach(function (c, idx) {
+      var op = Math.max(0.95 - idx * 0.2, 0.35);
+      L.circleMarker([c.lat, c.lon], { radius: 4, color: "#0f172a", weight: 1.5, fill: true, fillColor: "#f8fafc", fillOpacity: op, opacity: op, renderer: canvasRenderer })
+        .bindTooltip("Célula #" + cel.id + " — alcance estimado em +" + c.min + " min")
+        .addTo(celulasLayer);
     });
 
-    // trecho previsto
-    if (cps.length) {
-      var linha = [[atual.lat, atual.lon]].concat(cps.map(function (c) { return [c.lat, c.lon]; }));
-      L.polyline(linha, Object.assign({ color: CASING, weight: 7, opacity: 0.85 }, opt)).addTo(celulasLayer);
-      L.polyline(linha, Object.assign({ color: NUCLEO, weight: 3.5, opacity: 1, dashArray: "9, 8" }, opt)).addTo(celulasLayer);
-      cps.forEach(function (c) {
-        var m = L.circleMarker([c.lat, c.lon], { radius: 5, color: NUCLEO, weight: 2.5, fill: true, fillColor: CASING, fillOpacity: 1,
-          renderer: canvasRenderer, interactive: false });
-        m.bindTooltip("+" + c.min + " min", { permanent: true, direction: "right", offset: [8, 0], className: "cel-tip" });
-        m.addTo(celulasLayer);
-      });
-      var fim = cps[cps.length - 1];
-      var anterior = cps.length > 1 ? cps[cps.length - 2] : atual;
-      L.marker([fim.lat, fim.lon], { interactive: false, icon: L.divIcon({
-        className: "cel-seta-icon", iconSize: [22, 22], iconAnchor: [11, 11],
-        html: '<div class="cel-seta" style="transform:rotate(' + rumoGraus(anterior, fim).toFixed(0) + 'deg);">▲</div>' }) }).addTo(celulasLayer);
-    }
-
-    // posição atual
-    var atualMarker = L.marker([atual.lat, atual.lon], { icon: L.divIcon({
-      className: "cel-x-icon", iconSize: [24, 24], iconAnchor: [12, 12], html: '<div class="cel-x">✕</div>' }) });
-    atualMarker.bindTooltip("#" + cel.id + " " + (SETAS_RUMO[cel.rumo_texto] || "") + " " + Math.round(cel.vel_kmh) + " km/h " + (cel.rumo_texto || ""),
-      { permanent: true, direction: "top", offset: [0, -14], className: "cel-tip" });
-    atualMarker.addTo(celulasLayer);
+    hist.forEach(function (p, i) {
+      var atual = (i === hist.length - 1);
+      var t = hist.length > 1 ? i / (hist.length - 1) : 1;
+      var marc = L.marker([p.lat, p.lon], { icon: iconeX(corCelula(t), atual ? 26 : 19), zIndexOffset: atual ? 500 : 0 });
+      if (atual) marc.bindTooltip("Célula #" + cel.id + " · ~" + Math.round(cel.vel_kmh) + " km/h para " + cel.rumo_texto);
+      marc.addTo(celulasLayer);
+    });
   }
 
   function atualizarLegenda(aneis) {
@@ -644,9 +667,8 @@
       '<div><span style="color:#ef1c1c;">●</span> 0–5 min &nbsp;<span style="color:#f97316;">●</span> 5–10 min</div>' +
       '<div><span style="color:#facc15;">●</span> 10–15 min &nbsp;<span style="color:#22c55e;">●</span> 15–20 min</div>' +
       '<div style="' + tit + '">Deslocamento da célula</div>' +
-      '<div><span style="font-weight:900;">━●</span> trajetória já percorrida</div>' +
-      '<div><span style="font-weight:900;">┅▲</span> trajetória prevista (+30/60/90 min)</div>' +
-      '<div><span style="color:#ef4444; font-weight:900;">✕</span> posição atual da célula</div>';
+      '<div><span style="color:#22d68c; font-weight:900;">✕</span><span style="color:#ffe01a; font-weight:900;">✕</span><span style="color:#ff4828; font-weight:900;">✕</span> posições da célula (antiga → atual)</div>' +
+      '<div><span style="font-weight:900;">┅ ●</span> trajetória e alcance previsto (+30/60/90 min)</div>';
     if (itens) html += '<div style="' + tit + '">Anéis de distância</div>' + itens;
     html += '<div style="' + tit + '">Contorno das UFs</div><div><span style="display:inline-block; width:14px; border-top:2px solid #1e293b; vertical-align:middle;"></span> limite dos estados</div>';
     document.getElementById("legenda-corpo").innerHTML = html;
