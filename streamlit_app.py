@@ -25,7 +25,15 @@ from urllib3.util.retry import Retry
 
 import boletins_bo  # script de boletins (WhatsApp), incorporado sem alterações
 
-st.set_page_config(page_title="BlueOcean — Monitor de Raios", layout="wide", page_icon="⚡")
+def _carregar_icone_pagina():
+    try:
+        from PIL import Image
+        return Image.open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "icone_rio.png"))
+    except Exception:
+        return "⚡"
+
+
+st.set_page_config(page_title="RIO — Rede Inteligente de Observação", layout="wide", page_icon=_carregar_icone_pagina())
 
 EMPRESA = "BlueOcean"
 
@@ -64,6 +72,16 @@ def _som_padrao_data_uri():
     with open(caminho, "rb") as f:
         b64 = base64.b64encode(f.read()).decode("ascii")
     return f"data:audio/wav;base64,{b64}"
+
+
+@st.cache_data(show_spinner=False)
+def _logo_data_uri():
+    """Logo do RIO embutida no HTML do cabeçalho (data URI), sem depender de arquivo estático."""
+    try:
+        with open(os.path.join(APP_DIR, "data", "logo_rio.webp"), "rb") as f:
+            return "data:image/webp;base64," + base64.b64encode(f.read()).decode("ascii")
+    except Exception:
+        return ""
 
 
 def utc_para_brasilia(dt_utc):
@@ -171,8 +189,11 @@ PALETAS_ANEIS = {
     "Padrão (azul · verde · laranja · vermelho)": ["#2f6bff", "#00c853", "#ff8f00", "#ff1744"],
     "Alto contraste (ciano · magenta · branco · lilás)": ["#00e5ff", "#ff2bd6", "#ffffff", "#b388ff"],
     "Vivas (azul · lima · amarelo · rosa)": ["#00b0ff", "#76ff03", "#ffea00", "#ff4081"],
+    "Quentes (amarelo · laranja · vermelho · vinho)": ["#ffd600", "#ff9100", "#ff3d00", "#c2185b"],
+    "Frias (ciano · azul · índigo · roxo)": ["#00e5ff", "#2979ff", "#651fff", "#d500f9"],
+    "Semáforo (verde · amarelo · laranja · vermelho)": ["#00e676", "#ffea00", "#ff9100", "#ff1744"],
+    "Daltonismo (azul · celeste · laranja · vermelhão)": ["#0072b2", "#56b4e9", "#e69f00", "#d55e00"],
 }
-PALETA_PERSONALIZADA = "Personalizada"
 
 # Tamanho (raio em pixels) das bolinhas de raio no mapa.
 TAMANHO_BOLINHA_RAIO = 5.0
@@ -205,12 +226,12 @@ def montar_mensagem_proximidade_raio(nivel_km, nome_estacao, meteorologista):
 def classificar_risco_raio(dist_min_km):
     """Classifica o risco somente quando existe raio dentro de 50 km."""
     if dist_min_km is None or not np.isfinite(dist_min_km):
-        return 0, "Sem raios próximos", "🟢", "#22c55e", None
+        return 0, "Sem raios próximos", "🟢", "#19d36b", None
     if dist_min_km <= 30:
-        return 2, "Alto — raio a menos de 30 km", "🔴", "#ef4444", "vermelho"
+        return 2, "Alto — raio a menos de 30 km", "🔴", "#ff2d44", "vermelho"
     if dist_min_km <= 50:
-        return 1, "Médio — raio a menos de 50 km", "🟡", "#eab308", "amarelo"
-    return 0, "Sem raios próximos", "🟢", "#22c55e", None
+        return 1, "Médio — raio a menos de 50 km", "🟡", "#ffc400", "amarelo"
+    return 0, "Sem raios próximos", "🟢", "#19d36b", None
 
 def calcular_status_estacoes(df_stations, raios_df):
     """Calcula a distância geodésica real até o raio mais próximo da janela atual."""
@@ -530,7 +551,12 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 .bo-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
              padding: 14px 20px; margin-bottom: 6px; border-radius: 14px;
              background: linear-gradient(120deg, #101f2b 0%, #0c151f 100%); border: 1px solid #1f2d3a; }
-.bo-header h1 { margin: 0; font-size: 1.5rem; color: #eaf6f6; }
+.bo-header { gap: 18px; }
+.bo-brand { display: flex; align-items: center; gap: 18px; min-width: 0; }
+.bo-logo { background: #fdfdfd; border-radius: 12px; padding: 6px 12px; height: 74px; width: auto; flex-shrink: 0;
+           box-shadow: 0 2px 10px rgba(0,0,0,0.35); }
+.bo-header h1 { margin: 0; font-size: 1.5rem; color: #eaf6f6; line-height: 1.25; }
+.bo-header h1 .bo-sub { font-weight: 500; font-size: 1.05rem; color: #9db4c0; }
 .bo-header p { margin: 2px 0 0; color: #8b93a3; font-size: 0.85rem; }
 .bo-pill { display: inline-block; padding: 6px 16px; border-radius: 999px; font-weight: 600; font-size: 0.85rem; white-space: nowrap; }
 div[data-testid="stVerticalBlockBorderWrapper"] { border-radius: 12px !important; }
@@ -587,13 +613,8 @@ with st.sidebar:
 
     st.subheader("📏 Anéis de distância no mapa")
     mostrar_aneis = st.checkbox("Mostrar anéis de distância ao redor das unidades", value=True)
-    paleta_escolhida = st.selectbox("Cores dos anéis", list(PALETAS_ANEIS) + [PALETA_PERSONALIZADA], disabled=not mostrar_aneis)
-    if paleta_escolhida == PALETA_PERSONALIZADA:
-        _base_pers = list(PALETAS_ANEIS.values())[0]
-        cores_aneis = [st.color_picker(f"Anel de {km} km", _base_pers[i], key=f"cor_anel_{km}", disabled=not mostrar_aneis)
-                       for i, km in enumerate(DISTANCIAS_ANEIS_KM)]
-    else:
-        cores_aneis = PALETAS_ANEIS[paleta_escolhida]
+    paleta_escolhida = st.selectbox("Cores dos anéis", list(PALETAS_ANEIS), disabled=not mostrar_aneis)
+    cores_aneis = PALETAS_ANEIS[paleta_escolhida]
 
 # --------------------------------------------------------------
 # Som de alerta personalizado: se a pessoa subiu um arquivo, ele vira um
@@ -623,9 +644,12 @@ else:
 
 st.markdown(f"""
 <div class="bo-header">
-  <div>
-    <h1>⚡ BlueOcean — Monitor de Raios</h1>
-    <p>Monitoramento de raios em tempo real (GLM/GOES-19) — by Mário Henrique</p>
+  <div class="bo-brand">
+    <img class="bo-logo" src="{_logo_data_uri()}" alt="RIO" />
+    <div>
+      <h1>RIO — Rede Inteligente de Observação <span class="bo-sub">(de descargas atmosféricas)</span></h1>
+      <p>Monitoramento de raios em tempo real (GLM/GOES-19) — by Mário Henrique</p>
+    </div>
   </div>
   {pill_html}
 </div>

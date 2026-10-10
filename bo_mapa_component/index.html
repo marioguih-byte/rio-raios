@@ -550,7 +550,7 @@
       var texto = (e.dist_min_km === null || e.dist_min_km === undefined)
         ? "sem raios na janela atual" : e.dist_min_km.toFixed(0) + " km do raio mais próximo";
       var marcador = L.circleMarker([e.lat, e.lon], {
-        radius: 7, pane: "markerPane", color: e.risco_color, weight: 2, fill: true, fillColor: e.risco_color, fillOpacity: 0.9, renderer: canvasRenderer,
+        radius: 8, pane: "markerPane", color: "#0b0f16", weight: 1.6, opacity: 0.85, fill: true, fillColor: e.risco_color, fillOpacity: 1, renderer: canvasRenderer,
       });
       // Tooltip somente durante o hover; nunca fica preso após sair do marcador.
       marcador.bindTooltip(e.risco_emoji + " " + e.nome + " — " + texto, {

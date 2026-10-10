@@ -49,6 +49,18 @@ mapa não carrega.
   **O arquivo `boletins_bo.py` precisa subir pro GitHub junto com o
   `streamlit_app.py`.**
 
+## Identidade visual
+
+- Cabeçalho: logo do **RIO** (`data/logo_rio.webp`) e título "RIO — Rede Inteligente de Observação
+  (de descargas atmosféricas)". O ícone da aba do navegador é `data/icone_rio.png`.
+  A pasta `data/` precisa subir pro GitHub junto com o `streamlit_app.py`.
+
+## Ajustes (mais recentes 2)
+
+- **Cores dos anéis:** removida a opção "Personalizada"; agora são 7 paletas prontas (Padrão, Alto
+  contraste, Vivas, Quentes, Frias, Semáforo e Daltonismo).
+- **Pontos das unidades:** cores de status mais vivas (vermelho · amarelo · verde) e borda preta sutil.
+
 ## Ajustes (mais recentes)
 
 - **Anéis:** voltaram às cores azul · verde · laranja · vermelho, em tons mais vivos, com contorno
