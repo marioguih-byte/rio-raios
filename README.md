@@ -54,6 +54,8 @@ mapa não carrega.
 - Todas as unidades agora começam no **dia de hoje em Brasília**. Antes cada unidade usava o dia do
   próprio fuso; a UTE Três Lagoas (MS, 1 h atrás de Brasília) saía com o boletim do dia anterior
   entre 00h e 01h. O formato do boletim não mudou.
+- Depois de gerar, o app confere se todos os boletins começam em hoje (Brasília) e avisa quando alguma
+  unidade sair com outro dia — sinal de que o `boletins_bo.py` em uso é a versão antiga.
 
 ## Removido
 

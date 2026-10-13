@@ -911,7 +911,8 @@ def _secao_boletins(unidades_base):
 
     if st.button(f"📨 Gerar boletins ({len(unidades)})", key="bol_gerar", type="primary", disabled=(not unidades) or rodando):
         novo = {"rodando": True, "resultados": {}, "erros": [], "feitos": 0, "total": len(unidades), "atual": "",
-                "data": utc_para_brasilia(datetime.now(timezone.utc)).strftime("%Y%m%d")}
+                "data": utc_para_brasilia(datetime.now(timezone.utc)).strftime("%Y%m%d"),
+                "hoje_dd_mm": utc_para_brasilia(datetime.now(timezone.utc)).strftime("%d/%m")}
         st.session_state["boletins_estado"] = novo
         threading.Thread(target=_worker_boletins, args=(novo, unidades, int(dias)), daemon=True).start()
         st.rerun()
@@ -926,6 +927,22 @@ def _secao_boletins(unidades_base):
     resultados, erros = estado["resultados"], estado["erros"]
     for nome, msg in erros: st.error(f"ERRO em {nome}: {msg}")
     if not resultados: return
+
+    # Checagem: todos os boletins precisam começar em hoje (Brasília). Se alguma unidade sair com
+    # outro dia, o boletins_bo.py em uso é a versão antiga (ou o app não foi reiniciado).
+    esperado = estado.get("hoje_dd_mm")
+    if esperado:
+        fora = []
+        for nome, txt in resultados.items():
+            m_dia = re.search(r"\*Dia (\d\d/\d\d)\*", txt)
+            if m_dia and m_dia.group(1) != esperado:
+                fora.append(f"{nome} (começa em {m_dia.group(1)})")
+        if fora:
+            st.warning(f"⚠️ Boletins que não começam em hoje ({esperado}, horário de Brasília): " + "; ".join(fora) +
+                       ". Isso indica que o `boletins_bo.py` em uso é a versão antiga: atualize o arquivo no GitHub "
+                       "e reinicie o app (Manage app → Reboot app).")
+        else:
+            st.caption(f"✅ Todos os boletins começam em {esperado} (hoje, horário de Brasília).")
 
     consolidado = "\n\n".join(resultados.values())
     nome_consolidado = f"boletins_{estado['data']}.txt"
