@@ -40,12 +40,13 @@ VARIAVEIS = [
 DIAS_PREVISAO = 4
 LIMITE_RAJADA_ALERTA = 40  # km/h, para o aviso de "Atenção"
 
-# Faixas de cor (limites inferiores do amarelo e do vermelho) - ajuste à vontade
-LIM_CHUVA = (20, 50)      # mm/dia
-LIM_VENTO = (40, 60)      # km/h
-LIM_RAJADA = (40, 70)     # km/h
-LIM_UV = (6, 11)          # índice
-LIM_UMID = (40, 20)       # %, INVERTIDO: abaixo de 40 amarelo, abaixo de 20 vermelho
+# Faixas de cor (limites inferiores do amarelo e do vermelho). As cores usam o valor
+# arredondado, o mesmo que aparece no boletim.
+LIM_CHUVA = (10, 25)      # mm/dia: verde < 10 · amarelo 10–24 · vermelho >= 25
+LIM_VENTO = (40, 60)      # km/h (vento médio)
+LIM_RAJADA = (41, 62)     # km/h: verde 0–40 · amarelo 41–61 · vermelho >= 62
+LIM_UV = (6, 11)          # índice: verde 0–5 · amarelo 6–10 · vermelho >= 11
+LIM_UMID = (40, 12)       # %, INVERTIDO: verde >= 40 · amarelo 12–39 · vermelho < 12
 
 # 40 unidades (nome, (lat, lon))
 UNIDADES = {
@@ -275,12 +276,12 @@ def boletim_unidade(nome, lat, lon, dias=DIAS_PREVISAO):
         linhas += [
             f"*Dia {dd}*",
             f"🌡️ Máxima: {fmt(tmax)}°C Mínima: {fmt(tmin)}°C",
-            f"{cor(ch, LIM_CHUVA)} Chuva: {fmt(ch)} mm/dia{per_chuva}",
+            f"{cor(np.round(ch), LIM_CHUVA)} Chuva: {fmt(ch)} mm/dia{per_chuva}",
             f"⚡ Probabilidade de raios: {r_max:.0f}% ({juntar(sel_r, cap=True)})",
             f"{cor(v_med, LIM_VENTO)} Vento: {fmt(v_med)} km/h {txt_dir}",
-            f"{cor(raj_max, LIM_RAJADA)} Rajadas: {fmt(raj_max)} km/h ({per_raj})",
-            f"{cor(um_med, LIM_UMID, invertido=True)} Umidade: {fmt(um_med)}%",
-            f"{cor(uv_max, LIM_UV)} Índice UV: {fmt(uv_max)}",
+            f"{cor(np.round(raj_max), LIM_RAJADA)} Rajadas: {fmt(raj_max)} km/h ({per_raj})",
+            f"{cor(np.round(um_med), LIM_UMID, invertido=True)} Umidade: {fmt(um_med)}%",
+            f"{cor(np.round(uv_max), LIM_UV)} Índice UV: {fmt(uv_max)}",
             "",
         ]
 
