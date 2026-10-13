@@ -49,6 +49,12 @@ mapa não carrega.
   **O arquivo `boletins_bo.py` precisa subir pro GitHub junto com o
   `streamlit_app.py`.**
 
+## Correção nos boletins
+
+- Todas as unidades agora começam no **dia de hoje em Brasília**. Antes cada unidade usava o dia do
+  próprio fuso; a UTE Três Lagoas (MS, 1 h atrás de Brasília) saía com o boletim do dia anterior
+  entre 00h e 01h. O formato do boletim não mudou.
+
 ## Removido
 
 - Botão "Baixar boletim de raios em PDF" (e a dependência `reportlab`).

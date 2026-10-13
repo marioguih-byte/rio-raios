@@ -19,6 +19,7 @@ import sys
 import time
 import warnings
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 import numpy as np
@@ -105,7 +106,11 @@ def baixar(lat, lon, dias=DIAS_PREVISAO, tentativas=4):
         "hourly": ",".join(VARIAVEIS),
         "models": ",".join(MODELOS),
         "timezone": "auto",
-        "forecast_days": dias,
+        # O Open-Meteo devolve os dias no fuso de cada unidade (ex.: Três Lagoas/MS fica 1 h
+        # atrás de Brasília). Pra todas começarem no MESMO dia (hoje, em Brasília) pedimos
+        # 1 dia de passado e 1 a mais de previsão; o excedente é descartado em boletim_unidade.
+        "past_days": 1,
+        "forecast_days": dias + 1,
         "wind_speed_unit": "kmh",
     }
     for i in range(tentativas):
@@ -220,7 +225,8 @@ def boletim_unidade(nome, lat, lon, dias=DIAS_PREVISAO):
     raios = prob_raios_horaria(consenso(h, "cape"), consenso(h, "lifted_index"),
                                consenso(h, "convective_inhibition"))
 
-    dias_unicos = list(dict.fromkeys(datas))[:dias]
+    hoje_brasilia = datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%Y-%m-%d")
+    dias_unicos = [d for d in dict.fromkeys(datas) if d >= hoje_brasilia][:dias]
     linhas = [f"_*Boletim de previsão do tempo - {nome}*_", ""]
     alerta = None
 
