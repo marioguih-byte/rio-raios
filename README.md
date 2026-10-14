@@ -123,7 +123,7 @@ mapa não carrega.
 ## Ajustes da última rodada
 
 - **Legenda retrátil**, recolhida por padrão (clique em "▸ Legenda" no canto do mapa).
-- **Sem upload de planilha:** o app usa sempre as 40 unidades cadastradas.
+- **Sem upload de planilha:** o app usa sempre as 41 unidades cadastradas.
 - **Anéis:** ficou só a caixa "Mostrar anéis de distância" (30/50/100/200 km sempre juntos).
 - **Divisão de UFs** no mapa (limites entre estados, ligável/desligável no controle de camadas).
 - **Bolinhas de raio maiores.**

@@ -157,6 +157,7 @@ ESTACOES_PADRAO = [
     {"estacao": "UTE Ibirité - UTE IBT", "lat": -19.98858, "lon": -44.09821},
     {"estacao": "UTE Juiz de Fora - UTE JF", "lat": -21.69062, "lon": -43.45672},
     {"estacao": "UTE Três Lagoas - UTE TLG", "lat": -20.7455, "lon": -51.66459},
+    {"estacao": "Unidade de Fertilizantes Nitrogenados III - UFN III", "lat": -20.9859, "lon": -51.8383},
     {"estacao": "Unidade de Tratamento de Gás de Caraguatatuba - UTGCA", "lat": -23.65419, "lon": -45.50121},
     {"estacao": "Refinaria Presidente Bernardes - RPBC", "lat": -23.87333, "lon": -46.42757},
     {"estacao": "UTE Cubatão - UTE CBT", "lat": -23.87573, "lon": -46.43139},

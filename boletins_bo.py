@@ -5,7 +5,7 @@ Gera boletins de previsão do tempo (formato WhatsApp) para as unidades,
 usando Open-Meteo com ENSEMBLE (MÉDIA CONSENSO) entre ECMWF, ICON e GFS.
 
 Uso:
-    python gerar_boletins.py                       # usa as 40 unidades embutidas em UNIDADES
+    python gerar_boletins.py                       # usa as 41 unidades embutidas em UNIDADES
     python gerar_boletins.py --csv unidades.csv    # CSV com colunas: nome,lat,lon
     python gerar_boletins.py --filtro Macaé        # só unidades cujo nome contém o texto
     python gerar_boletins.py --dias 4 --saida boletins
@@ -40,15 +40,14 @@ VARIAVEIS = [
 DIAS_PREVISAO = 4
 LIMITE_RAJADA_ALERTA = 40  # km/h, para o aviso de "Atenção"
 
-# Faixas de cor (limites inferiores do amarelo e do vermelho). As cores usam o valor
-# arredondado, o mesmo que aparece no boletim.
-LIM_CHUVA = (10, 25)      # mm/dia: verde < 10 · amarelo 10–24 · vermelho >= 25
-LIM_VENTO = (40, 60)      # km/h (vento médio)
-LIM_RAJADA = (41, 62)     # km/h: verde 0–40 · amarelo 41–61 · vermelho >= 62
-LIM_UV = (6, 11)          # índice: verde 0–5 · amarelo 6–10 · vermelho >= 11
-LIM_UMID = (40, 12)       # %, INVERTIDO: verde >= 40 · amarelo 12–39 · vermelho < 12
+# Faixas de cor (limites inferiores do amarelo e do vermelho) - ajuste à vontade
+LIM_CHUVA = (20, 50)      # mm/dia
+LIM_VENTO = (40, 60)      # km/h
+LIM_RAJADA = (40, 70)     # km/h
+LIM_UV = (6, 11)          # índice
+LIM_UMID = (40, 20)       # %, INVERTIDO: abaixo de 40 amarelo, abaixo de 20 vermelho
 
-# 40 unidades (nome, (lat, lon))
+# 41 unidades (nome, (lat, lon))
 UNIDADES = {
     "UTE Termocamaçari - UTE TCA": (-12.666868, -38.314687),
     "UTE Termobahia - UTE TBA": (-12.703235, -38.564904),
@@ -67,6 +66,7 @@ UNIDADES = {
     "UTE Ibirité - UTE IBT": (-19.988579, -44.098207),
     "UTE Juiz de Fora - UTE JF": (-21.690619, -43.456720),
     "UTE Três Lagoas - UTE TLG": (-20.745500, -51.664590),
+    "Unidade de Fertilizantes Nitrogenados III - UFN III": (-20.985900, -51.838300),
     "Unidade de Tratamento de Gás de Caraguatatuba - UTGCA": (-23.654191, -45.501209),
     "Refinaria Presidente Bernardes - RPBC": (-23.873326, -46.427572),
     "UTE Cubatão - UTE CBT": (-23.875735, -46.431387),
@@ -276,12 +276,12 @@ def boletim_unidade(nome, lat, lon, dias=DIAS_PREVISAO):
         linhas += [
             f"*Dia {dd}*",
             f"🌡️ Máxima: {fmt(tmax)}°C Mínima: {fmt(tmin)}°C",
-            f"{cor(np.round(ch), LIM_CHUVA)} Chuva: {fmt(ch)} mm/dia{per_chuva}",
+            f"{cor(ch, LIM_CHUVA)} Chuva: {fmt(ch)} mm/dia{per_chuva}",
             f"⚡ Probabilidade de raios: {r_max:.0f}% ({juntar(sel_r, cap=True)})",
             f"{cor(v_med, LIM_VENTO)} Vento: {fmt(v_med)} km/h {txt_dir}",
-            f"{cor(np.round(raj_max), LIM_RAJADA)} Rajadas: {fmt(raj_max)} km/h ({per_raj})",
-            f"{cor(np.round(um_med), LIM_UMID, invertido=True)} Umidade: {fmt(um_med)}%",
-            f"{cor(np.round(uv_max), LIM_UV)} Índice UV: {fmt(uv_max)}",
+            f"{cor(raj_max, LIM_RAJADA)} Rajadas: {fmt(raj_max)} km/h ({per_raj})",
+            f"{cor(um_med, LIM_UMID, invertido=True)} Umidade: {fmt(um_med)}%",
+            f"{cor(uv_max, LIM_UV)} Índice UV: {fmt(uv_max)}",
             "",
         ]
 
