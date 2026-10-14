@@ -196,6 +196,10 @@ PALETAS_ANEIS = {
     "Daltonismo (azul · celeste · laranja · vermelhão)": ["#0072b2", "#56b4e9", "#e69f00", "#d55e00"],
 }
 
+# Espessura (px) do traço colorido dos anéis de distância. O padrão é mais fino que o antigo (4,5);
+# dá pra ajustar na barra lateral. O contorno escuro por baixo acompanha (espessura + 3 px).
+ESPESSURA_ANEIS_PADRAO = 3.0
+
 # Tamanho (raio em pixels) das bolinhas de raio no mapa.
 TAMANHO_BOLINHA_RAIO = 5.0
 
@@ -633,6 +637,8 @@ with st.sidebar:
     mostrar_aneis = st.checkbox("Mostrar anéis de distância ao redor das unidades", value=True)
     paleta_escolhida = st.selectbox("Cores dos anéis", list(PALETAS_ANEIS), disabled=not mostrar_aneis)
     cores_aneis = PALETAS_ANEIS[paleta_escolhida]
+    espessura_aneis = st.slider("Espessura dos anéis (px)", min_value=1.0, max_value=8.0, value=ESPESSURA_ANEIS_PADRAO,
+                                step=0.5, disabled=not mostrar_aneis)
 
 # --------------------------------------------------------------
 # Som de alerta personalizado: se a pessoa subiu um arquivo, ele vira um
@@ -891,7 +897,7 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, status_texto):
         }
         for _, e in df_status.iterrows()
     ]
-    aneis_payload = [{"km": km, "cor": cor} for km, cor in zip(DISTANCIAS_ANEIS_KM, cores_aneis) if mostrar_aneis]
+    aneis_payload = [{"km": km, "cor": cor, "esp": float(espessura_aneis)} for km, cor in zip(DISTANCIAS_ANEIS_KM, cores_aneis) if mostrar_aneis]
     raios_payload = _preparar_payload_raios(raios_df, celulas_com_trajetoria)
 
     _mapa_raios_component(

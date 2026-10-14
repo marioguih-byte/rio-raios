@@ -634,9 +634,11 @@
       (aneis || []).forEach(function (a) {
         // contorno escuro por baixo + traço colorido por cima: o anel aparece no mapa claro,
         // no satélite e por cima das cores do GOES-East
-        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: "#0b1220", weight: 8, fill: false, opacity: 0.6, interactive: false, renderer: canvasRenderer })
+        // espessura vem do Python (slider na barra lateral); o contorno escuro é 3 px mais grosso
+        var esp = (typeof a.esp === "number" && a.esp > 0) ? a.esp : 3;
+        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: "#0b1220", weight: esp + 3, fill: false, opacity: 0.6, interactive: false, renderer: canvasRenderer })
           .addTo(aneisLayer);
-        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: a.cor, weight: 4.5, fill: false, dashArray: "12, 9", opacity: 1, interactive: false, renderer: canvasRenderer })
+        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: a.cor, weight: esp, fill: false, dashArray: "12, 9", opacity: 1, interactive: false, renderer: canvasRenderer })
           .addTo(aneisLayer);
       });
     });
