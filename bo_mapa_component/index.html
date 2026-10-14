@@ -196,6 +196,20 @@
     return true;
   }
 
+  var GOES_TENTATIVAS_MAX = 5;
+  function reTentarTileGoes(ev) {
+    var tile = ev.tile;
+    if (!tile) return;
+    var n = tile._goesTent || 0;
+    if (n >= GOES_TENTATIVAS_MAX) return;
+    tile._goesTent = n + 1;
+    if (!tile._goesSrc) tile._goesSrc = tile.src;
+    setTimeout(function () {
+      if (!tile.parentNode) return;  // o tile já saiu do mapa (zoom/pan): não precisa mais
+      tile.src = tile._goesSrc + "&_r=" + tile._goesTent + "_" + Date.now();
+    }, 700 * (n + 1));
+  }
+
   function corPorIdade(idadeMin) {
     // Vermelho 0–5 min · laranja 5–10 · amarelo 10–15 · verde 15–20.
     if (idadeMin < 5) return "#ef1c1c";
@@ -486,8 +500,18 @@
     });
     goesLayer = L.tileLayer.wms("https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi", {
       layers: "GOES-East_ABI_Band13_Clean_Infrared", format: "image/png", transparent: true, version: "1.1.1",
-      opacity: 0.6, zIndex: 10, attribution: "GOES-East ABI &copy; NOAA/NASA GIBS"
+      opacity: 0.6, zIndex: 10, attribution: "GOES-East ABI &copy; NOAA/NASA GIBS",
+      // O GOES-East IR tem ~2 km/pixel: acima do zoom 8 não há mais detalhe, então os tiles passam a ser
+      // só ampliados (menos requisições pesadas ao GIBS = menos tiles que falham ao dar zoom).
+      maxNativeZoom: 8,
+      // Durante o zoom animado (roda do mouse) não dispara uma enxurrada de requisições a cada nível:
+      // busca os tiles quando o zoom assenta, e mantém uma margem maior de tiles em volta.
+      updateWhenZooming: false, updateWhenIdle: true, keepBuffer: 4
     });
+    // O GIBS (WMS) às vezes falha/demora em tiles soltos, e o Leaflet não tenta de novo: o tile fica
+    // vazio e aparece o mapa-base por baixo (o "retângulo" desconfigurado). Aqui cada tile com erro é
+    // pedido de novo, até GOES_TENTATIVAS_MAX vezes, com espera crescente.
+    goesLayer.on("tileerror", reTentarTileGoes);
 
     fundoOSM.addTo(map);
     goesLayer.addTo(map);
