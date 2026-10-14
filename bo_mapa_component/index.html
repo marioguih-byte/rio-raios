@@ -168,9 +168,32 @@
 
   function destravarSom() {
     if (!audio) return;
-    audio.play().then(function () { audio.pause(); audio.currentTime = 0; }).catch(function () {});
+    // "Destrava" o áudio do navegador com um play() mudo — antes o alarme chegava a soar por um instante.
+    audio.muted = true;
+    audio.play().then(function () { audio.pause(); audio.currentTime = 0; audio.muted = false; })
+                .catch(function () { audio.muted = false; });
     document.removeEventListener("click", destravarSom, true);
     document.removeEventListener("keydown", destravarSom, true);
+  }
+
+  // ----------------------------------------------------------------
+  // Som do alerta: toca UMA vez por alerta novo, identificado por som_alerta_id (vem do Python).
+  // O Streamlit reenvia os últimos dados ao mapa sempre que a largura do componente muda (ex.: ao
+  // retrair/expandir a barra lateral); antes isso repetia o som. Agora um id já tocado é ignorado —
+  // e o último id tocado fica no sessionStorage, então vale mesmo se o iframe for recarregado.
+  // ----------------------------------------------------------------
+  var SOM_ID_KEY = "rio_raios_ultimo_som_id_v1";
+  var ultimoSomTocado = "";
+  try { ultimoSomTocado = sessionStorage.getItem(SOM_ID_KEY) || ""; } catch (e) {}
+
+  function tratarSomAlerta(somId) {
+    if (!somId || somId === ultimoSomTocado) return false;
+    ultimoSomTocado = somId;
+    try { sessionStorage.setItem(SOM_ID_KEY, somId); } catch (e) {}
+    if (!audio) return false;
+    audio.currentTime = 0;
+    audio.play().catch(function () {});
+    return true;
   }
 
   function corPorIdade(idadeMin) {
@@ -716,12 +739,9 @@
       audioSrcAtual = args.som_data_uri;
     }
 
-    // Alerta novo: só toca o som (o aviso em texto aparece no pop-up do Streamlit).
-    // O painel da unidade abre apenas quando a pessoa clica na unidade.
-    if (args.tocar_som && args.estacoes_novas && args.estacoes_novas.length && audio) {
-      audio.currentTime = 0;
-      audio.play().catch(function () {});
-    }
+    // Alerta novo (id diferente do último tocado): só toca o som (o aviso em texto aparece no
+    // pop-up do Streamlit). O painel da unidade abre apenas quando a pessoa clica na unidade.
+    tratarSomAlerta(args.som_alerta_id);
 
     Streamlit.setFrameHeight(650);
   }
