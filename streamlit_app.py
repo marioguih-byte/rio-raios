@@ -157,6 +157,7 @@ ESTACOES_PADRAO = [
     {"estacao": "UTE Ibirité - UTE IBT", "lat": -19.98858, "lon": -44.09821},
     {"estacao": "UTE Juiz de Fora - UTE JF", "lat": -21.69062, "lon": -43.45672},
     {"estacao": "UTE Três Lagoas - UTE TLG", "lat": -20.7455, "lon": -51.66459},
+    {"estacao": "UFN III - Unidade de Fertilizantes Nitrogenados III", "lat": -20.9859, "lon": -51.8383},
     {"estacao": "Unidade de Tratamento de Gás de Caraguatatuba - UTGCA", "lat": -23.65419, "lon": -45.50121},
     {"estacao": "Refinaria Presidente Bernardes - RPBC", "lat": -23.87333, "lon": -46.42757},
     {"estacao": "UTE Cubatão - UTE CBT", "lat": -23.87573, "lon": -46.43139},
@@ -784,15 +785,23 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
         {
             "nome": e["nome"], "estacao": e["estacao"], "lat": e["lat"], "lon": e["lon"],
             "risco_emoji": e["risco_emoji"], "risco_label": e["risco_label"], "risco_color": e["risco_color"],
-            "dist_min_km": e["dist_min_km"], "contatos": e["contatos"],
+            "dist_min_km": e["dist_min_km"], "contatos": e["contatos"], "risco_score": int(e["risco_score"]),
         }
         for _, e in df_status.iterrows()
     ]
     aneis_payload = [{"km": km, "cor": cor} for km, cor in zip(DISTANCIAS_ANEIS_KM, cores_aneis) if mostrar_aneis]
     raios_payload = _preparar_payload_raios(raios_df, celulas_com_trajetoria)
 
-    _mapa_raios_component(
+    # Alertas ativos, pra aba "Alertas" do painel que fica dentro do mapa (usável em tela cheia).
+    alertas_payload = [
+        {"id": a["id"], "quem_recebeu": a.get("quem_recebeu", ""), "copia": montar_texto_copia(a)}
+        for a in st.session_state.alertas_raio_ativos
+    ]
+
+    evento = _mapa_raios_component(
         estacoes=estacoes_payload,
+        alertas=alertas_payload,
+        default=None,
         raios=raios_payload["raios"],
         celulas=raios_payload["celulas"],
         aneis=aneis_payload,
@@ -805,6 +814,23 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
         som_data_uri=som_data_uri,
         key="bo_mapa_raios_live",
     )
+
+    # Ações feitas no painel de dentro do mapa (excluir alerta, "quem recebeu"). Cada ação traz um
+    # "nonce"; o componente continua devolvendo a última ação nas reexecuções, então só processa se for nova.
+    if isinstance(evento, dict) and evento.get("nonce") and evento["nonce"] != st.session_state.get("_nonce_evento_mapa"):
+        st.session_state["_nonce_evento_mapa"] = evento["nonce"]
+        tipo = evento.get("tipo")
+        if tipo == "quem_recebeu":
+            for a in st.session_state.alertas_raio_ativos:
+                if a.get("id") == evento.get("id"):
+                    valor = str(evento.get("valor", ""))[:200]
+                    a["quem_recebeu"] = valor
+                    st.session_state[f"quem_recebeu_{a['id']}"] = valor  # mantém o campo do painel lateral igual
+        elif tipo == "excluir":
+            st.session_state.alertas_raio_ativos = [x for x in st.session_state.alertas_raio_ativos if x.get("id") != evento.get("id")]
+        elif tipo == "limpar":
+            st.session_state.alertas_raio_ativos = []
+        st.rerun()
 
 with col_mapa:
     st.fragment(run_every=intervalo_raios_seg)(_renderizar_mapa_ao_vivo)()

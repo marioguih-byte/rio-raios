@@ -9,6 +9,40 @@
   .leaflet-container { background: #cfd6dc !important; }
   .raio-celula-icon { background: transparent !important; border: none !important; }
 
+  /* ---------- painel "Alertas e riscos" dentro do mapa (funciona também em tela cheia) ---------- */
+  #painel_alertas { display: none; position: absolute; top: 52px; right: 10px; bottom: 34px; width: 410px; max-width: calc(100% - 20px);
+    z-index: 1150; flex-direction: column; background: #1a1d24; color: #e8eaed; border: 1px solid #2a303b; border-radius: 12px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.6); font: 13px 'Segoe UI', Arial, sans-serif; }
+  #painel_alertas.aberto { display: flex; }
+  .al-head { display: flex; justify-content: space-between; align-items: center; padding: 11px 14px 0; font-weight: 700; font-size: 15px; }
+  .al-fechar { cursor: pointer; color: #9aa3b2; padding: 2px 8px; border-radius: 6px; }
+  .al-fechar:hover { background: #2a303b; color: #fff; }
+  .al-tabs { display: flex; gap: 4px; padding: 8px 12px 0; border-bottom: 1px solid #2a303b; }
+  .al-tab { background: none; border: none; border-bottom: 2px solid transparent; color: #9aa3b2; padding: 8px 10px; cursor: pointer; font: 600 12.5px 'Segoe UI', sans-serif; }
+  .al-tab.ativa { color: #fff; border-bottom-color: #ff4b4b; }
+  .al-corpo { overflow-y: auto; padding: 12px; flex: 1; }
+  .al-card { background: #20242d; border: 1px solid #2d3340; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+  .al-tit { font-weight: 700; cursor: pointer; }
+  .al-sub { font-size: 12px; margin-top: 2px; }
+  .al-contatos { margin-top: 8px; padding: 8px 10px; background: #111827; border: 1px solid #263244; border-radius: 8px; font-size: 12px; line-height: 1.6; }
+  .al-acoes { display: flex; gap: 8px; margin-top: 8px; }
+  .al-acoes button, .al-limpar { background: #2a303b; color: #e5e7eb; border: 1px solid #374151; border-radius: 6px; padding: 4px 10px;
+    font: 12px 'Segoe UI', sans-serif; cursor: pointer; }
+  .al-acoes button:hover, .al-limpar:hover { background: #374151; }
+  .al-limpar { width: 100%; margin-bottom: 10px; padding: 6px 10px; }
+  .al-input { width: 100%; box-sizing: border-box; background: #11151c; color: #fff; border: 1px solid #374151; border-radius: 6px; padding: 6px 8px; margin: 4px 0 8px; font: 12.5px 'Segoe UI', sans-serif; }
+  .al-pre { white-space: pre-wrap; word-break: break-word; background: #11151c; border: 1px solid #2a303b; border-radius: 6px; padding: 8px 10px;
+    font: 11.5px/1.5 Consolas, monospace; margin: 0; }
+  .al-vazio { color: #9aa3b2; padding: 8px 2px; }
+  .leaflet-bar a.bo-btn-alertas { position: relative; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+  .al-badge { position: absolute; top: -6px; right: -6px; min-width: 17px; height: 17px; padding: 0 4px; box-sizing: border-box; border-radius: 9px;
+    background: #ff1744; color: #fff; font: 700 10.5px/17px 'Segoe UI', sans-serif; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.5); }
+  @supports selector(::-webkit-scrollbar) {
+    .al-corpo::-webkit-scrollbar { width: 16px; }
+    .al-corpo::-webkit-scrollbar-track { background: #11151c; border-radius: 8px; }
+    .al-corpo::-webkit-scrollbar-thumb { background: #3fc2c2; border: 3px solid #11151c; border-radius: 10px; }
+  }
+  @supports not selector(::-webkit-scrollbar) { .al-corpo { scrollbar-width: auto; scrollbar-color: #3fc2c2 #11151c; } }
   #toast-mapa { display: none; position: absolute; z-index: 1300; left: 50%; bottom: 56px; transform: translateX(-50%);
     background: rgba(17,24,39,0.95); color: #fff; padding: 7px 14px; border-radius: 8px; font: 12.5px 'Segoe UI', sans-serif; }
   .leaflet-bar a.bo-tela-cheia { display: flex; align-items: center; justify-content: center; }
@@ -76,6 +110,15 @@
 <body>
 <div id="map">
   <div id="raios-status-bar"></div>
+  <div id="painel_alertas">
+    <div class="al-head"><span>🚨 Alertas e riscos</span><span class="al-fechar" id="al_fechar" title="Fechar">✕</span></div>
+    <div class="al-tabs">
+      <button class="al-tab ativa" id="al_tab_risco" data-aba="risco">🚨 Risco</button>
+      <button class="al-tab" id="al_tab_alertas" data-aba="alertas">📋 Alertas</button>
+    </div>
+    <div class="al-corpo" id="al_corpo_risco"></div>
+    <div class="al-corpo" id="al_corpo_alertas" style="display:none;"></div>
+  </div>
   <div id="goes-status"></div>
   <div id="toast-mapa"></div>
   <div id="busca-unidade-bar">
@@ -121,6 +164,7 @@
   var Streamlit = {
     setComponentReady: function () { enviarParaStreamlit("streamlit:componentReady", { apiVersion: 1 }); },
     setFrameHeight: function (height) { enviarParaStreamlit("streamlit:setFrameHeight", { height: height }); },
+    setComponentValue: function (value) { enviarParaStreamlit("streamlit:setComponentValue", { value: value, dataType: "json" }); },
     RENDER_EVENT: "streamlit:render",
     events: {
       addEventListener: function (type, callback) {
@@ -467,6 +511,153 @@
     carregarPrevisao(chave);
   }
 
+  // ----------------------------------------------------------------
+  // Painel "Alertas e riscos" dentro do mapa: as mesmas abas do painel lateral do Streamlit, pra poderem
+  // ser usadas em tela cheia. Excluir alerta e "quem recebeu" voltam pro Streamlit via setComponentValue.
+  // ----------------------------------------------------------------
+  var painelAlertasAberto = false;
+  var abaAtiva = "risco";
+  var contatosAbertos = {};
+  var ultimaChaveAlertas = null;
+  var dadosAlertas = { estacoes: [], alertas: [] };
+  var contadorEventos = 0;
+  var botaoAlertasEl = null;
+
+  function enviarEvento(ev) { ev.nonce = Date.now() + "-" + (++contadorEventos); Streamlit.setComponentValue(ev); }
+
+  function unidadesEmRisco() {
+    return (dadosAlertas.estacoes || []).filter(function (e) { return (e.risco_score || 0) > 0; }).sort(function (a, b) {
+      return ((b.risco_score || 0) - (a.risco_score || 0)) || (((a.dist_min_km === null || a.dist_min_km === undefined) ? 9999 : a.dist_min_km) - ((b.dist_min_km === null || b.dist_min_km === undefined) ? 9999 : b.dist_min_km));
+    });
+  }
+
+  function contatosHtmlLista(c) {
+    if (!c || !c.numeros || !c.numeros.length) return '<div class="al-contatos" style="color:#9ca3af;">Nenhum contato cadastrado para esta unidade.</div>';
+    var h = '<div class="al-contatos"><b style="color:#3fc2c2;">📞 Contatos — ' + esc(c.nome) + '</b><br/>';
+    c.numeros.forEach(function (n) { h += esc(n.numero) + (n.descricao ? ' <i style="color:#8b93a3;">(' + esc(n.descricao) + ')</i>' : '') + '<br/>'; });
+    return h + '</div>';
+  }
+
+  function renderAbaRisco(risco) {
+    var el = document.getElementById("al_corpo_risco");
+    if (!risco.length) { el.innerHTML = '<div class="al-vazio">✅ Nenhuma unidade em alerta amarelo/vermelho no momento.</div>'; return; }
+    el.innerHTML = risco.map(function (e) {
+      return '<div class="al-card" data-est="' + esc(e.estacao) + '" data-nome="' + esc(e.nome) + '">' +
+        '<div class="al-tit" data-acao="contatos">' + esc(e.risco_emoji) + ' ' + esc(e.nome) + '</div>' +
+        '<div class="al-sub" style="color:' + esc(e.risco_color) + ';">' + esc(e.risco_label) + '</div>' +
+        (contatosAbertos[e.estacao] ? contatosHtmlLista(e.contatos) : '') +
+        '<div class="al-acoes"><button data-acao="contatos">📞 Contatos</button><button data-acao="ver">📍 Ver no mapa</button></div></div>';
+    }).join("");
+  }
+
+  function renderAbaAlertas(alertas) {
+    var chave = JSON.stringify(alertas);
+    var ativo = document.activeElement;
+    var editando = ativo && ativo.classList && ativo.classList.contains("al-input");
+    if (chave === ultimaChaveAlertas || editando) return;
+    ultimaChaveAlertas = chave;
+    var el = document.getElementById("al_corpo_alertas");
+    if (!alertas.length) { el.innerHTML = '<div class="al-vazio">✅ Nenhum alerta de raio próximo ativo.</div>'; return; }
+    el.innerHTML = '<button class="al-limpar" data-acao="limpar">🗑️ Limpar todos os alertas</button>' + alertas.map(function (a) {
+      return '<div class="al-card" data-id="' + esc(a.id) + '">' +
+        '<label style="font-size:12px;color:#c4cbd6;">Quem recebeu o alerta:</label>' +
+        '<input class="al-input" data-acao="quem" value="' + esc(a.quem_recebeu || "") + '" placeholder="nome de quem confirmou o recebimento" />' +
+        '<pre class="al-pre">' + esc(a.copia) + '</pre>' +
+        '<div class="al-acoes"><button data-acao="copiar">📋 Copiar</button><button data-acao="excluir">✕ Excluir</button></div></div>';
+    }).join("");
+  }
+
+  function atualizarBadgeAlertas(risco) {
+    if (!botaoAlertasEl) return;
+    var b = botaoAlertasEl.querySelector(".al-badge");
+    if (!risco.length) { b.style.display = "none"; return; }
+    var vermelho = risco.some(function (e) { return (e.risco_score || 0) >= 2; });
+    b.style.display = "block"; b.textContent = risco.length; b.style.background = vermelho ? "#ff1744" : "#ffc400"; b.style.color = vermelho ? "#fff" : "#111";
+  }
+
+  function renderPainelAlertas() {
+    var risco = unidadesEmRisco(), alertas = dadosAlertas.alertas || [];
+    document.getElementById("al_tab_risco").textContent = "🚨 Risco (" + risco.length + ")";
+    document.getElementById("al_tab_alertas").textContent = "📋 Alertas (" + alertas.length + ")";
+    atualizarBadgeAlertas(risco);
+    if (!painelAlertasAberto) return;
+    renderAbaRisco(risco);
+    renderAbaAlertas(alertas);
+  }
+
+  function mostrarAba(aba) {
+    abaAtiva = aba;
+    document.getElementById("al_tab_risco").classList.toggle("ativa", aba === "risco");
+    document.getElementById("al_tab_alertas").classList.toggle("ativa", aba === "alertas");
+    document.getElementById("al_corpo_risco").style.display = aba === "risco" ? "block" : "none";
+    document.getElementById("al_corpo_alertas").style.display = aba === "alertas" ? "block" : "none";
+  }
+
+  function abrirPainelAlertas(abrir) {
+    painelAlertasAberto = abrir;
+    document.getElementById("painel_alertas").classList.toggle("aberto", abrir);
+    if (abrir) { ultimaChaveAlertas = null; mostrarAba(abaAtiva); renderPainelAlertas(); }
+  }
+
+  function copiarTexto(txt, botao) {
+    function feito() { var o = botao.textContent; botao.textContent = "✔ Copiado"; setTimeout(function () { botao.textContent = o; }, 1500); }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(feito).catch(function () { copiarFallback(txt); feito(); });
+    } else { copiarFallback(txt); feito(); }
+  }
+  function copiarFallback(txt) {
+    var t = document.createElement("textarea"); t.value = txt; t.style.position = "fixed"; t.style.opacity = "0";
+    document.body.appendChild(t); t.select(); try { document.execCommand("copy"); } catch (e) {} document.body.removeChild(t);
+  }
+
+  function iniciarPainelAlertas() {
+    var painel = document.getElementById("painel_alertas");
+    L.DomEvent.disableClickPropagation(painel);
+    L.DomEvent.disableScrollPropagation(painel);
+    document.getElementById("al_fechar").addEventListener("click", function () { abrirPainelAlertas(false); });
+    document.getElementById("al_tab_risco").addEventListener("click", function () { mostrarAba("risco"); });
+    document.getElementById("al_tab_alertas").addEventListener("click", function () { mostrarAba("alertas"); });
+
+    document.getElementById("al_corpo_risco").addEventListener("click", function (ev) {
+      var alvo = ev.target.closest("[data-acao]"); if (!alvo) return;
+      var card = alvo.closest(".al-card"); if (!card) return;
+      var est = card.getAttribute("data-est");
+      if (alvo.getAttribute("data-acao") === "contatos") { contatosAbertos[est] = !contatosAbertos[est]; renderAbaRisco(unidadesEmRisco()); }
+      else if (alvo.getAttribute("data-acao") === "ver") { irParaUnidade(card.getAttribute("data-nome")); }
+    });
+    var corpoAl = document.getElementById("al_corpo_alertas");
+    corpoAl.addEventListener("click", function (ev) {
+      var alvo = ev.target.closest("[data-acao]"); if (!alvo) return;
+      var acao = alvo.getAttribute("data-acao");
+      var card = alvo.closest(".al-card"), id = card && card.getAttribute("data-id");
+      if (acao === "limpar") { enviarEvento({ tipo: "limpar" }); }
+      else if (acao === "excluir") { enviarEvento({ tipo: "excluir", id: id }); }
+      else if (acao === "copiar") { copiarTexto(card.querySelector(".al-pre").textContent, alvo); }
+    });
+    corpoAl.addEventListener("change", function (ev) {
+      var alvo = ev.target;
+      if (alvo.getAttribute && alvo.getAttribute("data-acao") === "quem") {
+        var card = alvo.closest(".al-card");
+        enviarEvento({ tipo: "quem_recebeu", id: card.getAttribute("data-id"), valor: alvo.value });
+      }
+    });
+
+    var BotaoAlertas = L.Control.extend({
+      options: { position: "topleft" },
+      onAdd: function () {
+        var barra = L.DomUtil.create("div", "leaflet-bar");
+        var a = L.DomUtil.create("a", "bo-btn-alertas", barra);
+        a.href = "#"; a.setAttribute("role", "button"); a.title = "Alertas e riscos";
+        a.innerHTML = '🚨<span class="al-badge" style="display:none;"></span>';
+        botaoAlertasEl = a;
+        L.DomEvent.disableClickPropagation(barra);
+        L.DomEvent.on(a, "click", function (ev) { L.DomEvent.preventDefault(ev); abrirPainelAlertas(!painelAlertasAberto); });
+        return barra;
+      },
+    });
+    new BotaoAlertas().addTo(map);
+  }
+
   function iniciarMapa() {
     map = L.map("map", { zoomControl: true, minZoom: 4, maxZoom: 17, preferCanvas: true });
 
@@ -598,7 +789,11 @@
     document.addEventListener("keydown", destravarSom, true);
 
     document.getElementById("painel_estacao_fechar").addEventListener("click", fecharPainel);
-    document.addEventListener("keydown", function (ev) { if (ev.key === "Escape") fecharPainel(); });
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key !== "Escape") return;
+      if (document.getElementById("painel_estacao").style.display === "block") fecharPainel();
+      else if (painelAlertasAberto) abrirPainelAlertas(false);
+    });
     // O painel e a legenda ficam por cima do mapa: cliques/rolagem neles não devem mexer no mapa.
     ["painel_estacao", "legenda-mapa"].forEach(function (id) {
       var el = document.getElementById(id);
@@ -658,6 +853,7 @@
       },
     });
     new BotaoTelaCheia().addTo(map);
+    iniciarPainelAlertas();
     function aoMudarTelaCheia() {
       atualizarBotaoTelaCheia();
       setTimeout(function () { map.invalidateSize(); }, 100);
@@ -845,6 +1041,8 @@
     redesenharEstacoes(args.estacoes, args.aneis);
     redesenharRaios(args.raios, args.celulas, args.janela_min, args.mostrar_deslocamento, args.tamanho_raio);
     atualizarLegenda(args.aneis);
+    dadosAlertas = { estacoes: args.estacoes || [], alertas: args.alertas || [] };
+    renderPainelAlertas();
 
     if (args.som_data_uri && args.som_data_uri !== audioSrcAtual) {
       audio = new Audio(args.som_data_uri);

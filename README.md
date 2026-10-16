@@ -49,21 +49,32 @@ mapa não carrega.
   **O arquivo `boletins_bo.py` precisa subir pro GitHub junto com o
   `streamlit_app.py`.**
 
+## Alertas e riscos dentro do mapa
+
+- Botão 🚨 no canto superior esquerdo do mapa (abaixo da tela cheia), com contador de unidades em
+  alerta. Abre um painel com as mesmas abas do painel lateral — **Risco** (unidades em amarelo/vermelho,
+  contatos, "Ver no mapa") e **Alertas** (campo "Quem recebeu o alerta", texto para copiar, excluir
+  e limpar todos) — e funciona **também em tela cheia**.
+- "Quem recebeu", excluir e limpar voltam para o Streamlit e valem também para o painel lateral.
+
 ## Tela cheia do mapa
 
 - Botão de tela cheia no canto superior esquerdo do mapa (abaixo do zoom); o painel da unidade, a
   legenda e o controle de camadas vão junto. Se o navegador não permitir a tela cheia nativa dentro do
   quadro do Streamlit, o botão passa a **aumentar a altura do mapa** (e reduzir ao clicar de novo).
 
-## GOES-East com menos atraso e barra de rolagem
+## GOES-East com menos atraso
 
-- **GOES-East:** o padrão agora é o **SSEC RealEarth** (GOES-19, banda 13 com realce de topos frios).
+- **GOES-East:** o padrão é o **SSEC RealEarth** (GOES-19, banda 13 com realce de topos frios).
   Também há banda 13 simples, IR Sandwich (topos convectivos) e GeoColor, e o NASA GIBS (~30 min de
   atraso) continua disponível, desligado, no controle de camadas. O mapa mostra "imagem das HH:MM
   (há X min)" para você conferir o atraso real. Crédito exigido pelo SSEC: "Source: SSEC RealEarth,
-  UW-Madison" (aparece na atribuição do mapa).
-- **Barra de rolagem mais grossa** no site e no painel da unidade (Chrome/Edge); no Firefox vale a
-  espessura "auto" do navegador.
+  UW-Madison" (aparece na atribuição do mapa). Obs.: o SSEC pode exibir uma marca d'água
+  ("Size limit exceeded") quando o uso passa do limite gratuito dele.
+
+## Barra de rolagem
+
+- Barra de rolagem mais grossa no site e no painel da unidade (Chrome/Edge); no Firefox vale a espessura "auto" do navegador.
 
 ## Painel de alertas retrátil
 
@@ -151,7 +162,7 @@ mapa não carrega.
 ## Ajustes da última rodada
 
 - **Legenda retrátil**, recolhida por padrão (clique em "▸ Legenda" no canto do mapa).
-- **Sem upload de planilha:** o app usa sempre as 40 unidades cadastradas.
+- **Sem upload de planilha:** o app usa sempre as 41 unidades cadastradas.
 - **Anéis:** ficou só a caixa "Mostrar anéis de distância" (30/50/100/200 km sempre juntos).
 - **Divisão de UFs** no mapa (limites entre estados, ligável/desligável no controle de camadas).
 - **Bolinhas de raio maiores.**

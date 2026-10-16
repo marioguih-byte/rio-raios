@@ -5,7 +5,7 @@ Gera boletins de previsão do tempo (formato WhatsApp) para as unidades,
 usando Open-Meteo com ENSEMBLE (MÉDIA CONSENSO) entre ECMWF, ICON e GFS.
 
 Uso:
-    python gerar_boletins.py                       # usa as 40 unidades embutidas em UNIDADES
+    python gerar_boletins.py                       # usa as 41 unidades embutidas em UNIDADES
     python gerar_boletins.py --csv unidades.csv    # CSV com colunas: nome,lat,lon
     python gerar_boletins.py --filtro Macaé        # só unidades cujo nome contém o texto
     python gerar_boletins.py --dias 4 --saida boletins
@@ -48,7 +48,7 @@ LIM_RAJADA = (41, 62)     # km/h: verde 0–40 · amarelo 41–61 · vermelho >=
 LIM_UV = (6, 11)          # índice: verde 0–5 · amarelo 6–10 · vermelho >= 11
 LIM_UMID = (40, 12)       # %, INVERTIDO: verde >= 40 · amarelo 12–39 · vermelho < 12
 
-# 40 unidades (nome, (lat, lon))
+# 41 unidades (nome, (lat, lon))
 UNIDADES = {
     "UTE Termocamaçari - UTE TCA": (-12.666868, -38.314687),
     "UTE Termobahia - UTE TBA": (-12.703235, -38.564904),
@@ -67,6 +67,7 @@ UNIDADES = {
     "UTE Ibirité - UTE IBT": (-19.988579, -44.098207),
     "UTE Juiz de Fora - UTE JF": (-21.690619, -43.456720),
     "UTE Três Lagoas - UTE TLG": (-20.745500, -51.664590),
+    "UFN III - Unidade de Fertilizantes Nitrogenados III": (-20.985900, -51.838300),
     "Unidade de Tratamento de Gás de Caraguatatuba - UTGCA": (-23.654191, -45.501209),
     "Refinaria Presidente Bernardes - RPBC": (-23.873326, -46.427572),
     "UTE Cubatão - UTE CBT": (-23.875735, -46.431387),
