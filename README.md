@@ -49,6 +49,16 @@ mapa não carrega.
   **O arquivo `boletins_bo.py` precisa subir pro GitHub junto com o
   `streamlit_app.py`.**
 
+## GOES-East com menos atraso e barra de rolagem
+
+- **GOES-East:** o padrão agora é o **SSEC RealEarth** (GOES-19, banda 13 com realce de topos frios).
+  Também há banda 13 simples, IR Sandwich (topos convectivos) e GeoColor, e o NASA GIBS (~30 min de
+  atraso) continua disponível, desligado, no controle de camadas. O mapa mostra "imagem das HH:MM
+  (há X min)" para você conferir o atraso real. Crédito exigido pelo SSEC: "Source: SSEC RealEarth,
+  UW-Madison" (aparece na atribuição do mapa).
+- **Barra de rolagem mais grossa** no site e no painel da unidade (Chrome/Edge); no Firefox vale a
+  espessura "auto" do navegador.
+
 ## Painel de alertas retrátil
 
 - A chave "🚨 Painel de alertas" (acima do mapa, à direita) abre e fecha o painel lateral de risco e

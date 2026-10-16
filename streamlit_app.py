@@ -499,6 +499,18 @@ h1, h2, h3 { letter-spacing: -0.01em; }
              padding: 14px 20px; margin-bottom: 6px; border-radius: 14px;
              background: linear-gradient(120deg, #101f2b 0%, #0c151f 100%); border: 1px solid #1f2d3a; }
 .bo-header { gap: 18px; }
+/* Barra de rolagem mais grossa. Chrome/Edge/Safari usam ::-webkit-scrollbar; no Firefox vale a espessura "auto"
+   (a largura exata no Firefox/Linux depende da configuração do sistema). */
+@supports selector(::-webkit-scrollbar) {
+  ::-webkit-scrollbar { width: 18px; height: 18px; }
+  ::-webkit-scrollbar-track { background: #11151c; }
+  ::-webkit-scrollbar-thumb { background: #3fc2c2; border: 4px solid #11151c; border-radius: 12px; }
+  ::-webkit-scrollbar-thumb:hover { background: #63d8d8; }
+  ::-webkit-scrollbar-corner { background: #11151c; }
+}
+@supports not selector(::-webkit-scrollbar) {
+  * { scrollbar-width: auto; scrollbar-color: #3fc2c2 #11151c; }
+}
 .bo-brand { display: flex; align-items: center; gap: 18px; min-width: 0; }
 .bo-logo { background: #fdfdfd; border-radius: 12px; padding: 6px 12px; height: 74px; width: auto; flex-shrink: 0;
            box-shadow: 0 2px 10px rgba(0,0,0,0.35); }
