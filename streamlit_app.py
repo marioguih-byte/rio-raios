@@ -500,6 +500,15 @@ h1, h2, h3 { letter-spacing: -0.01em; }
              padding: 14px 20px; margin-bottom: 6px; border-radius: 14px;
              background: linear-gradient(120deg, #101f2b 0%, #0c151f 100%); border: 1px solid #1f2d3a; }
 .bo-header { gap: 18px; }
+@media (max-width: 640px) {
+  [data-testid="stMainBlockContainer"], .block-container { padding: 0.8rem 0.5rem 3rem !important; }
+  .bo-header { padding: 10px 12px; gap: 8px; border-radius: 12px; }
+  .bo-brand { gap: 10px; }
+  .bo-logo { height: 48px; padding: 4px 8px; border-radius: 9px; }
+  .bo-header h1 { font-size: 1.0rem; }
+  .bo-header h1 .bo-sub { display: block; font-size: 0.8rem; }
+  .bo-header p { font-size: 0.72rem; }
+}
 /* Barra de rolagem mais grossa. Chrome/Edge/Safari usam ::-webkit-scrollbar; no Firefox vale a espessura "auto"
    (a largura exata no Firefox/Linux depende da configuração do sistema). */
 @supports selector(::-webkit-scrollbar) {
@@ -798,6 +807,9 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
         for a in st.session_state.alertas_raio_ativos
     ]
 
+    if estacoes_novas:
+        st.session_state["som_token"] = f"{time.time():.3f}"
+
     evento = _mapa_raios_component(
         estacoes=estacoes_payload,
         alertas=alertas_payload,
@@ -810,9 +822,11 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
         mostrar_deslocamento=bool(mostrar_deslocamento),
         status_texto=status_texto,
         estacoes_novas=estacoes_novas,
-        tocar_som=bool(estacoes_novas),
-        # identifica ESTE alerta: o mapa só toca o som se o token for diferente do último que tocou
-        som_token=f"{time.time():.3f}" if estacoes_novas else None,
+        # Token do ÚLTIMO alerta novo. Fica nos dados enviados ao mapa até surgir outro alerta: o mapa toca o
+        # som quando vê um token que ainda não tocou. (Antes o token só ia na execução em que o alerta nascia,
+        # e a reexecução imediata que abre o pop-up podia substituir esses dados antes do mapa tocar o som.)
+        tocar_som=bool(st.session_state.get("som_token")),
+        som_token=st.session_state.get("som_token"),
         som_data_uri=som_data_uri,
         key="bo_mapa_raios_live",
     )

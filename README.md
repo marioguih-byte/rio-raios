@@ -76,8 +76,19 @@ mapa não carrega.
 
 - Barra de rolagem mais grossa no site e no painel da unidade (Chrome/Edge); no Firefox vale a espessura "auto" do navegador.
 
+## Celular (primeira rodada)
+
+- Mapa um pouco mais baixo em celular em pé (560 px); botões maiores para o toque; campos de texto
+  com fonte de 16 px (o iPhone não dá zoom ao digitar); painéis da unidade e de alertas ocupam a
+  largura da tela; tabela do painel da unidade rola de lado; cabeçalho compacto.
+- **Rolagem:** na tela normal, 1 dedo rola a página e o mapa se move/zoom com 2 dedos (dica na
+  primeira vez). Em tela cheia ou com o mapa ampliado (botão ⛶), 1 dedo move o mapa. No computador
+  nada muda.
+
 ## Som do alerta
 
+- O aviso de som fica nos dados do mapa até tocar (a reexecução que abre o pop-up podia substituí-lo antes).
+  Se o navegador bloquear o som, aparece um aviso e ele toca no primeiro toque/clique no mapa.
 - O som toca **uma única vez por alerta novo**. Antes, abrir/fechar o menu lateral (ou o painel de
   alertas, ou redimensionar a janela) fazia o Streamlit reenviar os mesmos dados ao mapa e o som tocava de novo.
 

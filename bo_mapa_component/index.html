@@ -2,6 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
 <style>
   html, body { margin: 0; padding: 0; height: 100%; background: #0b0f16; }
@@ -43,6 +44,34 @@
     .al-corpo::-webkit-scrollbar-thumb { background: #3fc2c2; border: 3px solid #11151c; border-radius: 10px; }
   }
   @supports not selector(::-webkit-scrollbar) { .al-corpo { scrollbar-width: auto; scrollbar-color: #3fc2c2 #11151c; } }
+  /* ---------- celular / telas estreitas ---------- */
+  @media (max-width: 640px) {
+    #raios-status-bar { left: 46px; right: 58px; font-size: 11px; padding: 3px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #busca-unidade-input { width: 150px; }
+    #painel_estacao { inset: 6px; padding: 14px 14px 20px; }
+    #pe_titulo { font-size: 18px; }
+    #pe_sub { font-size: 11.5px; }
+    .pe-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .pe-card { padding: 9px 10px 10px; }
+    .pe-card .val { font-size: 19px; }
+    .pe-chart { height: 210px; }
+    .pe-tab-wrap { overflow-x: auto; }
+    .pe-tab { font-size: 12px; min-width: 460px; }
+    #painel_alertas { top: 88px; left: 8px; right: 8px; bottom: 30px; width: auto; max-width: none; }
+    #legenda-mapa { max-width: 200px; }
+    #goes-status { font-size: 10.5px; bottom: 22px; }
+  }
+  /* telas de toque: alvos de toque maiores e campos de texto sem o zoom automático do iOS (fonte >= 16px) */
+  @media (pointer: coarse) {
+    .leaflet-bar a, .leaflet-bar a:hover { width: 40px !important; height: 40px !important; line-height: 40px !important; }
+    .leaflet-touch .leaflet-control-layers-toggle { width: 44px !important; height: 44px !important; }
+    #busca-unidade-input, .al-input { font-size: 16px; padding: 7px 8px; }
+    .al-tab { padding: 11px 12px; font-size: 13.5px; }
+    .al-acoes button, .al-limpar { padding: 9px 13px; font-size: 13px; }
+    #painel_estacao_fechar, .al-fechar { font-size: 22px; padding: 6px 12px; }
+    .al-card { padding: 12px; }
+    .leaflet-control-layers-list label { padding: 4px 0; }
+  }
   #toast-mapa { display: none; position: absolute; z-index: 1300; left: 50%; bottom: 56px; transform: translateX(-50%);
     background: rgba(17,24,39,0.95); color: #fff; padding: 7px 14px; border-radius: 8px; font: 12.5px 'Segoe UI', sans-serif; }
   .leaflet-bar a.bo-tela-cheia { display: flex; align-items: center; justify-content: center; }
@@ -176,8 +205,27 @@
   };
 
   var map = null;
-  var alturaQuadro = 650;
+  var alturaBase = (window.innerWidth < 640) ? 560 : 650;   // celular em pé: mapa um pouco mais baixo
+  var alturaQuadro = alturaBase;
   var ultimoSomToken = null;
+  var somPendente = false;
+  // Toca o som do alerta. Se o navegador bloquear (ele só deixa tocar depois que a pessoa interage com a
+  // página), avisa e toca assim que houver um toque/clique no mapa.
+  function tocarSomAlerta() {
+    audio.currentTime = 0;
+    var p = audio.play();
+    if (p && p.catch) {
+      p.catch(function (err) {
+        if (err && err.name === "NotAllowedError") {
+          somPendente = true;
+          if (window.__avisoMapa) window.__avisoMapa("🔔 O navegador bloqueou o som do alerta. Toque no mapa para ativar.");
+        }
+      });
+    }
+  }
+  document.addEventListener("pointerdown", function () {
+    if (somPendente && audio) { somPendente = false; tocarSomAlerta(); }
+  }, true);
   try { ultimoSomToken = sessionStorage.getItem("rio_som_token"); } catch (e) {}
   var stationsLayer, aneisLayer, raiosLayer, celulasLayer, ufLayer, layersControl;
 
@@ -385,7 +433,7 @@
     tab += "</table>";
 
     elPrev.innerHTML =
-      '<div class="pe-sec">Resumo por modelo</div>' + tab +
+      '<div class="pe-sec">Resumo por modelo</div><div class="pe-tab-wrap">' + tab + '</div>' +
       '<div class="pe-sec">Rajada de vento — hoje e amanhã</div>' +
       '<div class="pe-nota">Faixas: verde abaixo de 40 km/h · amarelo 40–61 km/h · vermelho acima de 61 km/h. Linha tracejada: hora atual.</div>' +
       '<div class="pe-chart"><canvas id="pe_canvas_vento"></canvas></div>' +
@@ -813,13 +861,16 @@
     }
     // Se a tela cheia nativa não estiver disponível (ou for negada), o botão aumenta a altura do mapa.
     var mapaExpandido = false;
+    window.__avisoMapa = avisoMapa;
     function alternarMapaMaior() {
       mapaExpandido = !mapaExpandido;
-      alturaQuadro = mapaExpandido ? Math.max(900, Math.round((window.screen.height || 1000) * 0.88)) : 650;
+      var alturaTela = window.screen.height || 1000;
+      alturaQuadro = mapaExpandido ? ((window.innerWidth < 640) ? Math.round(alturaTela * 0.8) : Math.max(900, Math.round(alturaTela * 0.88))) : alturaBase;
       document.getElementById("map").style.height = alturaQuadro + "px";
       Streamlit.setFrameHeight(alturaQuadro);
       setTimeout(function () { map.invalidateSize(); }, 100);
       atualizarBotaoTelaCheia();
+      atualizarArrasto();
     }
     var telaCheiaNativa = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
     function alternarTelaCheia() {
@@ -855,9 +906,29 @@
       },
     });
     new BotaoTelaCheia().addTo(map);
+
+    // Celular/tablet: o mapa ocupa boa parte da tela e "prenderia" a rolagem da página. Por isso, com a
+    // tela normal, 1 dedo rola a página e o mapa se move/zoom com 2 dedos; em tela cheia ou com o mapa
+    // ampliado, o arrasto com 1 dedo volta.
+    var telaToque = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+    function atualizarArrasto() {
+      if (!telaToque) return;
+      if (emTelaCheia() || mapaExpandido) map.dragging.enable(); else map.dragging.disable();
+    }
+    document.getElementById("map").style.height = alturaQuadro + "px";
+    if (telaToque) {
+      atualizarArrasto();
+      var jaViuDica = false;
+      try { jaViuDica = !!sessionStorage.getItem("rio_dica_toque"); } catch (e) {}
+      if (!jaViuDica) {
+        try { sessionStorage.setItem("rio_dica_toque", "1"); } catch (e) {}
+        setTimeout(function () { avisoMapa("Use 2 dedos para mover e dar zoom no mapa. Toque em ⛶ para ampliar."); }, 1500);
+      }
+    }
     iniciarPainelAlertas();
     function aoMudarTelaCheia() {
       atualizarBotaoTelaCheia();
+      atualizarArrasto();
       setTimeout(function () { map.invalidateSize(); }, 100);
     }
     document.addEventListener("fullscreenchange", aoMudarTelaCheia);
@@ -1056,11 +1127,10 @@
     // O Streamlit reenvia os mesmos dados ao mapa quando a largura muda (abrir/fechar o menu lateral, o
     // painel de alertas, redimensionar a janela...); sem o "token" o som tocaria de novo a cada vez.
     // O painel da unidade abre apenas quando a pessoa clica na unidade.
-    if (args.tocar_som && args.som_token && args.estacoes_novas && args.estacoes_novas.length && audio && args.som_token !== ultimoSomToken) {
+    if (args.som_token && audio && args.som_token !== ultimoSomToken) {
       ultimoSomToken = args.som_token;
       try { sessionStorage.setItem("rio_som_token", ultimoSomToken); } catch (e) {}
-      audio.currentTime = 0;
-      audio.play().catch(function () {});
+      tocarSomAlerta();
     }
 
     Streamlit.setFrameHeight(alturaQuadro);
