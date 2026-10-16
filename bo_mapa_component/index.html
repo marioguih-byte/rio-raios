@@ -9,6 +9,9 @@
   .leaflet-container { background: #cfd6dc !important; }
   .raio-celula-icon { background: transparent !important; border: none !important; }
 
+  #toast-mapa { display: none; position: absolute; z-index: 1300; left: 50%; bottom: 56px; transform: translateX(-50%);
+    background: rgba(17,24,39,0.95); color: #fff; padding: 7px 14px; border-radius: 8px; font: 12.5px 'Segoe UI', sans-serif; }
+  .leaflet-bar a.bo-tela-cheia { display: flex; align-items: center; justify-content: center; }
   #goes-status { display: none; position: absolute; z-index: 1000; bottom: 26px; right: 8px; background: rgba(15,15,20,0.8);
     color: #e5e7eb; padding: 3px 9px; border-radius: 6px; font: 11px 'Segoe UI', sans-serif; }
   /* barra de rolagem mais grossa (Chrome/Edge/Safari; no Firefox vale a espessura "auto") */
@@ -74,6 +77,7 @@
 <div id="map">
   <div id="raios-status-bar"></div>
   <div id="goes-status"></div>
+  <div id="toast-mapa"></div>
   <div id="busca-unidade-bar">
     <input id="busca-unidade-input" list="busca-unidade-lista" placeholder="🔎 Buscar unidade…" autocomplete="off" />
     <datalist id="busca-unidade-lista"></datalist>
@@ -128,6 +132,7 @@
   };
 
   var map = null;
+  var alturaQuadro = 650;
   var stationsLayer, aneisLayer, raiosLayer, celulasLayer, ufLayer, layersControl;
 
   // Contorno completo das UFs (inclui o limite externo do Brasil), linhas [lon, lat].
@@ -600,6 +605,66 @@
       L.DomEvent.disableClickPropagation(el);
       L.DomEvent.disableScrollPropagation(el);
     });
+    // Tela cheia do mapa (API de tela cheia sobre o próprio #map, então o painel, a legenda etc. vão junto).
+    var ICONE_EXPANDIR = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#222" stroke-width="2" stroke-linecap="round"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/></svg>';
+    var ICONE_RECOLHER = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#222" stroke-width="2" stroke-linecap="round"><path d="M6 2v4H2M14 6h-4V2M10 14v-4h4M2 10h4v4"/></svg>';
+    function emTelaCheia() { return !!(document.fullscreenElement || document.webkitFullscreenElement); }
+    function avisoMapa(texto) {
+      var t = document.getElementById("toast-mapa");
+      t.textContent = texto; t.style.display = "block";
+      setTimeout(function () { t.style.display = "none"; }, 3500);
+    }
+    // Se a tela cheia nativa não estiver disponível (ou for negada), o botão aumenta a altura do mapa.
+    var mapaExpandido = false;
+    function alternarMapaMaior() {
+      mapaExpandido = !mapaExpandido;
+      alturaQuadro = mapaExpandido ? Math.max(900, Math.round((window.screen.height || 1000) * 0.88)) : 650;
+      document.getElementById("map").style.height = alturaQuadro + "px";
+      Streamlit.setFrameHeight(alturaQuadro);
+      setTimeout(function () { map.invalidateSize(); }, 100);
+      atualizarBotaoTelaCheia();
+    }
+    var telaCheiaNativa = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+    function alternarTelaCheia() {
+      if (emTelaCheia()) {
+        (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+        return;
+      }
+      if (mapaExpandido || !telaCheiaNativa) { alternarMapaMaior(); return; }
+      var el = document.getElementById("map");
+      var pedir = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (!pedir) { alternarMapaMaior(); return; }
+      var r = pedir.call(el);
+      if (r && r.catch) r.catch(function () { telaCheiaNativa = false; avisoMapa("Tela cheia bloqueada pelo navegador: mapa ampliado."); alternarMapaMaior(); });
+    }
+    var botaoTelaCheiaEl = null;
+    function atualizarBotaoTelaCheia() {
+      if (!botaoTelaCheiaEl) return;
+      var maior = emTelaCheia() || mapaExpandido;
+      botaoTelaCheiaEl.innerHTML = maior ? ICONE_RECOLHER : ICONE_EXPANDIR;
+      botaoTelaCheiaEl.title = emTelaCheia() ? "Sair da tela cheia" : (mapaExpandido ? "Reduzir o mapa" : (telaCheiaNativa ? "Tela cheia" : "Aumentar o mapa"));
+    }
+    var BotaoTelaCheia = L.Control.extend({
+      options: { position: "topleft" },
+      onAdd: function () {
+        var barra = L.DomUtil.create("div", "leaflet-bar");
+        var a = L.DomUtil.create("a", "bo-tela-cheia", barra);
+        a.href = "#"; a.setAttribute("role", "button");
+        botaoTelaCheiaEl = a;
+        atualizarBotaoTelaCheia();
+        L.DomEvent.disableClickPropagation(barra);
+        L.DomEvent.on(a, "click", function (ev) { L.DomEvent.preventDefault(ev); alternarTelaCheia(); });
+        return barra;
+      },
+    });
+    new BotaoTelaCheia().addTo(map);
+    function aoMudarTelaCheia() {
+      atualizarBotaoTelaCheia();
+      setTimeout(function () { map.invalidateSize(); }, 100);
+    }
+    document.addEventListener("fullscreenchange", aoMudarTelaCheia);
+    document.addEventListener("webkitfullscreenchange", aoMudarTelaCheia);
+
     // O painel de alertas do Streamlit pode ser aberto/fechado, mudando a largura do mapa.
     if (window.ResizeObserver) {
       new ResizeObserver(function () { if (map) map.invalidateSize(); }).observe(document.getElementById("map"));
@@ -794,12 +859,12 @@
       audio.play().catch(function () {});
     }
 
-    Streamlit.setFrameHeight(650);
+    Streamlit.setFrameHeight(alturaQuadro);
   }
 
   Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, aoRenderizar);
   Streamlit.setComponentReady();
-  Streamlit.setFrameHeight(650);
+  Streamlit.setFrameHeight(alturaQuadro);
 })();
 </script>
 </body>

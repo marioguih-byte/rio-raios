@@ -49,6 +49,12 @@ mapa não carrega.
   **O arquivo `boletins_bo.py` precisa subir pro GitHub junto com o
   `streamlit_app.py`.**
 
+## Tela cheia do mapa
+
+- Botão de tela cheia no canto superior esquerdo do mapa (abaixo do zoom); o painel da unidade, a
+  legenda e o controle de camadas vão junto. Se o navegador não permitir a tela cheia nativa dentro do
+  quadro do Streamlit, o botão passa a **aumentar a altura do mapa** (e reduzir ao clicar de novo).
+
 ## GOES-East com menos atraso e barra de rolagem
 
 - **GOES-East:** o padrão agora é o **SSEC RealEarth** (GOES-19, banda 13 com realce de topos frios).
