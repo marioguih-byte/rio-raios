@@ -208,8 +208,10 @@ MAX_RAIOS_POR_FAIXA = 2500
 # O mapa mostra 20 min de raios, mas isso não muda a sensibilidade dos alertas.
 JANELA_ALERTA_MIN = 15
 
-# Alerta verde: depois de um alerta vermelho (raio a <= 30 km), a unidade é "liberada" quando passam
-# VERDE_MINUTOS_SEM_RAIO minutos sem nenhum raio a menos de VERDE_RAIO_KM km.
+# Alerta verde: depois de um alerta vermelho (raio a <= 30 km), a unidade é "liberada" quando o ÚLTIMO
+# ponto de raio a menos de VERDE_RAIO_KM km some do mapa (os pontos ficam 20 min: vermelho, laranja,
+# amarelo e, por fim, verde) e passam mais VERDE_MINUTOS_SEM_RAIO minutos. Ou seja: 20 + 5 = 25 min
+# depois do último raio dentro de 30 km.
 VERDE_RAIO_KM = 30
 VERDE_MINUTOS_SEM_RAIO = 5
 
@@ -677,9 +679,9 @@ def _corpo_dialog_alerta_raio():
     n_unidades = texto.count("* Local:")
     if st.session_state.get("dialog_raio_so_verde"):
         if n_unidades > 1:
-            st.success(f"**{n_unidades} unidades** sem raios a menos de {VERDE_RAIO_KM} km há {VERDE_MINUTOS_SEM_RAIO} min. Copie as mensagens abaixo:")
+            st.success(f"**{n_unidades} unidades** sem raios a menos de {VERDE_RAIO_KM} km (o último ponto saiu do mapa há {VERDE_MINUTOS_SEM_RAIO} min). Copie as mensagens abaixo:")
         else:
-            st.success(f"Unidade sem raios a menos de {VERDE_RAIO_KM} km há {VERDE_MINUTOS_SEM_RAIO} min. Copie a mensagem abaixo:")
+            st.success(f"Unidade sem raios a menos de {VERDE_RAIO_KM} km (o último ponto saiu do mapa há {VERDE_MINUTOS_SEM_RAIO} min). Copie a mensagem abaixo:")
     elif n_unidades > 1:
         st.warning(f"Foram detectados raios próximos de **{n_unidades} unidades** monitoradas ao mesmo tempo. Copie as mensagens abaixo:")
     else:
@@ -786,7 +788,8 @@ def _renderizar_mapa_ao_vivo():
                 sv["ultimo_raio"] = ultimo
             if sv["ultimo_raio"] is None:
                 continue
-            if (agora_utc - sv["ultimo_raio"]) >= timedelta(minutes=VERDE_MINUTOS_SEM_RAIO):
+            # o último ponto some do mapa depois de `raios_minutos` min; a partir daí, espera mais VERDE_MINUTOS_SEM_RAIO
+            if (agora_utc - sv["ultimo_raio"]) >= timedelta(minutes=raios_minutos + VERDE_MINUTOS_SEM_RAIO):
                 agora_ts_v = time.time()
                 texto_v = montar_mensagem_alerta_verde(est["nome"], meteorologista)
                 st.session_state.alertas_raio_ativos.insert(0, {

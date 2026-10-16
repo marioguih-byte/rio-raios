@@ -87,13 +87,16 @@ mapa não carrega.
 
 ## Alerta verde
 
-- Depois de um **alerta vermelho** (raio a menos de 30 km), quando passam **5 minutos sem nenhum raio
-  a menos de 30 km** da unidade, o app emite um **alerta verde** ("FIM DO ALERTA DE RAIOS"): ele entra na
-  lista de alertas (com "Quem recebeu" e texto para copiar) e abre um pop-up verde. **Não toca som.**
-- A unidade volta a aparecer como "Sem raios próximos" na hora (raios a ≤ 30 km anteriores ao
-  encerramento deixam de contar) e é **rearmada**: um raio novo gera um novo alerta vermelho/amarelo.
+- Depois de um **alerta vermelho** (raio a menos de 30 km), o app espera o **último ponto de raio dentro de
+  30 km sumir do mapa** (os pontos ficam 20 min: vermelho → laranja → amarelo → verde) e **mais 5 minutos**,
+  ou seja, **25 min depois do último raio a menos de 30 km**. Aí emite o **alerta verde**
+  ("FIM DO ALERTA DE RAIOS"): entra na lista de alertas (com "Quem recebeu" e texto para copiar) e abre
+  um pop-up verde. **Não toca som.**
+- Se um raio novo a menos de 30 km aparecer durante a espera, a contagem recomeça. Depois do verde, a
+  unidade é **rearmada**: um raio novo gera um novo alerta vermelho/amarelo.
 - Só emite o verde se o GLM foi lido com sucesso naquele ciclo (sem dados não dá pra dizer que não há raios).
-- Constantes no topo do código: `VERDE_RAIO_KM = 30` e `VERDE_MINUTOS_SEM_RAIO = 5`.
+- Constantes no topo do código: `VERDE_RAIO_KM = 30` e `VERDE_MINUTOS_SEM_RAIO = 5` (a espera depois que o
+  ponto some; os 20 min dos pontos vêm da janela do mapa).
 
 ## Som do alerta
 
