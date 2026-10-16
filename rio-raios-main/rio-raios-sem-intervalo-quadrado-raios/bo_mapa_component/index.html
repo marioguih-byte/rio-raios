@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #0b0f16; }
+  #map { position: relative; width: 100%; height: 650px; background: #0b0f16; }
+  .leaflet-container { background: #000 !important; }
+  .bo-preto-contorno .leaflet-tile { filter: invert(1) grayscale(1) contrast(1.65) brightness(0.58); }
+  .leaflet-tile.bo-branco { filter: grayscale(1) contrast(0.95); }
+  .raio-celula-icon { background: transparent !important; border: none !important; }
+  /* O mapa escuro usa tiles públicos do OpenStreetMap com tratamento visual local,
+     evitando provedores que exibem "API KEY REQUIRED". */
+  .map-dark-osm .leaflet-tile-pane {
+    filter: invert(100%) hue-rotate(180deg) brightness(0.55) saturate(0.35) contrast(1.15);
+  }
+
+  #raios-status-bar { position: absolute; z-index: 1000; top: 8px; left: 50px; background: rgba(15,15,20,0.75);
+    color: #e5e7eb; padding: 4px 10px; border-radius: 6px; font: 12px sans-serif; transition: opacity 0.4s ease; }
+
+  #busca-unidade-bar { position: absolute; z-index: 1000; top: 50px; right: 8px; background: rgba(15,15,20,0.75);
+    padding: 4px 8px; border-radius: 6px; }
+  #busca-unidade-input { width: 180px; font: 12px sans-serif; padding: 3px 6px; border-radius: 4px;
+    border: 1px solid #374151; background: #111827; color: #e5e7eb; }
+
+  #painel_estacao { display: none; position: absolute; top: 44px; left: 50px; z-index: 1000; width: 290px;
+    max-height: calc(100% - 90px); overflow-y: auto; background: #12161ff2; color: #f0f2f5; padding: 12px 14px;
+    border: 1px solid #3fc2c2; border-radius: 8px; font-family: 'Segoe UI', Arial, sans-serif;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.5); }
+  #painel_estacao_nome { font-size: 14px; font-weight: bold; color: #3fc2c2; padding-right: 8px; }
+  #painel_estacao_fechar { cursor: pointer; color: #ff6b5e; font-weight: bold; flex-shrink: 0; }
+  #painel_estacao_resumo { font-size: 12px; color: #c4cbd6; margin: 10px 0; }
+  #painel_estacao_contatos { font-size: 11.5px; margin-top: 6px; }
+
+  #legenda-mapa { position: absolute; z-index: 1000; bottom: 22px; left: 8px; background: rgba(15,15,20,0.8);
+    color: #e5e7eb; padding: 8px 10px; border-radius: 8px; font: 11px 'Segoe UI', sans-serif; line-height: 1.5; }
+
+  .leaflet-control-layers { background: rgba(15,15,20,0.9) !important; color: #e5e7eb; border: 1px solid #374151 !important;
+    font: 12px 'Segoe UI', sans-serif; }
+  .leaflet-control-layers-toggle { filter: invert(0.9); }
+  .leaflet-control-layers-separator { border-color: #374151 !important; }
+</style>
+</head>
+<body>
+<div id="map">
+  <div id="raios-status-bar"></div>
+  <div id="busca-unidade-bar">
+    <input id="busca-unidade-input" list="busca-unidade-lista" placeholder="🔎 Buscar unidade…" autocomplete="off" />
+    <datalist id="busca-unidade-lista"></datalist>
+  </div>
+  <div id="painel_estacao">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+      <div id="painel_estacao_nome">—</div>
+      <span id="painel_estacao_fechar">✕</span>
+    </div>
+    <div id="painel_estacao_resumo">—</div>
+    <div id="painel_estacao_contatos"></div>
+  </div>
+  <div id="legenda-mapa"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  // ----------------------------------------------------------------
+  // Protocolo mínimo de componente do Streamlit (sem React/build step).
+  // Referência: https://discuss.streamlit.io/t/code-snippet-create-components-without-any-frontend-tooling-no-react-babel-webpack-etc/13064
+  // Isso é o que permite atualizar os dados do mapa SEM recriar o
+  // iframe/mapa a cada ciclo — o Python manda um "render event" novo com
+  // os dados atualizados, e esse mesmo mapa (já carregado, com zoom e
+  // tiles intactos) só redesenha as camadas que mudaram.
+  // ----------------------------------------------------------------
+  function enviarParaStreamlit(type, data) {
+    var outData = Object.assign({ isStreamlitMessage: true, type: type }, data);
+    window.parent.postMessage(outData, "*");
+  }
+  var Streamlit = {
+    setComponentReady: function () { enviarParaStreamlit("streamlit:componentReady", { apiVersion: 1 }); },
+    setFrameHeight: function (height) { enviarParaStreamlit("streamlit:setFrameHeight", { height: height }); },
+    RENDER_EVENT: "streamlit:render",
+    events: {
+      addEventListener: function (type, callback) {
+        window.addEventListener("message", function (event) {
+          if (event.data && event.data.type === type) { event.detail = event.data; callback(event); }
+        });
+      },
+    },
+  };
+
+  var map = null;
+  var stationsLayer, aneisLayer, raiosLayer, celulasLayer;
+  var marcadoresPorNome = {};
+  var coordsPorNome = {};
+  var dadosPorChave = {};
+  var chavePorNome = {};
+  var audio = null;
+  var audioSrcAtual = null;
+  var canvasRenderer = L.canvas({ padding: 0.1 });
+
+  function destravarSom() {
+    if (!audio) return;
+    audio.play().then(function () { audio.pause(); audio.currentTime = 0; }).catch(function () {});
+    document.removeEventListener("click", destravarSom, true);
+    document.removeEventListener("keydown", destravarSom, true);
+  }
+
+  function corPorIdade(idadeMin, janelaMin) {
+    // Gradiente mais rico (vermelho = mais recente → azul = mais antigo
+    // dentro da janela), parecido com um radar de raios de verdade.
+    var fracao = Math.min(idadeMin / Math.max(janelaMin, 1), 1);
+    if (fracao < 0.15) return "#ff1f3d";
+    if (fracao < 0.30) return "#ff7a1a";
+    if (fracao < 0.45) return "#ffc400";
+    if (fracao < 0.60) return "#8be04e";
+    if (fracao < 0.80) return "#22d3ee";
+    return "#3b82f6";
+  }
+
+  function irParaUnidade(nome) {
+    var c = coordsPorNome[nome];
+    if (!c || !map) return;
+    map.flyTo([c.lat, c.lon], 10, { animate: true, duration: 0.8 });
+    var marcador = marcadoresPorNome[nome];
+    if (marcador) setTimeout(function () { abrirPainel(chavePorNome[nome]); }, 350);
+  }
+
+  function abrirPainel(chave) {
+    var d = dadosPorChave[chave];
+    if (!d) return;
+    document.getElementById("painel_estacao").style.display = "block";
+    document.getElementById("painel_estacao_nome").textContent = (d.risco_emoji || "") + " " + d.nome;
+    var distTxt = (d.dist_min_km === null || d.dist_min_km === undefined)
+      ? "sem raios na janela atual"
+      : d.dist_min_km.toFixed(0) + " km do raio mais próximo";
+    document.getElementById("painel_estacao_resumo").innerHTML =
+      "Status: <b style='color:" + d.risco_color + ";'>" + d.risco_label + "</b><br/>" + distTxt;
+
+    var corpo = document.getElementById("painel_estacao_contatos");
+    var contatos = d.contatos;
+    if (!contatos || !contatos.numeros || !contatos.numeros.length) {
+      corpo.innerHTML = "<hr style='border-color:#2a2f3a;'/><span style='color:#9ca3af;'>Nenhum contato cadastrado para esta unidade.</span>";
+    } else {
+      var html = "<hr style='border-color:#2a2f3a;'/><b style='color:#3fc2c2;'>📞 " + contatos.nome + "</b><br/>";
+      contatos.numeros.slice(0, 3).forEach(function (item) {
+        html += item.numero;
+        if (item.descricao) html += " <i style='color:#8b93a3;'>(" + item.descricao + ")</i>";
+        html += "<br/>";
+      });
+      corpo.innerHTML = html;
+    }
+  }
+
+  function iniciarMapa() {
+    map = L.map("map", { zoomControl: true, minZoom: 4, maxZoom: 14, preferCanvas: true });
+
+    // Fundos: somente preto com contorno branco e branco em escala de cinza.
+    // Os tiles são OSM público, sem chave de API. Cada camada tem seu próprio
+    // pane para evitar o mapa ficar invisível ao alternar entre fundos.
+    map.createPane("tilePanePreto");
+    map.getPane("tilePanePreto").style.zIndex = 200;
+    map.createPane("tilePaneBranco");
+    map.getPane("tilePaneBranco").style.zIndex = 201;
+
+    var fundoPreto = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "&copy; OpenStreetMap contributors", maxZoom: 19,
+      subdomains: "abc", pane: "tilePanePreto", className: "bo-preto-contorno"
+    });
+    var fundoBranco = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "&copy; OpenStreetMap contributors", maxZoom: 19,
+      subdomains: "abc", pane: "tilePaneBranco", className: "bo-branco"
+    });
+
+    // Preto com contorno é o padrão. O filtro transforma o fundo claro do OSM
+    // em preto e as linhas/limites em branco, mantendo um mapa B/W limpo.
+    fundoPreto.addTo(map);
+    L.control.layers(
+      {
+        "⬛ Preto com contorno": fundoPreto,
+        "⬜ Branco": fundoBranco
+      },
+      null,
+      { position: "topright", collapsed: true }
+    ).addTo(map);
+
+    var bb = { lat_min: -34.0, lat_max: 5.5, lon_min: -74.5, lon_max: -32.0 };
+    map.fitBounds([[bb.lat_min, bb.lon_min], [bb.lat_max, bb.lon_max]]);
+    map.setMaxBounds([[bb.lat_min - 6, bb.lon_min - 6], [bb.lat_max + 6, bb.lon_max + 6]]);
+
+    if (!map.getPane("markerPane")) { map.createPane("markerPane"); }
+    map.getPane("markerPane").style.zIndex = 650;
+
+    stationsLayer = L.layerGroup().addTo(map);
+    aneisLayer = L.layerGroup().addTo(map);
+    raiosLayer = L.layerGroup().addTo(map);
+    celulasLayer = L.layerGroup().addTo(map);
+
+    // Restaura o zoom/posição salvos — como esse mapa é montado só uma
+    // vez (o componente não recria o iframe entre atualizações), isso na
+    // prática só importa na primeira carga da página.
+    try {
+      var salvo = JSON.parse(localStorage.getItem("blueocean_raios_view_v1") || "null");
+      if (salvo && typeof salvo.lat === "number") map.setView([salvo.lat, salvo.lng], salvo.zoom);
+    } catch (e) {}
+    map.on("moveend zoomend", function () {
+      try {
+        var c = map.getCenter();
+        localStorage.setItem("blueocean_raios_view_v1", JSON.stringify({ lat: c.lat, lng: c.lng, zoom: map.getZoom() }));
+      } catch (e) {}
+    });
+
+    document.addEventListener("click", destravarSom, true);
+    document.addEventListener("keydown", destravarSom, true);
+
+    document.getElementById("painel_estacao_fechar").addEventListener("click", function () {
+      document.getElementById("painel_estacao").style.display = "none";
+    });
+
+    var inputBusca = document.getElementById("busca-unidade-input");
+    inputBusca.addEventListener("change", function () { irParaUnidade(inputBusca.value); });
+    inputBusca.addEventListener("keydown", function (ev) { if (ev.key === "Enter") irParaUnidade(inputBusca.value); });
+  }
+
+  function redesenharEstacoes(estacoes, aneis) {
+    stationsLayer.clearLayers();
+    aneisLayer.clearLayers();
+    marcadoresPorNome = {};
+    coordsPorNome = {};
+    dadosPorChave = {};
+    chavePorNome = {};
+    var opcoes = "";
+    (estacoes || []).forEach(function (e) {
+      var texto = (e.dist_min_km === null || e.dist_min_km === undefined)
+        ? "sem raios na janela atual" : e.dist_min_km.toFixed(0) + " km do raio mais próximo";
+      var marcador = L.circleMarker([e.lat, e.lon], {
+        radius: 7, pane: "markerPane", color: e.risco_color, weight: 2, fill: true, fillColor: e.risco_color, fillOpacity: 0.9, renderer: canvasRenderer,
+      });
+      // Tooltip somente durante o hover; nunca fica preso após sair do marcador.
+      marcador.bindTooltip(e.risco_emoji + " " + e.nome + " — " + texto, {
+        sticky: false,
+        permanent: false,
+        interactive: false,
+        autoClose: true,
+        closeOnClick: true
+      });
+      marcador.on("mouseover", function () { this.openTooltip(); });
+      marcador.on("mouseout", function () { this.closeTooltip(); });
+      marcador.on("remove", function () { this.closeTooltip(); });
+      marcador.on("click", function (ev) {
+        if (ev && ev.originalEvent) {
+          L.DomEvent.stopPropagation(ev.originalEvent);
+          L.DomEvent.preventDefault(ev.originalEvent);
+        }
+        this.closeTooltip();
+        abrirPainel(e.estacao);
+      });
+      marcador.addTo(stationsLayer);
+
+      marcadoresPorNome[e.nome] = marcador;
+      coordsPorNome[e.nome] = { lat: e.lat, lon: e.lon };
+      dadosPorChave[e.estacao] = e;
+      chavePorNome[e.nome] = e.estacao;
+      opcoes += '<option value="' + String(e.nome).replace(/"/g, "&quot;") + '">';
+
+      (aneis || []).forEach(function (a) {
+        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: a.cor, weight: 2.5, fill: false, dashArray: "8, 7", opacity: 0.78, interactive: false, renderer: canvasRenderer })
+          .addTo(aneisLayer);
+      });
+    });
+    document.getElementById("busca-unidade-lista").innerHTML = opcoes;
+  }
+
+  function redesenharRaios(raios, celulas, janelaMin, mostrarDeslocamento) {
+    raiosLayer.clearLayers();
+    (raios || []).forEach(function (r) {
+      var cor = corPorIdade(r.idade_min, janelaMin);
+      L.circleMarker([r.lat, r.lon], { radius: 2.5, color: cor, weight: 1, fill: true, fillColor: cor, fillOpacity: 0.75, renderer: canvasRenderer })
+        .addTo(raiosLayer);
+    });
+
+    celulasLayer.clearLayers();
+    if (mostrarDeslocamento) {
+      (celulas || []).forEach(function (cel) {
+        if (cel.hull && cel.hull.length >= 3) {
+          var pontosHull = cel.hull.map(function (p) { return [p.lat, p.lon]; });
+          L.polygon(pontosHull, {
+            color: "#f97316", weight: 1, opacity: 0.75, fillColor: "#f97316", fillOpacity: 0.12, renderer: canvasRenderer,
+          }).bindTooltip("Célula #" + cel.id + " — área de atividade").addTo(celulasLayer);
+        }
+        var hist = cel.historico || [];
+        var pts = hist.map(function (p) { return [p.lat, p.lon]; })
+          .concat((cel.checkpoints || []).map(function (c) { return [c.lat, c.lon]; }));
+        if (pts.length > 1) {
+          L.polyline(pts, { color: "#e5e7eb", weight: 1, opacity: 0.45, dashArray: "6, 5", renderer: canvasRenderer }).addTo(celulasLayer);
+        }
+        hist.forEach(function (p, i) {
+          var atual = (i === hist.length - 1);
+          var tam = atual ? 18 : 13;
+          var icone = L.divIcon({
+            className: "raio-celula-icon",
+            html: '<div style="font-weight:900; font-size:' + tam + 'px; color:' + (atual ? "#ef4444" : "#eab308") +
+              '; text-shadow:0 0 4px #000,0 0 7px #000; line-height:1;">✕</div>',
+            iconSize: [tam + 6, tam + 6], iconAnchor: [(tam + 6) / 2, (tam + 6) / 2],
+          });
+          var marc = L.marker([p.lat, p.lon], { icon: icone });
+          if (atual) marc.bindTooltip("Célula #" + cel.id + " · ~" + Math.round(cel.vel_kmh) + " km/h para " + cel.rumo_texto);
+          marc.addTo(celulasLayer);
+        });
+        (cel.checkpoints || []).forEach(function (c, idx) {
+          var op = Math.max(0.75 - idx * 0.18, 0.2);
+          L.circleMarker([c.lat, c.lon], { radius: 3, color: "#e5e7eb", weight: 1, fill: true, fillColor: "#e5e7eb", fillOpacity: op, opacity: op, renderer: canvasRenderer })
+            .bindTooltip("Célula #" + cel.id + " — alcance estimado em +" + c.min + " min")
+            .addTo(celulasLayer);
+        });
+      });
+    }
+  }
+
+  function atualizarLegenda(aneis) {
+    var itens = (aneis || []).map(function (a) {
+      return '<div style="display:flex; align-items:center; gap:6px; margin-top:2px;">' +
+        '<span style="width:12px; height:0; border-top:2px dashed ' + a.cor + '; display:inline-block;"></span>' +
+        '<span>' + a.km + ' km</span></div>';
+    }).join("");
+    var html = '<div style="font-weight:700; color:#3fc2c2; margin-bottom:3px;">Status da unidade</div>' +
+      '<div>🔴 Alto — raio a menos de 30 km</div><div>🟡 Médio — raio a menos de 50 km</div><div>🟢 Sem raios próximos</div>';
+    if (itens) html += '<div style="font-weight:700; color:#3fc2c2; margin:6px 0 2px;">Anéis de distância</div>' + itens;
+    document.getElementById("legenda-mapa").innerHTML = html;
+  }
+
+  function atualizarStatus(texto) {
+    var el = document.getElementById("raios-status-bar");
+    // Troca sutil: baixa a opacidade, troca o texto, sobe de novo — sem
+    // nenhum "flash" branco/recarregamento, só um fade rápido no textinho.
+    el.style.opacity = "0.35";
+    setTimeout(function () {
+      el.textContent = texto || "";
+      el.style.opacity = "1";
+    }, 150);
+  }
+
+  function aoRenderizar(event) {
+    var args = (event.detail && event.detail.args) || {};
+    if (!map) iniciarMapa();
+
+    atualizarStatus(args.status_texto);
+    redesenharEstacoes(args.estacoes, args.aneis);
+    redesenharRaios(args.raios, args.celulas, args.janela_min, args.mostrar_deslocamento);
+    atualizarLegenda(args.aneis);
+
+    if (args.som_data_uri && args.som_data_uri !== audioSrcAtual) {
+      audio = new Audio(args.som_data_uri);
+      audio.preload = "auto";
+      audioSrcAtual = args.som_data_uri;
+    }
+
+    if (args.tocar_som && args.estacoes_novas && args.estacoes_novas.length) {
+      args.estacoes_novas.forEach(function (nome) {
+        var marcador = marcadoresPorNome[nome];
+        if (marcador && map) map.panTo(marcador.getLatLng());
+        abrirPainel(chavePorNome[nome]);
+        if (audio) { audio.currentTime = 0; audio.play().catch(function () {}); }
+      });
+    }
+
+    Streamlit.setFrameHeight(650);
+  }
+
+  Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, aoRenderizar);
+  Streamlit.setComponentReady();
+  Streamlit.setFrameHeight(650);
+})();
+</script>
+</body>
+</html>
