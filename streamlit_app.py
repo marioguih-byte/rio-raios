@@ -811,6 +811,8 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
         status_texto=status_texto,
         estacoes_novas=estacoes_novas,
         tocar_som=bool(estacoes_novas),
+        # identifica ESTE alerta: o mapa só toca o som se o token for diferente do último que tocou
+        som_token=f"{time.time():.3f}" if estacoes_novas else None,
         som_data_uri=som_data_uri,
         key="bo_mapa_raios_live",
     )

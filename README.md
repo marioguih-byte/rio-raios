@@ -76,6 +76,11 @@ mapa não carrega.
 
 - Barra de rolagem mais grossa no site e no painel da unidade (Chrome/Edge); no Firefox vale a espessura "auto" do navegador.
 
+## Som do alerta
+
+- O som toca **uma única vez por alerta novo**. Antes, abrir/fechar o menu lateral (ou o painel de
+  alertas, ou redimensionar a janela) fazia o Streamlit reenviar os mesmos dados ao mapa e o som tocava de novo.
+
 ## Painel de alertas retrátil
 
 - A chave "🚨 Painel de alertas" (acima do mapa, à direita) abre e fecha o painel lateral de risco e

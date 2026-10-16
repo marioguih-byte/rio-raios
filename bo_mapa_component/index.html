@@ -177,6 +177,8 @@
 
   var map = null;
   var alturaQuadro = 650;
+  var ultimoSomToken = null;
+  try { ultimoSomToken = sessionStorage.getItem("rio_som_token"); } catch (e) {}
   var stationsLayer, aneisLayer, raiosLayer, celulasLayer, ufLayer, layersControl;
 
   // Contorno completo das UFs (inclui o limite externo do Brasil), linhas [lon, lat].
@@ -1050,9 +1052,13 @@
       audioSrcAtual = args.som_data_uri;
     }
 
-    // Alerta novo: só toca o som (o aviso em texto aparece no pop-up do Streamlit).
+    // Alerta novo: só toca o som (o aviso em texto aparece no pop-up do Streamlit), e UMA vez por alerta.
+    // O Streamlit reenvia os mesmos dados ao mapa quando a largura muda (abrir/fechar o menu lateral, o
+    // painel de alertas, redimensionar a janela...); sem o "token" o som tocaria de novo a cada vez.
     // O painel da unidade abre apenas quando a pessoa clica na unidade.
-    if (args.tocar_som && args.estacoes_novas && args.estacoes_novas.length && audio) {
+    if (args.tocar_som && args.som_token && args.estacoes_novas && args.estacoes_novas.length && audio && args.som_token !== ultimoSomToken) {
+      ultimoSomToken = args.som_token;
+      try { sessionStorage.setItem("rio_som_token", ultimoSomToken); } catch (e) {}
       audio.currentTime = 0;
       audio.play().catch(function () {});
     }
