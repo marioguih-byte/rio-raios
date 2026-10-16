@@ -85,6 +85,16 @@ mapa não carrega.
   primeira vez). Em tela cheia ou com o mapa ampliado (botão ⛶), 1 dedo move o mapa. No computador
   nada muda.
 
+## Alerta verde
+
+- Depois de um **alerta vermelho** (raio a menos de 30 km), quando passam **5 minutos sem nenhum raio
+  a menos de 30 km** da unidade, o app emite um **alerta verde** ("FIM DO ALERTA DE RAIOS"): ele entra na
+  lista de alertas (com "Quem recebeu" e texto para copiar) e abre um pop-up verde. **Não toca som.**
+- A unidade volta a aparecer como "Sem raios próximos" na hora (raios a ≤ 30 km anteriores ao
+  encerramento deixam de contar) e é **rearmada**: um raio novo gera um novo alerta vermelho/amarelo.
+- Só emite o verde se o GLM foi lido com sucesso naquele ciclo (sem dados não dá pra dizer que não há raios).
+- Constantes no topo do código: `VERDE_RAIO_KM = 30` e `VERDE_MINUTOS_SEM_RAIO = 5`.
+
 ## Som do alerta
 
 - O aviso de som fica nos dados do mapa até tocar (a reexecução que abre o pop-up podia substituí-lo antes).

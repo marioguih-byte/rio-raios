@@ -208,6 +208,11 @@ MAX_RAIOS_POR_FAIXA = 2500
 # O mapa mostra 20 min de raios, mas isso não muda a sensibilidade dos alertas.
 JANELA_ALERTA_MIN = 15
 
+# Alerta verde: depois de um alerta vermelho (raio a <= 30 km), a unidade é "liberada" quando passam
+# VERDE_MINUTOS_SEM_RAIO minutos sem nenhum raio a menos de VERDE_RAIO_KM km.
+VERDE_RAIO_KM = 30
+VERDE_MINUTOS_SEM_RAIO = 5
+
 GLM_BUCKET = "noaa-goes19"
 GLM_BASE_URL = f"https://{GLM_BUCKET}.s3.amazonaws.com"
 SOUTH_AMERICA_BOUNDS = {"lat_min": -58.0, "lat_max": 13.5, "lon_min": -82.0, "lon_max": -33.0}
@@ -224,6 +229,27 @@ def montar_mensagem_proximidade_raio(nivel_km, nome_estacao, meteorologista):
             f"* Raios próximos de sua região ({janela})\n"
             f"Válido até as {validade.strftime('%H:%M')}")
 
+def montar_mensagem_alerta_verde(nome_estacao, meteorologista):
+    agora = utc_para_brasilia(datetime.now(timezone.utc))
+    return (f"🟢 {agora.strftime('%d/%m/%Y')} - {agora.strftime('%H:%M')}\n"
+            f"* Local: {nome_estacao}\n"
+            f"* Meteorologista: {meteorologista or '(não informado)'}\n"
+            f"* FIM DO ALERTA DE RAIOS")
+
+def ultimo_raio_ate_km(raios_df, lat, lon, km):
+    """Horário (UTC) do raio mais recente a até `km` km do ponto, ou None se não houver."""
+    if raios_df is None or raios_df.empty: return None
+    lat_r = np.radians(pd.to_numeric(raios_df["lat"], errors="coerce").to_numpy(dtype=float))
+    lon_r = np.radians(pd.to_numeric(raios_df["lon"], errors="coerce").to_numpy(dtype=float))
+    ok = np.isfinite(lat_r) & np.isfinite(lon_r)
+    if not ok.any(): return None
+    lat1, lon1 = math.radians(lat), math.radians(lon)
+    a = np.sin((lat_r - lat1) / 2.0) ** 2 + np.cos(lat1) * np.cos(lat_r) * np.sin((lon_r - lon1) / 2.0) ** 2
+    d = 2.0 * 6371.0088 * np.arcsin(np.sqrt(np.clip(a, 0.0, 1.0)))
+    m = ok & (d <= km)
+    if not m.any(): return None
+    return pd.to_datetime(raios_df["time"], utc=True)[m].max().to_pydatetime()
+
 def classificar_risco_raio(dist_min_km):
     """Classifica o risco somente quando existe raio dentro de 50 km."""
     if dist_min_km is None or not np.isfinite(dist_min_km):
@@ -234,7 +260,7 @@ def classificar_risco_raio(dist_min_km):
         return 1, "Médio — raio a menos de 50 km", "🟡", "#ffc400", "amarelo"
     return 0, "Sem raios próximos", "🟢", "#19d36b", None
 
-def calcular_status_estacoes(df_stations, raios_df):
+def calcular_status_estacoes(df_stations, raios_df, encerrados=None):
     """Calcula a distância geodésica real até o raio mais próximo da janela atual."""
     linhas = []
     tem_raios = raios_df is not None and not raios_df.empty
@@ -244,6 +270,7 @@ def calcular_status_estacoes(df_stations, raios_df):
         valido = np.isfinite(raio_lat) & np.isfinite(raio_lon)
         raio_lat = np.radians(raio_lat[valido])
         raio_lon = np.radians(raio_lon[valido])
+        raio_t = pd.to_datetime(raios_df["time"], utc=True).dt.tz_localize(None).to_numpy()[valido]
 
     for _, row in df_stations.iterrows():
         nome_completo = str(row["estacao"])
@@ -256,7 +283,13 @@ def calcular_status_estacoes(df_stations, raios_df):
             dlat = raio_lat - lat1
             dlon = raio_lon - lon1
             a = np.sin(dlat / 2.0) ** 2 + np.cos(lat1) * np.cos(raio_lat) * np.sin(dlon / 2.0) ** 2
-            dist_min = float((2.0 * 6371.0088 * np.arcsin(np.sqrt(np.clip(a, 0.0, 1.0)))).min())
+            dists = 2.0 * 6371.0088 * np.arcsin(np.sqrt(np.clip(a, 0.0, 1.0)))
+            corte = (encerrados or {}).get(nome_completo)
+            if corte is not None:
+                # alerta verde já emitido: raios a <= 30 km ANTERIORES ao encerramento não contam mais
+                ignorar = (dists <= VERDE_RAIO_KM) & (raio_t <= np.datetime64(corte.replace(tzinfo=None)))
+                dists = np.where(ignorar, np.inf, dists)
+            dist_min = float(dists.min()) if np.isfinite(dists.min()) else None
 
         score, label, emoji, color, nivel_chave = classificar_risco_raio(dist_min)
         contatos = buscar_contatos_por_estacao(nome_completo)
@@ -482,7 +515,10 @@ def calcular_trajetoria_celula(celula):
 def montar_texto_copia(alerta):
     linhas = alerta["texto"].split("\n")
     quem = (alerta.get("quem_recebeu") or "").strip()
-    linhas.insert(-1, f"* Quem recebeu o alerta: {quem}")
+    if alerta.get("nivel") == "verde":
+        linhas.insert(-1, f"* Quem Recebeu o Alerta: {quem}".rstrip())
+    else:
+        linhas.insert(-1, f"* Quem recebeu o alerta: {quem}")
     return "\n".join(linhas)
 
 # ======================================================================
@@ -535,6 +571,7 @@ div[data-testid="stVerticalBlockBorderWrapper"] { border-radius: 12px !important
 
 if "alertas_raio_ativos" not in st.session_state: st.session_state.alertas_raio_ativos = []
 if "alertas_unidade" not in st.session_state: st.session_state.alertas_unidade = {}
+if "verde_estado" not in st.session_state: st.session_state.verde_estado = {}
 
 # Na primeira abertura, identifica imediatamente o meteorologista responsável.
 # O restante da interface só é exibido depois da confirmação do nome.
@@ -634,12 +671,16 @@ with _col_toggle:
 col_mapa, col_lado = st.columns([2.4, 1] if mostrar_painel_alertas else [1000, 1])
 st.session_state["_run_completo"] = True
 
-@st.dialog("⚡ Raio próximo de unidade(s)!")
-def _dialog_alerta_raio():
+def _corpo_dialog_alerta_raio():
     texto = st.session_state.get("dialog_raio_texto")
     if not texto: return
     n_unidades = texto.count("* Local:")
-    if n_unidades > 1:
+    if st.session_state.get("dialog_raio_so_verde"):
+        if n_unidades > 1:
+            st.success(f"**{n_unidades} unidades** sem raios a menos de {VERDE_RAIO_KM} km há {VERDE_MINUTOS_SEM_RAIO} min. Copie as mensagens abaixo:")
+        else:
+            st.success(f"Unidade sem raios a menos de {VERDE_RAIO_KM} km há {VERDE_MINUTOS_SEM_RAIO} min. Copie a mensagem abaixo:")
+    elif n_unidades > 1:
         st.warning(f"Foram detectados raios próximos de **{n_unidades} unidades** monitoradas ao mesmo tempo. Copie as mensagens abaixo:")
     else:
         st.warning("Foi detectado um raio próximo de uma unidade monitorada. Copie a mensagem abaixo:")
@@ -722,12 +763,48 @@ def _renderizar_mapa_ao_vivo():
             traj = calcular_trajetoria_celula(cel)
             if traj is not None: celulas_com_trajetoria.append({**cel, "trajetoria": traj})
 
-    df_status = calcular_status_estacoes(df_stations, raios_alerta)
+    def _encerrados_verde():
+        return {k: datetime.fromtimestamp(v["encerrado_ts"], tz=timezone.utc)
+                for k, v in st.session_state.alertas_unidade.items() if v.get("encerrado_ts")}
+
+    df_status = calcular_status_estacoes(df_stations, raios_alerta, encerrados=_encerrados_verde())
+
+    # ---- Alerta verde ----
+    # Só quando o GLM foi lido com sucesso agora (sem dados não dá pra dizer que não há raios).
+    notificacoes_verde = []
+    if erro is None:
+        agora_utc = datetime.now(timezone.utc)
+        for _, est in df_status.iterrows():
+            chave_v = est["estacao"]
+            sv = st.session_state.verde_estado.setdefault(chave_v, {"vermelho_ativo": False, "ultimo_raio": None})
+            if est["nivel_chave"] == "vermelho":
+                sv["vermelho_ativo"] = True
+            if not sv["vermelho_ativo"]:
+                continue
+            ultimo = ultimo_raio_ate_km(raios_df, float(est["lat"]), float(est["lon"]), VERDE_RAIO_KM)
+            if ultimo is not None and (sv["ultimo_raio"] is None or ultimo > sv["ultimo_raio"]):
+                sv["ultimo_raio"] = ultimo
+            if sv["ultimo_raio"] is None:
+                continue
+            if (agora_utc - sv["ultimo_raio"]) >= timedelta(minutes=VERDE_MINUTOS_SEM_RAIO):
+                agora_ts_v = time.time()
+                texto_v = montar_mensagem_alerta_verde(est["nome"], meteorologista)
+                st.session_state.alertas_raio_ativos.insert(0, {
+                    "id": f"{chave_v}_verde_{agora_ts_v}", "texto": texto_v, "estacao": chave_v,
+                    "nivel": "verde", "dist_km": None, "expira": agora_ts_v + 3600, "quem_recebeu": "",
+                })
+                notificacoes_verde.append(montar_texto_copia({"texto": texto_v, "nivel": "verde", "quem_recebeu": ""}))  # no pop-up já com a linha "Quem Recebeu o Alerta:"
+                sv["vermelho_ativo"], sv["ultimo_raio"] = False, None
+                reg = st.session_state.alertas_unidade.setdefault(chave_v, {
+                    "nivel": "vermelho", "dist_km": None, "notificado_ts": agora_ts_v, "expira_ts": agora_ts_v + 3600})
+                reg["encerrado_ts"] = agora_ts_v
+        if notificacoes_verde:  # o status passa a refletir o encerramento já neste ciclo
+            df_status = calcular_status_estacoes(df_stations, raios_alerta, encerrados=_encerrados_verde())
     st.session_state["_fragment_df_status"] = df_status
 
     estacoes_novas = []
+    notificacoes_desta_rodada = []
     if not raios_alerta.empty:
-        notificacoes_desta_rodada = []
         agora_ts = time.time()
         for _, est in df_status.iterrows():
             # Alerta só pode nascer de um raio REAL dentro de um dos
@@ -739,6 +816,14 @@ def _renderizar_mapa_ao_vivo():
 
             chave_estacao = est["estacao"]
             existente = st.session_state.alertas_unidade.get(chave_estacao)
+            if existente is not None and existente.get("encerrado_ts"):
+                # alerta já encerrado (verde): só volta a alertar se houver raio NOVO, depois do encerramento
+                novo = ultimo_raio_ate_km(raios_df, float(est["lat"]), float(est["lon"]), 30 if nivel_atual == "vermelho" else 50)
+                if novo is not None and novo.timestamp() > existente["encerrado_ts"]:
+                    st.session_state.alertas_unidade.pop(chave_estacao, None)
+                    existente = None
+                else:
+                    continue
             deve_notificar = False
             if existente is None:
                 deve_notificar = True
@@ -762,10 +847,13 @@ def _renderizar_mapa_ao_vivo():
                 notificacoes_desta_rodada.append(texto)
                 estacoes_novas.append(est["nome"])
 
-        if notificacoes_desta_rodada:
-            separador = "\n\n" + ("─" * 30) + "\n\n"
-            st.session_state.dialog_raio_texto = separador.join(notificacoes_desta_rodada)
-            st.session_state.dialog_raio_pendente = True
+
+    todas_notificacoes = notificacoes_desta_rodada + notificacoes_verde
+    if todas_notificacoes:
+        separador = "\n\n" + ("─" * 30) + "\n\n"
+        st.session_state.dialog_raio_texto = separador.join(todas_notificacoes)
+        st.session_state.dialog_raio_so_verde = not notificacoes_desta_rodada   # só alerta(s) verde(s) nesta rodada
+        st.session_state.dialog_raio_pendente = True
 
     st.session_state.alertas_raio_ativos = [a for a in st.session_state.alertas_raio_ativos if a["expira"] > time.time()]
 
@@ -854,7 +942,8 @@ with col_mapa:
 # Pop-up do alerta: mostrado uma única vez por alerta novo.
 if st.session_state.get("dialog_raio_pendente"):
     st.session_state["dialog_raio_pendente"] = False
-    _dialog_alerta_raio()
+    _titulo_dialog = "🟢 Alerta verde — sem raios próximos" if st.session_state.get("dialog_raio_so_verde") else "⚡ Raio próximo de unidade(s)!"
+    st.dialog(_titulo_dialog)(_corpo_dialog_alerta_raio)()
 st.session_state["_run_completo"] = False
 
 with col_lado:
