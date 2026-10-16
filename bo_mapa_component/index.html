@@ -168,46 +168,9 @@
 
   function destravarSom() {
     if (!audio) return;
-    // "Destrava" o áudio do navegador com um play() mudo — antes o alarme chegava a soar por um instante.
-    audio.muted = true;
-    audio.play().then(function () { audio.pause(); audio.currentTime = 0; audio.muted = false; })
-                .catch(function () { audio.muted = false; });
+    audio.play().then(function () { audio.pause(); audio.currentTime = 0; }).catch(function () {});
     document.removeEventListener("click", destravarSom, true);
     document.removeEventListener("keydown", destravarSom, true);
-  }
-
-  // ----------------------------------------------------------------
-  // Som do alerta: toca UMA vez por alerta novo, identificado por som_alerta_id (vem do Python).
-  // O Streamlit reenvia os últimos dados ao mapa sempre que a largura do componente muda (ex.: ao
-  // retrair/expandir a barra lateral); antes isso repetia o som. Agora um id já tocado é ignorado —
-  // e o último id tocado fica no sessionStorage, então vale mesmo se o iframe for recarregado.
-  // ----------------------------------------------------------------
-  var SOM_ID_KEY = "rio_raios_ultimo_som_id_v1";
-  var ultimoSomTocado = "";
-  try { ultimoSomTocado = sessionStorage.getItem(SOM_ID_KEY) || ""; } catch (e) {}
-
-  function tratarSomAlerta(somId) {
-    if (!somId || somId === ultimoSomTocado) return false;
-    ultimoSomTocado = somId;
-    try { sessionStorage.setItem(SOM_ID_KEY, somId); } catch (e) {}
-    if (!audio) return false;
-    audio.currentTime = 0;
-    audio.play().catch(function () {});
-    return true;
-  }
-
-  var GOES_TENTATIVAS_MAX = 5;
-  function reTentarTileGoes(ev) {
-    var tile = ev.tile;
-    if (!tile) return;
-    var n = tile._goesTent || 0;
-    if (n >= GOES_TENTATIVAS_MAX) return;
-    tile._goesTent = n + 1;
-    if (!tile._goesSrc) tile._goesSrc = tile.src;
-    setTimeout(function () {
-      if (!tile.parentNode) return;  // o tile já saiu do mapa (zoom/pan): não precisa mais
-      tile.src = tile._goesSrc + "&_r=" + tile._goesTent + "_" + Date.now();
-    }, 700 * (n + 1));
   }
 
   function corPorIdade(idadeMin) {
@@ -500,18 +463,8 @@
     });
     goesLayer = L.tileLayer.wms("https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi", {
       layers: "GOES-East_ABI_Band13_Clean_Infrared", format: "image/png", transparent: true, version: "1.1.1",
-      opacity: 0.6, zIndex: 10, attribution: "GOES-East ABI &copy; NOAA/NASA GIBS",
-      // O GOES-East IR tem ~2 km/pixel: acima do zoom 8 não há mais detalhe, então os tiles passam a ser
-      // só ampliados (menos requisições pesadas ao GIBS = menos tiles que falham ao dar zoom).
-      maxNativeZoom: 8,
-      // Durante o zoom animado (roda do mouse) não dispara uma enxurrada de requisições a cada nível:
-      // busca os tiles quando o zoom assenta, e mantém uma margem maior de tiles em volta.
-      updateWhenZooming: false, updateWhenIdle: true, keepBuffer: 4
+      opacity: 0.6, zIndex: 10, attribution: "GOES-East ABI &copy; NOAA/NASA GIBS"
     });
-    // O GIBS (WMS) às vezes falha/demora em tiles soltos, e o Leaflet não tenta de novo: o tile fica
-    // vazio e aparece o mapa-base por baixo (o "retângulo" desconfigurado). Aqui cada tile com erro é
-    // pedido de novo, até GOES_TENTATIVAS_MAX vezes, com espera crescente.
-    goesLayer.on("tileerror", reTentarTileGoes);
 
     fundoOSM.addTo(map);
     goesLayer.addTo(map);
@@ -580,6 +533,10 @@
       L.DomEvent.disableClickPropagation(el);
       L.DomEvent.disableScrollPropagation(el);
     });
+    // O painel de alertas do Streamlit pode ser aberto/fechado, mudando a largura do mapa.
+    if (window.ResizeObserver) {
+      new ResizeObserver(function () { if (map) map.invalidateSize(); }).observe(document.getElementById("map"));
+    }
     document.getElementById("legenda-toggle").addEventListener("click", function () {
       var aberta = document.getElementById("legenda-mapa").classList.toggle("aberta");
       document.getElementById("legenda-seta").textContent = aberta ? "▾" : "▸";
@@ -634,11 +591,9 @@
       (aneis || []).forEach(function (a) {
         // contorno escuro por baixo + traço colorido por cima: o anel aparece no mapa claro,
         // no satélite e por cima das cores do GOES-East
-        // espessura vem do Python (slider na barra lateral); o contorno escuro é 3 px mais grosso
-        var esp = (typeof a.esp === "number" && a.esp > 0) ? a.esp : 3;
-        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: "#0b1220", weight: esp + 3, fill: false, opacity: 0.6, interactive: false, renderer: canvasRenderer })
+        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: "#0b1220", weight: 8, fill: false, opacity: 0.6, interactive: false, renderer: canvasRenderer })
           .addTo(aneisLayer);
-        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: a.cor, weight: esp, fill: false, dashArray: "12, 9", opacity: 1, interactive: false, renderer: canvasRenderer })
+        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: a.cor, weight: 4.5, fill: false, dashArray: "12, 9", opacity: 1, interactive: false, renderer: canvasRenderer })
           .addTo(aneisLayer);
       });
     });
@@ -765,9 +720,12 @@
       audioSrcAtual = args.som_data_uri;
     }
 
-    // Alerta novo (id diferente do último tocado): só toca o som (o aviso em texto aparece no
-    // pop-up do Streamlit). O painel da unidade abre apenas quando a pessoa clica na unidade.
-    tratarSomAlerta(args.som_alerta_id);
+    // Alerta novo: só toca o som (o aviso em texto aparece no pop-up do Streamlit).
+    // O painel da unidade abre apenas quando a pessoa clica na unidade.
+    if (args.tocar_som && args.estacoes_novas && args.estacoes_novas.length && audio) {
+      audio.currentTime = 0;
+      audio.play().catch(function () {});
+    }
 
     Streamlit.setFrameHeight(650);
   }

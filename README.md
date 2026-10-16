@@ -49,6 +49,18 @@ mapa não carrega.
   **O arquivo `boletins_bo.py` precisa subir pro GitHub junto com o
   `streamlit_app.py`.**
 
+## Painel de alertas retrátil
+
+- A chave "🚨 Painel de alertas" (acima do mapa, à direita) abre e fecha o painel lateral de risco e
+  alertas. Começa **recolhido**, com o mapa ocupando a largura toda; os avisos de raio continuam
+  aparecendo em pop-up. A tela de boas-vindas agora diz "Bem-vindo ao RIO".
+
+## Cores das bolinhas dos boletins
+
+- Verde/amarelo/vermelho seguem os limiares: **chuva** <10 · 10–24 · ≥25 mm/dia; **rajada** 0–40 ·
+  41–61 · ≥62 km/h; **UV** 0–5 · 6–10 · ≥11; **umidade** ≥40% · 12–39% · <12%. O vento médio
+  segue como antes (40/60 km/h). O texto do boletim não mudou, só as bolinhas.
+
 ## Correção nos boletins
 
 - Todas as unidades agora começam no **dia de hoje em Brasília**. Antes cada unidade usava o dia do
@@ -123,7 +135,7 @@ mapa não carrega.
 ## Ajustes da última rodada
 
 - **Legenda retrátil**, recolhida por padrão (clique em "▸ Legenda" no canto do mapa).
-- **Sem upload de planilha:** o app usa sempre as 41 unidades cadastradas.
+- **Sem upload de planilha:** o app usa sempre as 40 unidades cadastradas.
 - **Anéis:** ficou só a caixa "Mostrar anéis de distância" (30/50/100/200 km sempre juntos).
 - **Divisão de UFs** no mapa (limites entre estados, ligável/desligável no controle de camadas).
 - **Bolinhas de raio maiores.**
