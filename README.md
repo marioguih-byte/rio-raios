@@ -63,14 +63,21 @@ mapa não carrega.
   legenda e o controle de camadas vão junto. Se o navegador não permitir a tela cheia nativa dentro do
   quadro do Streamlit, o botão passa a **aumentar a altura do mapa** (e reduzir ao clicar de novo).
 
-## GOES-East com menos atraso
+## GOES-East e tiles do mapa
 
-- **GOES-East:** o padrão é o **SSEC RealEarth** (GOES-19, banda 13 com realce de topos frios).
-  Também há banda 13 simples, IR Sandwich (topos convectivos) e GeoColor, e o NASA GIBS (~30 min de
-  atraso) continua disponível, desligado, no controle de camadas. O mapa mostra "imagem das HH:MM
-  (há X min)" para você conferir o atraso real. Crédito exigido pelo SSEC: "Source: SSEC RealEarth,
-  UW-Madison" (aparece na atribuição do mapa). Obs.: o SSEC pode exibir uma marca d'água
-  ("Size limit exceeded") quando o uso passa do limite gratuito dele.
+- **GOES-East padrão: NASA GIBS (banda 13, infravermelho limpo, ~30 min de atraso).** Usa os tiles prontos
+  (WMTS), que são rápidos e ficam em cache; se esse serviço não responder, o mapa cai sozinho no WMS do
+  GIBS (mais lento, mesma imagem). Os tiles são recarregados a cada 10 min.
+- **Alternativa quase em tempo real: SSEC RealEarth** (desligada por padrão; ligue no controle de camadas
+  do mapa): IR realçado, banda 13, IR Sandwich e GeoColor. Mostra "imagem das HH:MM (há X min)". Se o
+  SSEC não entregar nenhum tile, o mapa volta sozinho para o GIBS. Crédito: "Source: SSEC RealEarth,
+  UW-Madison". O SSEC pode exibir uma marca d'água ("Size limit exceeded") quando passa do limite gratuito.
+- **Tiles sem problema ao arrastar/dar zoom** (todas as camadas de tiles): mais tiles guardados em volta da
+  área visível, tiles carregados enquanto arrasta, sem buscar níveis intermediários durante o zoom,
+  sem o "fade" que fazia as sobreposições piscarem, tile com erro tentado de novo e depois transparente
+  (sem ícone de imagem quebrada), e acima do nível em que o provedor tem imagem o mapa amplia o último nível
+  em vez de pedir tiles que não existem (GOES: nível 6; satélite Esri: nível 17; OSM: nível 19).
+- A troca de imagem do SSEC é feita sem piscar: a camada nova carrega por cima e a antiga só sai depois.
 
 ## Barra de rolagem
 

@@ -718,62 +718,138 @@
   }
 
   function iniciarMapa() {
-    map = L.map("map", { zoomControl: true, minZoom: 4, maxZoom: 18, preferCanvas: true });
+    map = L.map("map", { zoomControl: true, minZoom: 4, maxZoom: 18, preferCanvas: true, fadeAnimation: false });
     window.__mapaRIO = map;
 
-    // Fundos: OpenStreetMap (padrão) e Satélite (Esri World Imagery) — ambos
-    // públicos, sem chave de API. GOES-East (NASA GIBS, infravermelho limpo,
-    // banda 13) entra como camada sobreposta, ligada por padrão.
-    var fundoOSM = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "&copy; OpenStreetMap contributors", maxNativeZoom: 19, maxZoom: 19, subdomains: "abc",
-      keepBuffer: 4, updateWhenZooming: false
-    });
-    var fundoSatelite = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+    // ------------------------------------------------------------------------------------------
+    // Camadas de tiles. Opções comuns pra o mapa não piscar nem ficar com buracos ao arrastar ou dar zoom:
+    //  - keepBuffer maior: mantém mais tiles em volta da área visível;
+    //  - updateWhenIdle=false: carrega tiles enquanto arrasta (não só quando para);
+    //  - updateWhenZooming=false: não busca níveis intermediários durante o zoom animado;
+    //  - maxNativeZoom: acima do nível em que o provedor tem imagem, o Leaflet amplia o último nível em vez
+    //    de pedir tiles que não existem (que apareciam em branco);
+    //  - tile com erro é tentado de novo uma vez e, se falhar, fica transparente (sem ícone de imagem quebrada);
+    //  - fadeAnimation=false no mapa: sem o "fade" dos tiles, que fazia as sobreposições piscarem.
+    // ------------------------------------------------------------------------------------------
+    var PIXEL_TRANSPARENTE = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+    function opcoesTiles(extra) {
+      return Object.assign({ keepBuffer: 6, updateWhenIdle: false, updateWhenZooming: false, updateInterval: 120,
+                             errorTileUrl: PIXEL_TRANSPARENTE }, extra);
+    }
+    function robustecer(camada) {
+      var estado = { erros: 0, ok: false };
+      camada.on("tileload", function () { estado.ok = true; estado.erros = 0; });
+      camada.on("tileerror", function (ev) {
+        estado.erros++;
+        var t = ev.tile;
+        if (t && !t._tentouDeNovo) {
+          t._tentouDeNovo = true;
+          setTimeout(function () { try { t.src = camada.getTileUrl(ev.coords); } catch (e) {} }, 1200 + Math.random() * 800);
+        }
+        // nenhum tile chegou e já são muitos erros: o serviço não está respondendo -> usa a alternativa
+        if (camada._aoFalharMuito && !estado.ok && estado.erros >= 8) { var f = camada._aoFalharMuito; camada._aoFalharMuito = null; f(); }
+      });
+      return camada;
+    }
+
+    // Fundos: OpenStreetMap (padrão) e Satélite (Esri World Imagery) — ambos públicos, sem chave de API.
+    var fundoOSM = robustecer(L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", opcoesTiles({
+      attribution: "&copy; OpenStreetMap contributors", maxNativeZoom: 19, maxZoom: 19, subdomains: "abc"
+    })));
+    var fundoSatelite = robustecer(L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", opcoesTiles({
       attribution: "Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community",
-      // O Esri não tem imagem em todos os níveis de zoom em todo lugar (fora das cidades devolve o aviso
-      // "Map data not yet available"): acima do nível 17 o Leaflet amplia os tiles do 17 em vez de buscar
-      // tiles inexistentes. keepBuffer/updateWhenZooming evitam buracos cinza enquanto o zoom anima.
-      maxNativeZoom: 17, maxZoom: 19, keepBuffer: 4, updateWhenZooming: false
-    });
-    // GOES-East. Padrão: SSEC RealEarth (imagem do GOES-19 com poucos minutos de atraso, em vez dos ~30 min do
-    // NASA GIBS). O horário da imagem mais recente é consultado a cada 5 min e mostrado no mapa. Se essa
-    // consulta falhar, as camadas continuam funcionando com a "imagem mais recente" sem mostrar o horário.
+      // O Esri não tem imagem em todos os níveis em todo lugar (fora das cidades devolve "Map data not yet
+      // available"): acima do nível 17 o Leaflet amplia os tiles do 17 em vez de buscar tiles inexistentes.
+      maxNativeZoom: 17, maxZoom: 19
+    })));
+
+    // GOES-East padrão: NASA GIBS, infravermelho limpo (banda 13), atraso de ~30 min. Usa os tiles prontos (WMTS,
+    // rápidos e em cache); se esse serviço não responder, cai sozinho no WMS (mais lento, mas a mesma imagem).
+    var GIBS_ID = "GOES-East_ABI_Band13_Clean_Infrared";
+    var ROTULO_GIBS = "🛰️ GOES-East IR · NASA GIBS (~30 min de atraso)";
+    var ATRIB_GIBS = "GOES-East ABI &copy; NOAA/NASA GIBS";
+    var gibsWms = robustecer(L.tileLayer.wms("https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi", opcoesTiles({
+      layers: GIBS_ID, format: "image/png", transparent: true, version: "1.1.1",
+      opacity: 0.6, zIndex: 10, maxNativeZoom: 6, maxZoom: 11, attribution: ATRIB_GIBS
+    })));
+    var gibsWmts = robustecer(L.tileLayer("https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/" + GIBS_ID + "/default/default/GoogleMapsCompatible_Level6/{z}/{y}/{x}.png", opcoesTiles({
+      opacity: 0.6, zIndex: 10, maxNativeZoom: 6, maxZoom: 11, attribution: ATRIB_GIBS
+    })));
+    var gibsAtiva = gibsWmts;
+    gibsWmts._aoFalharMuito = function () {
+      var ligada = map.hasLayer(gibsWmts);
+      layersControl.removeLayer(gibsWmts);
+      if (ligada) map.removeLayer(gibsWmts);
+      layersControl.addOverlay(gibsWms, ROTULO_GIBS);
+      if (ligada) gibsWms.addTo(map);
+      gibsAtiva = gibsWms;
+      atualizarPillGOES();
+    };
+
+    // Alternativa mais "quase tempo real": SSEC RealEarth (GOES-19 com poucos minutos de atraso). Fica desligada
+    // por padrão. O horário da imagem mais recente é consultado a cada 5 min e mostrado no mapa. Se o SSEC não
+    // entregar nenhum tile, o mapa troca sozinho pro GIBS.
     var RE = "https://realearth.ssec.wisc.edu";
     var PRODUTOS_GOES = [
-      { id: "G19-ABI-FD-BAND13-GRAD", rotulo: "🛰️ GOES-East IR realçado · SSEC (quase tempo real)", padrao: true },
-      { id: "G19-ABI-FD-BAND13", rotulo: "🛰️ GOES-East IR banda 13 · SSEC" },
-      { id: "G19-ABI-FD-ir-sandwich", rotulo: "🛰️ GOES-East IR Sandwich (topos convectivos) · SSEC" },
-      { id: "G19-ABI-FD-geo-color", rotulo: "🛰️ GOES-East GeoColor · SSEC" },
+      { id: "G19-ABI-FD-BAND13-GRAD", rotulo: "🛰️ GOES-East IR realçado · SSEC (quase tempo real)", nativo: 6 },
+      { id: "G19-ABI-FD-BAND13", rotulo: "🛰️ GOES-East IR banda 13 · SSEC", nativo: 6 },
+      { id: "G19-ABI-FD-ir-sandwich", rotulo: "🛰️ GOES-East IR Sandwich (topos convectivos) · SSEC", nativo: 6 },
+      { id: "G19-ABI-FD-geo-color", rotulo: "🛰️ GOES-East GeoColor · SSEC", nativo: 7 },
     ];
+    function fallbackParaGibs(camada) {
+      return function () {
+        if (!map.hasLayer(camada)) return;
+        map.removeLayer(camada);
+        if (!map.hasLayer(gibsAtiva)) gibsAtiva.addTo(map);
+        avisoMapa("O SSEC não respondeu: usando o GOES-East do NASA GIBS.");
+      };
+    }
+    function criarSSEC(p, url) {
+      var camada = robustecer(L.tileLayer(url, opcoesTiles({
+        opacity: 0.6, zIndex: 10, maxNativeZoom: p.nativo, maxZoom: 11, attribution: "Source: SSEC RealEarth, UW-Madison"
+      })));
+      camada._aoFalharMuito = fallbackParaGibs(camada);
+      return camada;
+    }
+
     var goesInfo = {};
     var overlaysGoes = {};
+    overlaysGoes[ROTULO_GIBS] = gibsWmts;
     fundoOSM.addTo(map);
+    gibsWmts.addTo(map);                                  // GOES-East (NASA GIBS) ligado por padrão
     PRODUTOS_GOES.forEach(function (p) {
-      var camada = L.tileLayer(RE + "/tiles/" + p.id + "/{z}/{x}/{y}.png", {
-        opacity: 0.6, zIndex: 10, maxNativeZoom: 8, maxZoom: 11, keepBuffer: 2, updateWhenZooming: false,
-        attribution: "Source: SSEC RealEarth, UW-Madison"
-      });
+      var camada = criarSSEC(p, RE + "/tiles/" + p.id + "/{z}/{x}/{y}.png");
       goesInfo[p.id] = { camada: camada, t: null, url: null };
       overlaysGoes[p.rotulo] = camada;
-      if (p.padrao) camada.addTo(map);
     });
-    // alternativa: NASA GIBS (atraso de ~30 min)
-    var gibsLayer = L.tileLayer.wms("https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi", {
-      layers: "GOES-East_ABI_Band13_Clean_Infrared", format: "image/png", transparent: true, version: "1.1.1",
-      opacity: 0.6, zIndex: 10, maxZoom: 11, updateWhenZooming: false, attribution: "GOES-East ABI &copy; NOAA/NASA GIBS"
-    });
-    overlaysGoes["🛰️ GOES-East IR · NASA GIBS (~30 min de atraso)"] = gibsLayer;
 
     function atualizarPillGOES() {
       var el = document.getElementById("goes-status");
       var ativo = PRODUTOS_GOES.filter(function (p) { return map.hasLayer(goesInfo[p.id].camada); })[0];
-      if (!ativo) { el.style.display = "none"; return; }
+      if (!ativo) {
+        if (map.hasLayer(gibsAtiva)) { el.style.display = "block"; el.textContent = "🛰️ GOES-East · NASA GIBS (imagem com ~30 min de atraso)"; }
+        else el.style.display = "none";
+        return;
+      }
       el.style.display = "block";
       var info = goesInfo[ativo.id];
       if (!info.t) { el.textContent = "🛰️ GOES-East (SSEC): imagem mais recente disponível"; return; }
       var min = Math.max(0, Math.round((Date.now() - info.t.getTime()) / 60000));
       var hora = info.t.toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
       el.textContent = "🛰️ GOES-East · imagem das " + hora + " (há " + min + " min)";
+    }
+    // Troca de imagem do SSEC sem "piscar": a camada nova carrega por cima e a antiga só sai quando a nova terminou.
+    function trocarUrl(p, url) {
+      var info = goesInfo[p.id], antiga = info.camada;
+      if (!info.url) { info.url = url; antiga.setUrl(url); return; }   // 1ª vez: só aponta pra imagem datada
+      info.url = url;
+      if (!map.hasLayer(antiga)) { antiga.setUrl(url, true); return; }    // camada desligada: só troca a URL
+      var nova = criarSSEC(p, url);
+      nova.once("load", function () { if (map.hasLayer(antiga)) map.removeLayer(antiga); });
+      nova.addTo(map);
+      layersControl.removeLayer(antiga);
+      layersControl.addOverlay(nova, p.rotulo);
+      info.camada = nova;
     }
     function atualizarGOES(p) {
       var info = goesInfo[p.id];
@@ -785,7 +861,7 @@
           achados.sort();
           var ult = achados[achados.length - 1], d = ult.slice(0, 8), h = ult.slice(9, 15);
           var url = RE + "/tiles/" + p.id + "/" + d + "/" + h + "/{z}/{x}/{y}.png";
-          if (url !== info.url) { info.url = url; info.camada.setUrl(url); }
+          if (url !== info.url) trocarUrl(p, url);
           info.t = new Date(Date.UTC(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8), +h.slice(0, 2), +h.slice(2, 4), +h.slice(4, 6)));
         })
         .catch(function () { info.t = null; })
@@ -801,8 +877,11 @@
       PRODUTOS_GOES.forEach(function (p) { if (goesInfo[p.id].camada === ev.layer && ev.type === "overlayadd") atualizarGOES(p); });
       atualizarPillGOES();
     });
-    PRODUTOS_GOES.forEach(atualizarGOES);
-    setInterval(function () { PRODUTOS_GOES.forEach(atualizarGOES); }, 300000);
+    atualizarPillGOES();
+    PRODUTOS_GOES.forEach(function (p) { if (map.hasLayer(goesInfo[p.id].camada)) atualizarGOES(p); });
+    // a cada 5 min o SSEC procura imagem nova; o GIBS atualiza a cada 10 min, então os tiles são recarregados nesse ritmo
+    setInterval(function () { PRODUTOS_GOES.forEach(function (p) { if (map.hasLayer(goesInfo[p.id].camada)) atualizarGOES(p); }); }, 300000);
+    setInterval(function () { if (map.hasLayer(gibsAtiva)) gibsAtiva.redraw(); }, 600000);
     setInterval(atualizarPillGOES, 30000);
 
     var bb = { lat_min: -34.0, lat_max: 5.5, lon_min: -74.5, lon_max: -32.0 };
