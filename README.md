@@ -94,8 +94,10 @@ mapa não carrega.
 
 ## Mapa mais alto e zoom do satélite
 
-- A altura do mapa acompanha a janela do navegador (~86% dela, entre 700 e 1100 px; 560 px no celular em pé)
-  e se ajusta se a janela mudar de tamanho.
+- A altura do mapa é **86% da altura da janela do navegador**, entre 700 e 1400 px (560 px no celular em pé), já
+  na abertura da página. Dá para ajustar na barra lateral, em "🗺️ Mapa → Altura do mapa (% da altura da janela)"
+  (60% a 120%); o valor fica lembrado junto com o nome e os alertas. (Antes o mapa podia abrir menor e só
+  "crescer" depois da tela cheia: o quadro do mapa começa estreito por instantes e era tratado como celular.)
 - Zoom máximo 18. O satélite (Esri) usa imagens reais até o nível 17 e amplia o 17 acima disso, em vez de
   pedir níveis que o Esri não tem em todo lugar (que mostravam "Map data not yet available"). As camadas
   do GOES, de ~2 km por pixel, somem acima do zoom 11 (esticadas demais, o navegador não consegue

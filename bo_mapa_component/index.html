@@ -206,13 +206,35 @@
 
   var map = null;
   // Altura do mapa: ~86% da altura da janela do navegador (entre 700 e 1100 px); no celular em pé, 560 px.
+  // Altura do mapa = alturaPct % da altura da JANELA do navegador, entre 700 e 1400 px (560 px no celular em pé).
+  // alturaPct vem da barra lateral do app (padrão 86).
+  // A largura usada pra decidir "celular" é a da janela do navegador (página-mãe), e não a do próprio quadro do
+  // mapa: logo que a página abre, o quadro pode estar com largura 0/300 px por alguns instantes, e isso fazia o
+  // mapa nascer com 560 px (altura de celular) e só "corrigir" quando a janela mudava de tamanho (ex.: tela cheia).
+  var alturaPct = 86;
+  function larguraJanela() {
+    try { return window.parent.innerWidth || window.innerWidth; } catch (e) { return window.innerWidth; }
+  }
+  var mapaExpandidoFlag = false;
+  // Recalcula a altura e aplica no mapa e no quadro do Streamlit (a menos que o mapa esteja ampliado).
+  function reajustarAltura() {
+    var nova = calcularAlturaBase();
+    if (mapaExpandidoAgora()) { alturaBase = nova; return; }
+    if (nova === alturaBase && nova === alturaQuadro) return;
+    alturaBase = alturaQuadro = nova;
+    var el = document.getElementById("map");
+    if (el) el.style.height = alturaQuadro + "px";
+    Streamlit.setFrameHeight(alturaQuadro);
+    if (map) map.invalidateSize();
+  }                       // espelha o estado do botão "mapa maior" (usado fora do iniciarMapa)
+  function mapaExpandidoAgora() { return mapaExpandidoFlag; }
   function calcularAlturaBase() {
-    if (window.innerWidth < 640) return 560;
+    if (larguraJanela() < 640) return 560;
     var h = 0;
     try { h = window.parent.innerHeight; } catch (e) {}      // o app e o mapa são da mesma origem
     if (!h) h = window.screen.height ? window.screen.height * 0.9 : 0;
     if (!h) return 820;
-    return Math.max(700, Math.min(1100, Math.round(h * 0.86)));
+    return Math.max(700, Math.min(1400, Math.round(h * alturaPct / 100)));
   }
   var alturaBase = calcularAlturaBase();
   var alturaQuadro = alturaBase;
@@ -959,8 +981,9 @@
     window.__avisoMapa = avisoMapa;
     function alternarMapaMaior() {
       mapaExpandido = !mapaExpandido;
+      mapaExpandidoFlag = mapaExpandido;
       var alturaTela = window.screen.height || 1000;
-      alturaQuadro = mapaExpandido ? ((window.innerWidth < 640) ? Math.round(alturaTela * 0.8) : Math.max(alturaBase + 150, Math.round(alturaTela * 0.92))) : alturaBase;
+      alturaQuadro = mapaExpandido ? ((larguraJanela() < 640) ? Math.round(alturaTela * 0.8) : Math.max(alturaBase + 150, Math.round(alturaTela * 0.92))) : alturaBase;
       document.getElementById("map").style.height = alturaQuadro + "px";
       Streamlit.setFrameHeight(alturaQuadro);
       setTimeout(function () { map.invalidateSize(); }, 100);
@@ -1029,22 +1052,13 @@
     document.addEventListener("fullscreenchange", aoMudarTelaCheia);
     document.addEventListener("webkitfullscreenchange", aoMudarTelaCheia);
 
-    // Se a janela do navegador mudar de tamanho, a altura do mapa acompanha (a menos que esteja ampliado).
-    try {
-      var tAjusteAltura = null;
-      window.parent.addEventListener("resize", function () {
-        clearTimeout(tAjusteAltura);
-        tAjusteAltura = setTimeout(function () {
-          if (mapaExpandido) return;
-          var nova = calcularAlturaBase();
-          if (Math.abs(nova - alturaBase) < 8) return;
-          alturaBase = alturaQuadro = nova;
-          document.getElementById("map").style.height = alturaQuadro + "px";
-          Streamlit.setFrameHeight(alturaQuadro);
-          map.invalidateSize();
-        }, 300);
-      });
-    } catch (e) {}
+    // Se a janela do navegador (ou o quadro do mapa) mudar de tamanho, a altura do mapa acompanha (a menos que esteja ampliado).
+    var tAjusteAltura = null;
+    function agendarReajuste() { clearTimeout(tAjusteAltura); tAjusteAltura = setTimeout(reajustarAltura, 250); }
+    window.addEventListener("resize", agendarReajuste);
+    try { window.parent.addEventListener("resize", agendarReajuste); } catch (e) {}
+    // Logo que a página abre o layout ainda está se acomodando: reconfere a altura algumas vezes.
+    [300, 900, 2000, 4000].forEach(function (ms) { setTimeout(reajustarAltura, ms); });
 
     // O painel de alertas do Streamlit pode ser aberto/fechado, mudando a largura do mapa.
     if (window.ResizeObserver) {
@@ -1225,6 +1239,10 @@
     atualizarStatus(args.status_texto);
     redesenharEstacoes(args.estacoes, args.aneis);
     redesenharRaios(args.raios, args.celulas, args.janela_min, args.mostrar_deslocamento, args.tamanho_raio);
+    if (typeof args.altura_pct === "number" && args.altura_pct !== alturaPct) {
+      alturaPct = args.altura_pct;
+    }
+    reajustarAltura();   // 1º render: a altura certa já vale antes do primeiro setFrameHeight
     atualizarLegenda(args.aneis);
     dadosAlertas = { estacoes: args.estacoes || [], alertas: args.alertas || [] };
     renderPainelAlertas();

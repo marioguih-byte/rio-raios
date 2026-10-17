@@ -582,7 +582,7 @@ div[data-testid="stVerticalBlockBorderWrapper"] { border-radius: 12px !important
 #  - o estado dos alertas fica guardado no servidor, identificado por um código na URL (?sid=...),
 #    e é restaurado quando a mesma URL reabre.
 # ----------------------------------------------------------------------------------------------
-_CHAVES_PERSISTENTES = ("meteorologista_nome", "alertas_raio_ativos", "alertas_unidade", "verde_estado", "som_token")
+_CHAVES_PERSISTENTES = ("meteorologista_nome", "alertas_raio_ativos", "alertas_unidade", "verde_estado", "som_token", "altura_mapa_pct")
 
 @st.cache_resource
 def _armazem_sessoes():
@@ -672,6 +672,12 @@ with st.sidebar:
     mostrar_aneis = st.checkbox("Mostrar anéis de distância ao redor das unidades", value=True)
     paleta_escolhida = st.selectbox("Cores dos anéis", list(PALETAS_ANEIS), disabled=not mostrar_aneis)
     cores_aneis = PALETAS_ANEIS[paleta_escolhida]
+
+    st.subheader("🗺️ Mapa")
+    if "altura_mapa_pct" not in st.session_state:
+        st.session_state["altura_mapa_pct"] = 86      # padrão (também pode vir restaurado da sessão anterior)
+    altura_mapa_pct = st.slider("Altura do mapa (% da altura da janela)", min_value=60, max_value=120, step=1, key="altura_mapa_pct",
+                                help="86% é o padrão. Aumente para deixar o mapa mais alto (entre 700 e 1400 px; no celular em pé fica fixo).")
 
 # --------------------------------------------------------------
 # Som de alerta personalizado: se a pessoa subiu um arquivo, ele vira um
@@ -960,6 +966,7 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
         aneis=aneis_payload,
         janela_min=raios_minutos,
         tamanho_raio=TAMANHO_BOLINHA_RAIO,
+        altura_pct=int(st.session_state.get("altura_mapa_pct", 86)),
         mostrar_deslocamento=bool(mostrar_deslocamento),
         status_texto=status_texto,
         estacoes_novas=estacoes_novas,
