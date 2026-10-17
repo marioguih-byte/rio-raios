@@ -85,6 +85,26 @@ mapa não carrega.
   primeira vez). Em tela cheia ou com o mapa ampliado (botão ⛶), 1 dedo move o mapa. No computador
   nada muda.
 
+## Mapa mais alto e zoom do satélite
+
+- A altura do mapa acompanha a janela do navegador (~86% dela, entre 700 e 1100 px; 560 px no celular em pé)
+  e se ajusta se a janela mudar de tamanho.
+- Zoom máximo 18. O satélite (Esri) usa imagens reais até o nível 17 e amplia o 17 acima disso, em vez de
+  pedir níveis que o Esri não tem em todo lugar (que mostravam "Map data not yet available"). As camadas
+  do GOES, de ~2 km por pixel, somem acima do zoom 11 (esticadas demais, o navegador não consegue
+  desenhar os tiles e eles somem/tremem). Os tiles ganharam buffer extra e só recarregam quando o zoom termina.
+
+## Sessão que reinicia (nome e alertas lembrados)
+
+- Quando a conexão da página cai (computador suspenso, aba em segundo plano, rede instável), o Streamlit abre uma
+  sessão nova e tudo voltava ao início. Agora:
+  - o **nome do meteorologista** fica na URL (`?nome=...`) e a sessão nova entra direto, sem pedir de novo;
+  - o **estado dos alertas** (alertas ativos, alertas já notificados, contagem do alerta verde, som) fica guardado no
+    servidor, ligado ao código `?sid=...` da URL, e é restaurado — sem repetir pop-up, som nem notificações.
+- Dica: guarde nos favoritos a URL com `?nome=SeuNome` para entrar já identificado.
+- Limite: se o próprio servidor do Streamlit reiniciar (ex.: falta de memória), o nome continua (está na URL),
+  mas o estado dos alertas é perdido. As configurações da barra lateral (paleta etc.) voltam ao padrão.
+
 ## Alerta verde
 
 - Depois de um **alerta vermelho** (raio a menos de 30 km), o app espera o **último ponto de raio dentro de

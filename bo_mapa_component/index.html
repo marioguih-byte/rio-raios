@@ -205,7 +205,16 @@
   };
 
   var map = null;
-  var alturaBase = (window.innerWidth < 640) ? 560 : 650;   // celular em pé: mapa um pouco mais baixo
+  // Altura do mapa: ~86% da altura da janela do navegador (entre 700 e 1100 px); no celular em pé, 560 px.
+  function calcularAlturaBase() {
+    if (window.innerWidth < 640) return 560;
+    var h = 0;
+    try { h = window.parent.innerHeight; } catch (e) {}      // o app e o mapa são da mesma origem
+    if (!h) h = window.screen.height ? window.screen.height * 0.9 : 0;
+    if (!h) return 820;
+    return Math.max(700, Math.min(1100, Math.round(h * 0.86)));
+  }
+  var alturaBase = calcularAlturaBase();
   var alturaQuadro = alturaBase;
   var ultimoSomToken = null;
   var somPendente = false;
@@ -709,16 +718,22 @@
   }
 
   function iniciarMapa() {
-    map = L.map("map", { zoomControl: true, minZoom: 4, maxZoom: 17, preferCanvas: true });
+    map = L.map("map", { zoomControl: true, minZoom: 4, maxZoom: 18, preferCanvas: true });
+    window.__mapaRIO = map;
 
     // Fundos: OpenStreetMap (padrão) e Satélite (Esri World Imagery) — ambos
     // públicos, sem chave de API. GOES-East (NASA GIBS, infravermelho limpo,
     // banda 13) entra como camada sobreposta, ligada por padrão.
     var fundoOSM = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "&copy; OpenStreetMap contributors", maxZoom: 19, subdomains: "abc"
+      attribution: "&copy; OpenStreetMap contributors", maxNativeZoom: 19, maxZoom: 19, subdomains: "abc",
+      keepBuffer: 4, updateWhenZooming: false
     });
     var fundoSatelite = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
-      attribution: "Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community", maxZoom: 19
+      attribution: "Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+      // O Esri não tem imagem em todos os níveis de zoom em todo lugar (fora das cidades devolve o aviso
+      // "Map data not yet available"): acima do nível 17 o Leaflet amplia os tiles do 17 em vez de buscar
+      // tiles inexistentes. keepBuffer/updateWhenZooming evitam buracos cinza enquanto o zoom anima.
+      maxNativeZoom: 17, maxZoom: 19, keepBuffer: 4, updateWhenZooming: false
     });
     // GOES-East. Padrão: SSEC RealEarth (imagem do GOES-19 com poucos minutos de atraso, em vez dos ~30 min do
     // NASA GIBS). O horário da imagem mais recente é consultado a cada 5 min e mostrado no mapa. Se essa
@@ -735,7 +750,8 @@
     fundoOSM.addTo(map);
     PRODUTOS_GOES.forEach(function (p) {
       var camada = L.tileLayer(RE + "/tiles/" + p.id + "/{z}/{x}/{y}.png", {
-        opacity: 0.6, zIndex: 10, maxNativeZoom: 8, maxZoom: 17, attribution: "Source: SSEC RealEarth, UW-Madison"
+        opacity: 0.6, zIndex: 10, maxNativeZoom: 8, maxZoom: 11, keepBuffer: 2, updateWhenZooming: false,
+        attribution: "Source: SSEC RealEarth, UW-Madison"
       });
       goesInfo[p.id] = { camada: camada, t: null, url: null };
       overlaysGoes[p.rotulo] = camada;
@@ -744,7 +760,7 @@
     // alternativa: NASA GIBS (atraso de ~30 min)
     var gibsLayer = L.tileLayer.wms("https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi", {
       layers: "GOES-East_ABI_Band13_Clean_Infrared", format: "image/png", transparent: true, version: "1.1.1",
-      opacity: 0.6, zIndex: 10, attribution: "GOES-East ABI &copy; NOAA/NASA GIBS"
+      opacity: 0.6, zIndex: 10, maxZoom: 11, updateWhenZooming: false, attribution: "GOES-East ABI &copy; NOAA/NASA GIBS"
     });
     overlaysGoes["🛰️ GOES-East IR · NASA GIBS (~30 min de atraso)"] = gibsLayer;
 
@@ -865,7 +881,7 @@
     function alternarMapaMaior() {
       mapaExpandido = !mapaExpandido;
       var alturaTela = window.screen.height || 1000;
-      alturaQuadro = mapaExpandido ? ((window.innerWidth < 640) ? Math.round(alturaTela * 0.8) : Math.max(900, Math.round(alturaTela * 0.88))) : alturaBase;
+      alturaQuadro = mapaExpandido ? ((window.innerWidth < 640) ? Math.round(alturaTela * 0.8) : Math.max(alturaBase + 150, Math.round(alturaTela * 0.92))) : alturaBase;
       document.getElementById("map").style.height = alturaQuadro + "px";
       Streamlit.setFrameHeight(alturaQuadro);
       setTimeout(function () { map.invalidateSize(); }, 100);
@@ -933,6 +949,23 @@
     }
     document.addEventListener("fullscreenchange", aoMudarTelaCheia);
     document.addEventListener("webkitfullscreenchange", aoMudarTelaCheia);
+
+    // Se a janela do navegador mudar de tamanho, a altura do mapa acompanha (a menos que esteja ampliado).
+    try {
+      var tAjusteAltura = null;
+      window.parent.addEventListener("resize", function () {
+        clearTimeout(tAjusteAltura);
+        tAjusteAltura = setTimeout(function () {
+          if (mapaExpandido) return;
+          var nova = calcularAlturaBase();
+          if (Math.abs(nova - alturaBase) < 8) return;
+          alturaBase = alturaQuadro = nova;
+          document.getElementById("map").style.height = alturaQuadro + "px";
+          Streamlit.setFrameHeight(alturaQuadro);
+          map.invalidateSize();
+        }, 300);
+      });
+    } catch (e) {}
 
     // O painel de alertas do Streamlit pode ser aberto/fechado, mudando a largura do mapa.
     if (window.ResizeObserver) {

@@ -3,6 +3,7 @@
 # Versão focada só em raios (GLM/GOES-19), por Mário Henrique.
 # ======================================================================
 import base64
+import copy
 import io
 import math
 import os
@@ -10,6 +11,7 @@ import re
 import threading
 import time
 import unicodedata
+import uuid
 import xml.etree.ElementTree as ET
 import zipfile
 from collections import defaultdict
@@ -571,6 +573,46 @@ div[data-testid="stVerticalBlockBorderWrapper"] { border-radius: 12px !important
 </style>
 """, unsafe_allow_html=True)
 
+# ----------------------------------------------------------------------------------------------
+# Persistência entre reinícios da sessão.
+# Se a conexão da página cai (computador suspenso, aba em segundo plano, rede instável...), o Streamlit
+# abre uma sessão NOVA e o st.session_state volta vazio: pedia o nome de novo e os alertas "recomeçavam"
+# (notificando e tocando som outra vez). Para evitar isso:
+#  - o nome fica na URL (?nome=...) e é lido de lá se a sessão nova estiver sem nome;
+#  - o estado dos alertas fica guardado no servidor, identificado por um código na URL (?sid=...),
+#    e é restaurado quando a mesma URL reabre.
+# ----------------------------------------------------------------------------------------------
+_CHAVES_PERSISTENTES = ("meteorologista_nome", "alertas_raio_ativos", "alertas_unidade", "verde_estado", "som_token")
+
+@st.cache_resource
+def _armazem_sessoes():
+    return {}
+
+def _salvar_estado():
+    try:
+        arm = _armazem_sessoes()
+        sid = st.query_params.get("sid")
+        if not sid:
+            return
+        arm[sid] = {"_ts": time.time(), **{k: copy.deepcopy(st.session_state[k]) for k in _CHAVES_PERSISTENTES if k in st.session_state}}
+        if len(arm) > 60:  # mantém só os mais recentes
+            for velho in sorted(arm, key=lambda k: arm[k].get("_ts", 0))[:len(arm) - 60]:
+                arm.pop(velho, None)
+    except Exception:
+        pass  # guardar o estado nunca pode derrubar o app
+
+if not st.query_params.get("sid"):
+    st.query_params["sid"] = uuid.uuid4().hex[:12]
+if "_estado_restaurado" not in st.session_state:
+    st.session_state["_estado_restaurado"] = True
+    _salvo = _armazem_sessoes().get(st.query_params.get("sid"))
+    if _salvo:
+        for _k in _CHAVES_PERSISTENTES:
+            if _k in _salvo and _k not in st.session_state:
+                st.session_state[_k] = copy.deepcopy(_salvo[_k])
+    if not str(st.session_state.get("meteorologista_nome", "")).strip() and str(st.query_params.get("nome", "")).strip():
+        st.session_state["meteorologista_nome"] = str(st.query_params.get("nome")).strip()
+
 if "alertas_raio_ativos" not in st.session_state: st.session_state.alertas_raio_ativos = []
 if "alertas_unidade" not in st.session_state: st.session_state.alertas_unidade = {}
 if "verde_estado" not in st.session_state: st.session_state.verde_estado = {}
@@ -592,12 +634,17 @@ if "meteorologista_nome" not in st.session_state or not str(st.session_state.get
             nome = str(nome).strip()
             if nome:
                 st.session_state.meteorologista_nome = nome
+                st.query_params["nome"] = nome
+                _salvar_estado()
                 st.rerun()
             else:
                 st.warning("Digite o nome do meteorologista para continuar.")
 
     _dialog_meteorologista_inicial()
     st.stop()
+
+if str(st.session_state.get("meteorologista_nome", "")).strip() and st.query_params.get("nome") != st.session_state["meteorologista_nome"]:
+    st.query_params["nome"] = st.session_state["meteorologista_nome"]
 
 with st.sidebar:
     st.header("⚙ Configuração")
@@ -608,6 +655,8 @@ with st.sidebar:
     )
     if meteorologista.strip() != st.session_state.get("meteorologista_nome", ""):
         st.session_state.meteorologista_nome = meteorologista.strip()
+        if meteorologista.strip():
+            st.query_params["nome"] = meteorologista.strip()
 
     df_stations = pd.DataFrame(ESTACOES_PADRAO)
 
@@ -872,6 +921,7 @@ def _renderizar_mapa_ao_vivo():
         status_texto = f"⚠️ GLM indisponível: {erro_raios}"
         st.warning(f"GLM indisponível no momento: {erro_raios}")
 
+    _salvar_estado()
     _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas, status_texto)
 
     # Alerta novo surgiu numa atualização automática (só o fragmento rodou): pede uma
@@ -937,6 +987,7 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
             st.session_state.alertas_raio_ativos = [x for x in st.session_state.alertas_raio_ativos if x.get("id") != evento.get("id")]
         elif tipo == "limpar":
             st.session_state.alertas_raio_ativos = []
+        _salvar_estado()
         st.rerun()
 
 with col_mapa:
@@ -1002,6 +1053,7 @@ with col_lado:
                 else:
                     if st.button("🗑️ Limpar todos os alertas", key="limpar_todos_alertas", use_container_width=True):
                         st.session_state.alertas_raio_ativos = []
+                        _salvar_estado()
                         st.rerun(scope="fragment")
                     for a in st.session_state.alertas_raio_ativos:
                         with st.container(border=True):
@@ -1016,6 +1068,7 @@ with col_lado:
                             with col_del:
                                 if st.button("✕", key=f"excluir_alerta_{a.get('id', a['texto'])}", help="Excluir este alerta"):
                                     st.session_state.alertas_raio_ativos = [x for x in st.session_state.alertas_raio_ativos if x.get("id") != a.get("id")]
+                                    _salvar_estado()
                                     st.rerun(scope="fragment")
 
         st.fragment(run_every=intervalo_raios_seg)(_corpo_painel_lateral)()
@@ -1126,3 +1179,4 @@ def _boletins_fragmento(unidades_base):
 
 st.divider()
 st.fragment(run_every=2 if _boletins_rodando else None)(_boletins_fragmento)(unidades_boletim)
+_salvar_estado()
