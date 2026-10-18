@@ -5,7 +5,7 @@ Gera boletins de previsão do tempo (formato WhatsApp) para as unidades,
 usando Open-Meteo com ENSEMBLE (MÉDIA CONSENSO) entre ECMWF, ICON e GFS.
 
 Uso:
-    python gerar_boletins.py                       # usa as 41 unidades embutidas em UNIDADES
+    python gerar_boletins.py                       # usa as 40 unidades embutidas em UNIDADES
     python gerar_boletins.py --csv unidades.csv    # CSV com colunas: nome,lat,lon
     python gerar_boletins.py --filtro Macaé        # só unidades cujo nome contém o texto
     python gerar_boletins.py --dias 4 --saida boletins
@@ -48,7 +48,7 @@ LIM_RAJADA = (41, 62)     # km/h: verde 0–40 · amarelo 41–61 · vermelho >=
 LIM_UV = (6, 11)          # índice: verde 0–5 · amarelo 6–10 · vermelho >= 11
 LIM_UMID = (40, 12)       # %, INVERTIDO: verde >= 40 · amarelo 12–39 · vermelho < 12
 
-# 41 unidades (nome, (lat, lon))
+# 40 unidades (nome, (lat, lon))
 UNIDADES = {
     "UTE Termocamaçari - UTE TCA": (-12.666868, -38.314687),
     "UTE Termobahia - UTE TBA": (-12.703235, -38.564904),
@@ -70,7 +70,6 @@ UNIDADES = {
     "UFN III - Unidade de Fertilizantes Nitrogenados III": (-20.985900, -51.838300),
     "Unidade de Tratamento de Gás de Caraguatatuba - UTGCA": (-23.654191, -45.501209),
     "Refinaria Presidente Bernardes - RPBC": (-23.873326, -46.427572),
-    "UTE Cubatão - UTE CBT": (-23.875735, -46.431387),
     "Refinaria Henrique Lage - REVAP": (-23.184796, -45.815806),
     "Refinaria de Capuava - RECAP": (-23.656681, -46.480883),
     "Refinaria de Paulínia - REPLAN": (-22.729589, -47.147712),
@@ -86,7 +85,7 @@ UNIDADES = {
     "Porto Açu": (-21.864737, -41.016444),
     "Porto Aratu": (-12.780132, -38.496764),
     "Porto TMIB": (-10.824129, -36.946301),
-    "Porto Belém": (-1.439901, -48.494920),
+    "Porto Belém": (-1.341476, -48.481309),
     "Porto Valença": (-13.369369, -39.071252),
     "Porto Guamaré": (-5.106692, -36.319592),
     "Porto Mucuripe": (-3.713117, -38.474037),
