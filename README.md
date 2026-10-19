@@ -63,13 +63,23 @@ mapa não carrega.
   legenda e o controle de camadas vão junto. Se o navegador não permitir a tela cheia nativa dentro do
   quadro do Streamlit, o botão passa a **aumentar a altura do mapa** (e reduzir ao clicar de novo).
 
-## Enviar os boletins pelo WhatsApp (manual)
+## Enviar os boletins pelo WhatsApp Web (manual)
 
-Na seção de boletins, depois de gerar, há **📲 Enviar pelo WhatsApp (manual)**: uma lista com todas as unidades, cada uma
-com o botão **Abrir no WhatsApp**, que abre o WhatsApp com o boletim já escrito; você escolhe o grupo e envia. Há uma
-caixa **enviado** por unidade para controlar o que já foi. Não há automação (sem risco de banimento) e o app não acessa a
-conta nem os grupos do WhatsApp. Para entrar no WhatsApp Web: abra https://web.whatsapp.com e, no celular, WhatsApp →
-Aparelhos conectados → Conectar um aparelho → leia o QR code.
+Na seção de boletins, depois de gerar, há **📲 Enviar pelo WhatsApp Web (manual)**: uma lista com todas as unidades.
+1. **1️⃣ Abrir / entrar no WhatsApp Web** abre o WhatsApp Web numa aba nomeada pelo app (entre com o QR code se pedir).
+2. **Enviar no WhatsApp Web**, na linha da unidade, abre **essa mesma aba** com o boletim já escrito; você escolhe o grupo e envia.
+   A linha clicada fica verde e há uma caixa **enviado** (lembrada na aba do navegador, recomeça ao gerar novos boletins).
+- O navegador não deixa um site controlar uma aba aberta por você; por isso o app reaproveita a aba que ele mesmo abriu.
+  Se já houver outra aba do WhatsApp Web aberta, feche-a antes (ele só funciona em uma aba por vez; se aparecer "aberto em
+  outra janela", clique em **Usar aqui**). Se o navegador bloquear a aba, permita pop-ups para o site.
+- No celular os botões abrem o aplicativo do WhatsApp (`wa.me`).
+- Não há automação (sem risco de banimento) e o app não acessa a conta nem os grupos do WhatsApp.
+
+## Ordem alfabética
+
+- As unidades aparecem em **ordem alfabética** (pelo nome mostrado, sem diferenciar acento nem maiúsculas) na geração dos
+  boletins, no arquivo consolidado e no `.zip`, na lista do WhatsApp e na busca do mapa. A aba **Risco** continua por
+  gravidade/distância e os alertas por horário, porque aí a ordem importa.
 
 ## GOES-East e tiles do mapa
 

@@ -5,13 +5,13 @@
 import base64
 import copy
 import io
+import json
 import math
 import os
 import re
 import threading
 import time
 import unicodedata
-from urllib.parse import quote
 import uuid
 import xml.etree.ElementTree as ET
 import zipfile
@@ -142,6 +142,12 @@ def buscar_contatos_por_estacao(nome_estacao):
 # ======================================================================
 # ESTAÇÕES
 # ======================================================================
+def _chave_alfabetica(nome_completo):
+    """Chave de ordem alfabética pelo nome mostrado (antes do " - "), sem acento nem diferença de maiúsculas."""
+    t = unicodedata.normalize("NFKD", str(nome_completo).split(" - ")[0]).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"\s+", " ", t.lower()).strip()
+
+
 ESTACOES_PADRAO = [
     {"estacao": "UTE Termocamaçari - UTE TCA", "lat": -12.66687, "lon": -38.31469},
     {"estacao": "UTE Termobahia - UTE TBA", "lat": -12.70324, "lon": -38.5649},
@@ -184,6 +190,7 @@ ESTACOES_PADRAO = [
     {"estacao": "Porto Mucuripe", "lat": -3.71312, "lon": -38.47404},
     {"estacao": "Porto Paracuru", "lat": -3.40115, "lon": -39.0109},
 ]
+ESTACOES_PADRAO.sort(key=lambda e: _chave_alfabetica(e["estacao"]))   # unidades em ordem alfabética em todo o app
 
 # Anéis de distância (km) e paletas de cor. No mapa cada anel ganha também um contorno
 # escuro por baixo, pra se destacar do mapa e do GOES-East.
@@ -1104,42 +1111,86 @@ def _worker_boletins(estado, unidades, dias):
 unidades_boletim = dict(boletins_bo.UNIDADES)
 
 
-def _secao_whatsapp_manual(resultados):
-    """Lista de unidades, cada uma com um botão que abre o WhatsApp com o boletim já escrito.
+_HTML_WHATSAPP = """<!doctype html><html><head><meta charset="utf-8"><style>
+  html, body { margin:0; padding:0; background:transparent; color:#e6e6e6; font:14px 'Segoe UI', Arial, sans-serif; }
+  .topo { display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:2px 2px 10px; }
+  button { cursor:pointer; border-radius:8px; border:1px solid #3a4150; background:#232834; color:#f1f1f1; padding:8px 14px; font:inherit; }
+  button:hover { background:#2e3544; }
+  button.principal { background:#25d366; border-color:#25d366; color:#06210f; font-weight:600; }
+  button.principal:hover { background:#3be07b; }
+  .linha { display:flex; align-items:center; gap:12px; padding:7px 10px; border:1px solid #2a303b; border-radius:9px; margin-bottom:6px; background:#161a22; }
+  .linha.aberto { border-color:#25d366; background:#142019; }
+  .nome { flex:1; font-weight:600; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  label { display:flex; align-items:center; gap:6px; color:#c9cdd6; white-space:nowrap; cursor:pointer; }
+  #aviso { display:none; margin:0 0 8px; padding:8px 10px; border-radius:8px; background:#3a2b12; border:1px solid #8a6417; color:#ffd78a; }
+  .nota { color:#8b93a3; font-size:12.5px; margin:2px 2px 10px; }
+</style></head><body>
+<div class="topo">
+  <button class="principal" id="entrar">1️⃣ Abrir / entrar no WhatsApp Web</button>
+  <span class="nota" id="nota"></span>
+</div>
+<div id="aviso"></div>
+<div id="lista"></div>
+<script>
+  var ITENS = __ITENS__;
+  var GERACAO = "__GERACAO__";
+  var NOME_ABA = "rio_whatsapp_web";          // o app abre o WhatsApp Web nesta aba e reaproveita a MESMA aba nos próximos cliques
+  var celular = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  function lerFlag(k) { try { return sessionStorage.getItem(k) === "1"; } catch (e) { return false; } }
+  function gravarFlag(k, v) { try { sessionStorage.setItem(k, v ? "1" : "0"); } catch (e) {} }
+  function aviso(t) { var a = document.getElementById("aviso"); a.textContent = t; a.style.display = t ? "block" : "none"; }
+  function abrir(url) {
+    var w = window.open(url, NOME_ABA);
+    if (!w) { aviso("O navegador bloqueou a abertura da aba. Permita pop-ups para este site e clique de novo."); return false; }
+    aviso(""); try { w.focus(); } catch (e) {}
+    return true;
+  }
+  document.getElementById("nota").textContent = celular
+    ? "No celular o link abre o aplicativo do WhatsApp."
+    : "Abre numa aba só; os botões abaixo reaproveitam essa mesma aba.";
+  document.getElementById("entrar").addEventListener("click", function () {
+    abrir(celular ? "https://wa.me/" : "https://web.whatsapp.com/");
+  });
+  var lista = document.getElementById("lista");
+  ITENS.forEach(function (it) {
+    var kAberto = "rio_wa_aberto_" + GERACAO + "_" + it.id, kOk = "rio_wa_ok_" + GERACAO + "_" + it.id;
+    var linha = document.createElement("div"); linha.className = "linha" + (lerFlag(kAberto) ? " aberto" : "");
+    var nome = document.createElement("div"); nome.className = "nome"; nome.textContent = it.nome; nome.title = it.nome;
+    var b = document.createElement("button"); b.textContent = "📲 Enviar no WhatsApp Web";
+    b.addEventListener("click", function () {
+      var url = (celular ? "https://wa.me/?text=" : "https://web.whatsapp.com/send?text=") + encodeURIComponent(it.texto);
+      if (abrir(url)) { gravarFlag(kAberto, true); linha.classList.add("aberto"); }
+    });
+    var lab = document.createElement("label"); var cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = lerFlag(kOk);
+    cb.addEventListener("change", function () { gravarFlag(kOk, cb.checked); });
+    lab.appendChild(cb); lab.appendChild(document.createTextNode("enviado"));
+    linha.appendChild(nome); linha.appendChild(b); linha.appendChild(lab); lista.appendChild(linha);
+  });
+</script></body></html>"""
+
+
+def _secao_whatsapp_manual(resultados, geracao_id):
+    """Lista de unidades; cada botão abre o WhatsApp Web (numa aba que o app reaproveita) com o boletim já escrito.
     Quem escolhe o grupo e aperta "enviar" é a pessoa: nenhuma automação, sem risco de banimento."""
-    with st.expander("📲 Enviar pelo WhatsApp (manual)", expanded=True):
+    with st.expander("📲 Enviar pelo WhatsApp Web (manual)", expanded=True):
         st.markdown(
             "**Como usar**\n"
-            "1. Entre no **WhatsApp Web** (passo a passo logo abaixo) e deixe essa aba aberta.\n"
-            "2. Na linha da unidade, clique em **Abrir no WhatsApp**. Na página que abrir, escolha **usar o WhatsApp Web**.\n"
-            "3. O WhatsApp abre com o boletim já escrito: escolha o **grupo** da unidade e envie.\n"
-            "4. Volte aqui e marque **enviado** para controlar o que já foi."
+            "1. Clique em **1️⃣ Abrir / entrar no WhatsApp Web**. Se pedir, entre com o QR code "
+            "(WhatsApp no celular → *Aparelhos conectados* → *Conectar um aparelho*). Essa aba fica aberta.\n"
+            "2. Na linha da unidade, clique em **Enviar no WhatsApp Web**: **a mesma aba** abre com o boletim já escrito. "
+            "Escolha o **grupo** da unidade e envie.\n"
+            "3. Volte para esta aba, clique na próxima unidade e marque **enviado** para controlar."
         )
-        with st.expander("Como entrar no WhatsApp Web"):
-            st.markdown(
-                "1. No computador, abra **https://web.whatsapp.com**. Vai aparecer um QR code.\n"
-                "2. No celular, abra o WhatsApp → **Aparelhos conectados** (Android: menu ⋮ ou Configurações; iPhone: aba "
-                "Configurações) → **Conectar um aparelho** e aponte a câmera para o QR code. "
-                "(Se preferir, há a opção de conectar usando o número de telefone.)\n"
-                "3. Pronto: o WhatsApp Web fica conectado neste navegador. Deixe a aba aberta e o celular com internet. "
-                "Se pedir de novo, repita o passo 2.\n\n"
-                "Dica: o app só abre o WhatsApp com o texto pronto; ele **não** acessa a sua conta nem os seus grupos, "
-                "por isso a lista abaixo é por unidade e o grupo você escolhe no WhatsApp."
-            )
-        st.caption(f"{len(resultados)} boletim(ns) · marque ✓ quando enviar")
-        for nome, texto in resultados.items():
-            chave_ok = f"wa_ok_{boletins_bo.slug(nome)}"
-            c1, c2, c3 = st.columns([5, 3, 2], vertical_alignment="center")
-            with c1:
-                st.markdown(f"**{nome.split(' - ')[0]}**" + ("  ✅" if st.session_state.get(chave_ok) else ""))
-            with c2:
-                url = f"https://wa.me/?text={quote(texto, safe='')}"
-                if len(url) <= 7500:
-                    st.link_button("📲 Abrir no WhatsApp", url, use_container_width=True)
-                else:
-                    st.caption("texto longo: copie o boletim no quadro acima")
-            with c3:
-                st.checkbox("enviado", key=chave_ok)
+        st.caption("O navegador não deixa um site controlar uma aba que você abriu por conta própria: por isso o primeiro botão "
+                   "abre o WhatsApp Web numa aba do app, que passa a ser reaproveitada. Se já tiver outra aba do WhatsApp Web "
+                   "aberta, feche-a antes (ele só funciona em uma aba por vez; se aparecer \"aberto em outra janela\", "
+                   "clique em **Usar aqui**). O app não acessa a sua conta nem os seus grupos.")
+        itens = [{"id": boletins_bo.slug(n), "nome": n.split(" - ")[0], "texto": t} for n, t in resultados.items()]
+        html = (_HTML_WHATSAPP
+                .replace("__ITENS__", json.dumps(itens, ensure_ascii=False).replace("</", "<\\/"))
+                .replace("__GERACAO__", re.sub(r"[^0-9A-Za-z]", "", str(geracao_id))))
+        components.html(html, height=min(110 + 50 * len(itens), 650), scrolling=True)
+
 
 _estado_boletins = st.session_state.get("boletins_estado")
 _boletins_rodando = bool(_estado_boletins and _estado_boletins["rodando"])
@@ -1158,15 +1209,15 @@ def _secao_boletins(unidades_base):
     with c2:
         dias = st.number_input("Dias de previsão", min_value=1, max_value=7, value=boletins_bo.DIAS_PREVISAO, key="bol_dias", disabled=rodando)
 
-    unidades = {n: c for n, c in unidades_base.items() if not filtro or filtro.lower() in n.lower()}
+    unidades = {n: c for n, c in sorted(unidades_base.items(), key=lambda kv: _chave_alfabetica(kv[0]))
+                if not filtro or filtro.lower() in n.lower()}   # ordem alfabética: vale para a geração, o arquivo e a lista do WhatsApp
     st.caption(f"{len(unidades)} unidade(s) selecionada(s).")
 
     if st.button(f"📨 Gerar boletins ({len(unidades)})", key="bol_gerar", type="primary", disabled=(not unidades) or rodando):
         novo = {"rodando": True, "resultados": {}, "erros": [], "feitos": 0, "total": len(unidades), "atual": "",
                 "data": utc_para_brasilia(datetime.now(timezone.utc)).strftime("%Y%m%d"),
                 "hoje_dd_mm": utc_para_brasilia(datetime.now(timezone.utc)).strftime("%d/%m")}
-        for _k in [k for k in st.session_state if str(k).startswith("wa_ok_")]:
-            del st.session_state[_k]
+        novo["gerado_id"] = f"{int(time.time())}"   # muda a cada geração: o "enviado/aberto" da lista recomeça
         st.session_state["boletins_estado"] = novo
         threading.Thread(target=_worker_boletins, args=(novo, unidades, int(dias)), daemon=True).start()
         st.rerun()
@@ -1214,7 +1265,7 @@ def _secao_boletins(unidades_base):
     escolha = st.selectbox("Ver boletim da unidade", list(resultados), key="bol_ver")
     st.code(resultados[escolha], language=None)
 
-    _secao_whatsapp_manual(resultados)
+    _secao_whatsapp_manual(resultados, estado.get("gerado_id", estado.get("data", "")))
 
 
 # Fragmento próprio: interagir com os boletins não reconstrói o mapa. Enquanto

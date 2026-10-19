@@ -1124,6 +1124,10 @@
           .addTo(aneisLayer);
       });
     });
+    // lista da busca em ordem alfabética (pt-BR, sem diferenciar acento/maiúscula)
+    var nomesBusca = (estacoes || []).map(function (e) { return String(e.nome); })
+      .sort(function (a, b) { return a.localeCompare(b, "pt-BR", { sensitivity: "base" }); });
+    opcoes = nomesBusca.map(function (n) { return '<option value="' + n.replace(/"/g, "&quot;") + '">'; }).join("");
     document.getElementById("busca-unidade-lista").innerHTML = opcoes;
   }
 
