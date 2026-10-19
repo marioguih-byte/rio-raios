@@ -63,6 +63,14 @@ mapa não carrega.
   legenda e o controle de camadas vão junto. Se o navegador não permitir a tela cheia nativa dentro do
   quadro do Streamlit, o botão passa a **aumentar a altura do mapa** (e reduzir ao clicar de novo).
 
+## Enviar os boletins pelo WhatsApp (manual)
+
+Na seção de boletins, depois de gerar, há **📲 Enviar pelo WhatsApp (manual)**: uma lista com todas as unidades, cada uma
+com o botão **Abrir no WhatsApp**, que abre o WhatsApp com o boletim já escrito; você escolhe o grupo e envia. Há uma
+caixa **enviado** por unidade para controlar o que já foi. Não há automação (sem risco de banimento) e o app não acessa a
+conta nem os grupos do WhatsApp. Para entrar no WhatsApp Web: abra https://web.whatsapp.com e, no celular, WhatsApp →
+Aparelhos conectados → Conectar um aparelho → leia o QR code.
+
 ## GOES-East e tiles do mapa
 
 - **GOES-East padrão: NASA GIBS (banda 13, infravermelho limpo, ~30 min de atraso).** Usa os tiles prontos

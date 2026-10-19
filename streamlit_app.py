@@ -11,6 +11,7 @@ import re
 import threading
 import time
 import unicodedata
+from urllib.parse import quote
 import uuid
 import xml.etree.ElementTree as ET
 import zipfile
@@ -1102,6 +1103,44 @@ def _worker_boletins(estado, unidades, dias):
 
 unidades_boletim = dict(boletins_bo.UNIDADES)
 
+
+def _secao_whatsapp_manual(resultados):
+    """Lista de unidades, cada uma com um botão que abre o WhatsApp com o boletim já escrito.
+    Quem escolhe o grupo e aperta "enviar" é a pessoa: nenhuma automação, sem risco de banimento."""
+    with st.expander("📲 Enviar pelo WhatsApp (manual)", expanded=True):
+        st.markdown(
+            "**Como usar**\n"
+            "1. Entre no **WhatsApp Web** (passo a passo logo abaixo) e deixe essa aba aberta.\n"
+            "2. Na linha da unidade, clique em **Abrir no WhatsApp**. Na página que abrir, escolha **usar o WhatsApp Web**.\n"
+            "3. O WhatsApp abre com o boletim já escrito: escolha o **grupo** da unidade e envie.\n"
+            "4. Volte aqui e marque **enviado** para controlar o que já foi."
+        )
+        with st.expander("Como entrar no WhatsApp Web"):
+            st.markdown(
+                "1. No computador, abra **https://web.whatsapp.com**. Vai aparecer um QR code.\n"
+                "2. No celular, abra o WhatsApp → **Aparelhos conectados** (Android: menu ⋮ ou Configurações; iPhone: aba "
+                "Configurações) → **Conectar um aparelho** e aponte a câmera para o QR code. "
+                "(Se preferir, há a opção de conectar usando o número de telefone.)\n"
+                "3. Pronto: o WhatsApp Web fica conectado neste navegador. Deixe a aba aberta e o celular com internet. "
+                "Se pedir de novo, repita o passo 2.\n\n"
+                "Dica: o app só abre o WhatsApp com o texto pronto; ele **não** acessa a sua conta nem os seus grupos, "
+                "por isso a lista abaixo é por unidade e o grupo você escolhe no WhatsApp."
+            )
+        st.caption(f"{len(resultados)} boletim(ns) · marque ✓ quando enviar")
+        for nome, texto in resultados.items():
+            chave_ok = f"wa_ok_{boletins_bo.slug(nome)}"
+            c1, c2, c3 = st.columns([5, 3, 2], vertical_alignment="center")
+            with c1:
+                st.markdown(f"**{nome.split(' - ')[0]}**" + ("  ✅" if st.session_state.get(chave_ok) else ""))
+            with c2:
+                url = f"https://wa.me/?text={quote(texto, safe='')}"
+                if len(url) <= 7500:
+                    st.link_button("📲 Abrir no WhatsApp", url, use_container_width=True)
+                else:
+                    st.caption("texto longo: copie o boletim no quadro acima")
+            with c3:
+                st.checkbox("enviado", key=chave_ok)
+
 _estado_boletins = st.session_state.get("boletins_estado")
 _boletins_rodando = bool(_estado_boletins and _estado_boletins["rodando"])
 
@@ -1126,6 +1165,8 @@ def _secao_boletins(unidades_base):
         novo = {"rodando": True, "resultados": {}, "erros": [], "feitos": 0, "total": len(unidades), "atual": "",
                 "data": utc_para_brasilia(datetime.now(timezone.utc)).strftime("%Y%m%d"),
                 "hoje_dd_mm": utc_para_brasilia(datetime.now(timezone.utc)).strftime("%d/%m")}
+        for _k in [k for k in st.session_state if str(k).startswith("wa_ok_")]:
+            del st.session_state[_k]
         st.session_state["boletins_estado"] = novo
         threading.Thread(target=_worker_boletins, args=(novo, unidades, int(dias)), daemon=True).start()
         st.rerun()
@@ -1172,6 +1213,8 @@ def _secao_boletins(unidades_base):
 
     escolha = st.selectbox("Ver boletim da unidade", list(resultados), key="bol_ver")
     st.code(resultados[escolha], language=None)
+
+    _secao_whatsapp_manual(resultados)
 
 
 # Fragmento próprio: interagir com os boletins não reconstrói o mapa. Enquanto
