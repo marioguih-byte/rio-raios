@@ -340,45 +340,66 @@ def _listar_arquivos_glm_hora(session, ano, doy, hora):
     root = ET.fromstring(r.content)
     return [el.text for el in root.findall(".//s3:Key", ns)]
 
-@st.cache_data(show_spinner=False, ttl=90)
+@st.cache_resource
+def _glm_store():
+    """Memória compartilhada dos raios já baixados, por arquivo GLM (cada arquivo = 20 s).
+    Um arquivo que baixou uma vez fica guardado até sair da janela: se a próxima atualização
+    falhar (timeout, 503, listagem da AWS incompleta), os pontos que já estavam no mapa NÃO somem."""
+    return {"arquivos": {}, "lock": threading.Lock(), "df": None, "ts": 0.0}
+
+_COLUNAS_GLM = ["lat", "lon", "energy_j", "time"]
+_TTL_GLM_SEG = 90
+
 def fetch_glm_flashes_recent(minutos=15):
     import netCDF4
-    session = build_session()
-    agora = datetime.now(timezone.utc)
-    inicio = agora - timedelta(minutes=minutos)
-    horas = {(agora.year, agora.timetuple().tm_yday, agora.hour)}
-    if inicio.hour != agora.hour or inicio.timetuple().tm_yday != agora.timetuple().tm_yday:
-        horas.add((inicio.year, inicio.timetuple().tm_yday, inicio.hour))
+    store = _glm_store()
+    with store["lock"]:
+        if store["df"] is not None and (time.time() - store["ts"]) < _TTL_GLM_SEG:
+            return store["df"].copy()
 
-    chaves = []
-    falhas = 0
-    for ano, doy, hora in horas:
-        try: chaves.extend(_listar_arquivos_glm_hora(session, ano, doy, hora))
-        except Exception: falhas += 1
-    if falhas == len(horas): raise RuntimeError("não foi possível conectar ao bucket GLM na AWS")
+        session = build_session()
+        agora = datetime.now(timezone.utc)
+        inicio = agora - timedelta(minutes=minutos)
+        horas = {(agora.year, agora.timetuple().tm_yday, agora.hour)}
+        if inicio.hour != agora.hour or inicio.timetuple().tm_yday != agora.timetuple().tm_yday:
+            horas.add((inicio.year, inicio.timetuple().tm_yday, inicio.hour))
 
-    arquivos = sorted(c for c in chaves if (ts := _parse_glm_timestamp(c)) is not None and ts >= inicio)
-    if not arquivos: return pd.DataFrame(columns=["lat", "lon", "energy_j", "time"])
+        chaves = []
+        falhas = 0
+        for ano, doy, hora in horas:
+            try: chaves.extend(_listar_arquivos_glm_hora(session, ano, doy, hora))
+            except Exception: falhas += 1
+        if falhas == len(horas) and not store["arquivos"]:
+            raise RuntimeError("não foi possível conectar ao bucket GLM na AWS")
 
-    linhas = []
-    for chave in arquivos:
-        try:
-            r = session.get(f"{GLM_BASE_URL}/{chave}", timeout=30)
-            r.raise_for_status()
-            with netCDF4.Dataset("inmemory.nc", memory=r.content) as ds:
-                lats = np.asarray(ds.variables["flash_lat"][:])
-                lons = np.asarray(ds.variables["flash_lon"][:])
-                energias = np.asarray(ds.variables["flash_energy"][:])
-                ts_arquivo = _parse_glm_timestamp(chave)
-                for lat, lon, en in zip(lats, lons, energias):
-                    linhas.append({"lat": float(lat), "lon": float(lon), "energy_j": float(en), "time": ts_arquivo})
-        except Exception: continue
-    df = pd.DataFrame(linhas)
-    if not df.empty:
+        # só baixa o que ainda não está guardado; o que falhar fica de fora e é tentado de novo no próximo ciclo
+        novos = sorted(c for c in chaves
+                       if c not in store["arquivos"] and (ts := _parse_glm_timestamp(c)) is not None and ts >= inicio)
         b = SOUTH_AMERICA_BOUNDS
-        df = df[(df["lat"] >= b["lat_min"]) & (df["lat"] <= b["lat_max"]) &
-                (df["lon"] >= b["lon_min"]) & (df["lon"] <= b["lon_max"])]
-    return df
+        for chave in novos:
+            try:
+                r = session.get(f"{GLM_BASE_URL}/{chave}", timeout=30)
+                r.raise_for_status()
+                with netCDF4.Dataset("inmemory.nc", memory=r.content) as ds:
+                    lats = np.asarray(ds.variables["flash_lat"][:], dtype=float)
+                    lons = np.asarray(ds.variables["flash_lon"][:], dtype=float)
+                    energias = np.asarray(ds.variables["flash_energy"][:], dtype=float)
+                ts_arquivo = _parse_glm_timestamp(chave)
+                dfa = pd.DataFrame({"lat": lats, "lon": lons, "energy_j": energias, "time": ts_arquivo})
+                dfa = dfa[(dfa["lat"] >= b["lat_min"]) & (dfa["lat"] <= b["lat_max"]) &
+                          (dfa["lon"] >= b["lon_min"]) & (dfa["lon"] <= b["lon_max"])]
+                store["arquivos"][chave] = (ts_arquivo, dfa)   # arquivo vazio também é guardado (não baixa de novo)
+            except Exception:
+                continue
+
+        # descarta só o que já saiu da janela
+        for chave in [k for k, (ts, _) in store["arquivos"].items() if ts < inicio]:
+            store["arquivos"].pop(chave, None)
+
+        partes = [d for _, d in store["arquivos"].values() if not d.empty]
+        df = pd.concat(partes, ignore_index=True) if partes else pd.DataFrame(columns=_COLUNAS_GLM)
+        store["df"], store["ts"] = df, time.time()
+        return df.copy()
 
 def _dist_km(lat1, lon1, lat2, lon2):
     dlat = (lat1 - lat2) * 111
@@ -767,10 +788,15 @@ def _preparar_payload_raios(raios_df, celulas_com_trajetoria):
         df["faixa"] = (df["idade_min"] // 5).clip(upper=3).astype(int)
         df["gx"] = (df["lat"] / 0.03).round().astype(int)
         df["gy"] = (df["lon"] / 0.03).round().astype(int)
-        df = df.sort_values("time", ascending=False).drop_duplicates(["gx", "gy", "faixa"])
+        # Dedupe pela grade + horário do arquivo (não pela faixa de idade, que muda a cada atualização):
+        # assim um ponto que já apareceu não é descartado só porque trocou de faixa/cor.
+        df["_t"] = df["time"].astype("int64")
+        df = df.sort_values("time", ascending=False).drop_duplicates(["gx", "gy", "_t"])
+        # Limite por faixa com critério ESTÁVEL (hash do próprio ponto), em vez de amostra aleatória nova a cada ciclo.
+        df["_h"] = ((df["gx"] * 73856093) ^ (df["gy"] * 19349663) ^ (df["_t"] // 1_000_000_000)) % 1_000_003
         partes = []
         for _, g in df.groupby("faixa"):
-            partes.append(g.sample(MAX_RAIOS_POR_FAIXA, random_state=1) if len(g) > MAX_RAIOS_POR_FAIXA else g)
+            partes.append(g.nsmallest(MAX_RAIOS_POR_FAIXA, "_h") if len(g) > MAX_RAIOS_POR_FAIXA else g)
         raios_mapa = pd.concat(partes).sort_values("time", kind="stable") if partes else df  # antigos primeiro, novos por cima
         for r in raios_mapa.itertuples():
             raios_out.append({
