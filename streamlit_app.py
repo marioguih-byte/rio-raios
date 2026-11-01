@@ -778,26 +778,11 @@ def _preparar_payload_raios(raios_df, celulas_com_trajetoria):
     agora = datetime.now(timezone.utc)
     raios_out = []
     if raios_df is not None and not raios_df.empty:
-        # O processamento de alertas usa a série completa. Pro navegador, os raios são
-        # agrupados em faixas de 5 min; em cada faixa, pontos praticamente sobrepostos
-        # (mesma grade de ~3 km) viram um só e, se ainda passar do limite, é feita uma
-        # amostra. Antes só os mais recentes eram enviados, e os antigos sumiam.
+        # Mostra TODOS os raios da janela: sem remover pontos sobrepostos e sem limite/amostra.
         df = raios_df.dropna(subset=["lat", "lon", "time"]).copy()
         df["time"] = pd.to_datetime(df["time"], utc=True)
         df["idade_min"] = ((agora - df["time"]).dt.total_seconds() / 60).clip(lower=0)
-        df["faixa"] = (df["idade_min"] // 5).clip(upper=3).astype(int)
-        df["gx"] = (df["lat"] / 0.03).round().astype(int)
-        df["gy"] = (df["lon"] / 0.03).round().astype(int)
-        # Dedupe pela grade + horário do arquivo (não pela faixa de idade, que muda a cada atualização):
-        # assim um ponto que já apareceu não é descartado só porque trocou de faixa/cor.
-        df["_t"] = df["time"].astype("int64")
-        df = df.sort_values("time", ascending=False).drop_duplicates(["gx", "gy", "_t"])
-        # Limite por faixa com critério ESTÁVEL (hash do próprio ponto), em vez de amostra aleatória nova a cada ciclo.
-        df["_h"] = ((df["gx"] * 73856093) ^ (df["gy"] * 19349663) ^ (df["_t"] // 1_000_000_000)) % 1_000_003
-        partes = []
-        for _, g in df.groupby("faixa"):
-            partes.append(g.nsmallest(MAX_RAIOS_POR_FAIXA, "_h") if len(g) > MAX_RAIOS_POR_FAIXA else g)
-        raios_mapa = pd.concat(partes).sort_values("time", kind="stable") if partes else df  # antigos primeiro, novos por cima
+        raios_mapa = df.sort_values("time", kind="stable")  # antigos primeiro, novos por cima
         for r in raios_mapa.itertuples():
             raios_out.append({
                 "lat": float(r.lat), "lon": float(r.lon),
