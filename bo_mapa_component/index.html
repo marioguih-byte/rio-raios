@@ -305,6 +305,27 @@
   }
   function visivel(lat, lon) { return noBrasil(lat, lon) || pertoDeUnidade(lat, lon); }
   var canvasRenderer = L.canvas({ padding: 0.1 });
+  // Células de tempestade têm canvas próprio: mexer nelas não obriga a redesenhar os milhares de raios (e vice-versa).
+  var canvasCelulas = L.canvas({ padding: 0.1 });
+  // Marcador "✕" desenhado direto no canvas. Antes cada ✕ era um L.marker com ícone SVG (um elemento DOM por posição),
+  // o que pesava bastante ao arrastar/dar zoom no celular.
+  L.Canvas.include({
+    _updateXMarker: function (layer) {
+      if (!this._drawing || layer._empty()) return;
+      var p = layer._point, ctx = this._ctx, r = layer._radius, o = layer.options;
+      ctx.save();
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(p.x - r, p.y - r); ctx.lineTo(p.x + r, p.y + r);
+      ctx.moveTo(p.x + r, p.y - r); ctx.lineTo(p.x - r, p.y + r);
+      ctx.strokeStyle = "rgba(15,23,42,0.6)"; ctx.lineWidth = o.haloWeight; ctx.stroke();
+      ctx.strokeStyle = o.color; ctx.lineWidth = o.weight; ctx.stroke();
+      ctx.restore();
+    }
+  });
+  L.XMarker = L.CircleMarker.extend({
+    _updatePath: function () { this._renderer._updateXMarker(this); }
+  });
   // Pontos das unidades ficam numa camada própria, acima dos anéis, dos raios e das células,
   // pra a borda preta nunca ser coberta.
   var canvasEstacoes = L.canvas({ pane: "estacoesPane", padding: 0.1 });
@@ -1144,10 +1165,12 @@
     });
 
     if (mostrarDeslocamento) {
+      var atuais = [];   // ✕ da posição atual de cada célula: adicionados por último, ficam por cima
       (celulas || []).forEach(function (cel) {
         var h = cel.historico || [];
-        if (h.length && visivel(h[h.length - 1].lat, h[h.length - 1].lon)) desenharCelula(cel, novasCelulas);
+        if (h.length && visivel(h[h.length - 1].lat, h[h.length - 1].lon)) desenharCelula(cel, novasCelulas, atuais);
       });
+      atuais.forEach(function (m) { m.addTo(novasCelulas); });
     }
     novoRaios.addTo(map);
     novasCelulas.addTo(map);
@@ -1176,12 +1199,12 @@
     });
   }
 
-  function desenharCelula(cel, alvo) {
+  function desenharCelula(cel, alvo, atuais) {
     var hist = cel.historico || [];
     if (!hist.length) return;
     var cps = cel.checkpoints || [];
     var pts = hist.map(function (p) { return [p.lat, p.lon]; }).concat(cps.map(function (c) { return [c.lat, c.lon]; }));
-    var opt = { renderer: canvasRenderer, interactive: false, lineCap: "round", lineJoin: "round" };
+    var opt = { renderer: canvasCelulas, interactive: false, lineCap: "round", lineJoin: "round" };
 
     if (pts.length > 1) {
       // contorno escuro suave por baixo pra a linha clara aparecer no mapa claro e no satélite
@@ -1191,7 +1214,7 @@
 
     cps.forEach(function (c, idx) {
       var op = Math.max(0.95 - idx * 0.2, 0.35);
-      L.circleMarker([c.lat, c.lon], { radius: 4, color: "#0f172a", weight: 1.5, fill: true, fillColor: "#f8fafc", fillOpacity: op, opacity: op, renderer: canvasRenderer })
+      L.circleMarker([c.lat, c.lon], { radius: 4, color: "#0f172a", weight: 1.5, fill: true, fillColor: "#f8fafc", fillOpacity: op, opacity: op, renderer: canvasCelulas })
         .bindTooltip("Célula #" + cel.id + " — alcance estimado em +" + c.min + " min")
         .addTo(alvo);
     });
@@ -1199,9 +1222,17 @@
     hist.forEach(function (p, i) {
       var atual = (i === hist.length - 1);
       var t = hist.length > 1 ? i / (hist.length - 1) : 1;
-      var marc = L.marker([p.lat, p.lon], { icon: iconeX(corCelula(t), atual ? 26 : 19), zIndexOffset: atual ? 500 : 0 });
-      if (atual) marc.bindTooltip("Célula #" + cel.id + " · ~" + Math.round(cel.vel_kmh) + " km/h para " + cel.rumo_texto);
-      marc.addTo(alvo);
+      var tam = atual ? 26 : 19;   // mesmas proporções do ícone SVG antigo (viewBox 24)
+      var marc = new L.XMarker([p.lat, p.lon], {
+        renderer: canvasCelulas, radius: tam * 7 / 24, color: corCelula(t),
+        weight: tam * 4.2 / 24, haloWeight: tam * 7 / 24, interactive: atual
+      });
+      if (atual) {
+        marc.bindTooltip("Célula #" + cel.id + " · ~" + Math.round(cel.vel_kmh) + " km/h para " + cel.rumo_texto);
+        atuais.push(marc);
+      } else {
+        marc.addTo(alvo);
+      }
     });
   }
 
@@ -1236,13 +1267,18 @@
     }, 150);
   }
 
+  var ultimaAssinRaios = null;
   function aoRenderizar(event) {
     var args = (event.detail && event.detail.args) || {};
     if (!map) iniciarMapa();
 
     atualizarStatus(args.status_texto);
     redesenharEstacoes(args.estacoes, args.aneis);
-    redesenharRaios(args.raios, args.celulas, args.janela_min, args.mostrar_deslocamento, args.tamanho_raio);
+    var assinRaios = JSON.stringify([args.raios, args.celulas, args.janela_min, args.mostrar_deslocamento, args.tamanho_raio]);
+    if (assinRaios !== ultimaAssinRaios) {   // mesmo conteúdo reenviado (ex.: menu/largura mudou) → não refaz tudo
+      ultimaAssinRaios = assinRaios;
+      redesenharRaios(args.raios, args.celulas, args.janela_min, args.mostrar_deslocamento, args.tamanho_raio);
+    }
     if (typeof args.altura_pct === "number" && args.altura_pct !== alturaPct) {
       alturaPct = args.altura_pct;
     }
