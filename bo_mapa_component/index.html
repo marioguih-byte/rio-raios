@@ -329,6 +329,9 @@
   // Pontos das unidades ficam numa camada própria, acima dos anéis, dos raios e das células,
   // pra a borda preta nunca ser coberta.
   var canvasEstacoes = L.canvas({ pane: "estacoesPane", padding: 0.1 });
+  // Anéis ficam numa camada própria ABAIXO dos raios (overlayPane = 400). Antes dividiam o mesmo canvas dos raios e
+  // a ordem dependia de quem foi redesenhado por último, então às vezes o anel passava por cima do ponto de raio.
+  var canvasAneis = L.canvas({ pane: "aneisPane", padding: 0.1 });
 
   function destravarSom() {
     if (!audio) return;
@@ -940,6 +943,8 @@
     L.polygon([mundo].concat(buracos), { pane: "mascaraBR", renderer: L.svg({ pane: "mascaraBR" }), stroke: false,
       fillColor: "#0b0f16", fillOpacity: 0.28, interactive: false }).addTo(map);
 
+    map.createPane("aneisPane");
+    map.getPane("aneisPane").style.zIndex = 380; map.getPane("aneisPane").style.pointerEvents = "none";
     map.createPane("estacoesPane");
     map.getPane("estacoesPane").style.zIndex = 620;
     if (!map.getPane("markerPane")) { map.createPane("markerPane"); }
@@ -1139,9 +1144,9 @@
       (aneis || []).forEach(function (a) {
         // contorno escuro por baixo + traço colorido por cima: o anel aparece no mapa claro,
         // no satélite e por cima das cores do GOES-East
-        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: "#0b1220", weight: 8, fill: false, opacity: 0.6, interactive: false, renderer: canvasRenderer })
+        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: "#0b1220", weight: 8, fill: false, opacity: 0.6, interactive: false, renderer: canvasAneis })
           .addTo(aneisLayer);
-        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: a.cor, weight: 4.5, fill: false, dashArray: "12, 9", opacity: 1, interactive: false, renderer: canvasRenderer })
+        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: a.cor, weight: 4.5, fill: false, dashArray: "12, 9", opacity: 1, interactive: false, renderer: canvasAneis })
           .addTo(aneisLayer);
       });
     });
