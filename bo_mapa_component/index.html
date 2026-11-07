@@ -31,6 +31,8 @@
   .al-acoes button, .al-limpar { background: #2a303b; color: #e5e7eb; border: 1px solid #374151; border-radius: 6px; padding: 4px 10px;
     font: 12px 'Segoe UI', sans-serif; cursor: pointer; }
   .al-acoes button:hover, .al-limpar:hover { background: #374151; }
+  .al-acoes button.al-finalizar { background: #14532d; border-color: #22c55e; color: #bbf7d0; }
+  .al-acoes button.al-finalizar:hover { background: #166534; }
   .al-limpar { width: 100%; margin-bottom: 10px; padding: 6px 10px; }
   .al-input { width: 100%; box-sizing: border-box; background: #11151c; color: #fff; border: 1px solid #374151; border-radius: 6px; padding: 6px 8px; margin: 4px 0 8px; font: 12.5px 'Segoe UI', sans-serif; }
   .al-pre { white-space: pre-wrap; word-break: break-word; background: #11151c; border: 1px solid #2a303b; border-radius: 6px; padding: 8px 10px;
@@ -675,7 +677,9 @@
         '<label style="font-size:12px;color:#c4cbd6;">Quem recebeu o alerta:</label>' +
         '<input class="al-input" data-acao="quem" value="' + esc(a.quem_recebeu || "") + '" placeholder="nome de quem confirmou o recebimento" />' +
         '<pre class="al-pre">' + esc(a.copia) + '</pre>' +
-        '<div class="al-acoes"><button data-acao="copiar">📋 Copiar</button><button data-acao="excluir">✕ Excluir</button></div></div>';
+        '<div class="al-acoes"><button data-acao="copiar">📋 Copiar</button>' +
+        (a.finalizavel ? '<button data-acao="finalizar" class="al-finalizar">🟢 Finalizar alerta</button>' : '') +
+        '<button data-acao="excluir">✕ Excluir</button></div></div>';
     }).join("");
   }
 
@@ -743,6 +747,7 @@
       var acao = alvo.getAttribute("data-acao");
       var card = alvo.closest(".al-card"), id = card && card.getAttribute("data-id");
       if (acao === "limpar") { enviarEvento({ tipo: "limpar" }); }
+      else if (acao === "finalizar") { enviarEvento({ tipo: "finalizar", id: id }); }
       else if (acao === "excluir") { enviarEvento({ tipo: "excluir", id: id }); }
       else if (acao === "copiar") { copiarTexto(card.querySelector(".al-pre").textContent, alvo); }
     });

@@ -271,7 +271,7 @@ def classificar_risco_raio(dist_min_km):
         return 1, "Médio — raio a menos de 50 km", "🟡", "#ffc400", "amarelo"
     return 0, "Sem raios próximos", "🟢", "#19d36b", None
 
-def calcular_status_estacoes(df_stations, raios_df, encerrados=None):
+def calcular_status_estacoes(df_stations, raios_df, encerrados=None, km_encerrados=None):
     """Calcula a distância geodésica real até o raio mais próximo da janela atual."""
     linhas = []
     tem_raios = raios_df is not None and not raios_df.empty
@@ -298,7 +298,9 @@ def calcular_status_estacoes(df_stations, raios_df, encerrados=None):
             corte = (encerrados or {}).get(nome_completo)
             if corte is not None:
                 # alerta verde já emitido: raios a <= 30 km ANTERIORES ao encerramento não contam mais
-                ignorar = (dists <= VERDE_RAIO_KM) & (raio_t <= np.datetime64(corte.replace(tzinfo=None)))
+                # (encerramento manual limpa até 50 km; o automático, só até VERDE_RAIO_KM)
+                km_limpar = (km_encerrados or {}).get(nome_completo, VERDE_RAIO_KM)
+                ignorar = (dists <= km_limpar) & (raio_t <= np.datetime64(corte.replace(tzinfo=None)))
                 dists = np.where(ignorar, np.inf, dists)
             dist_min = float(dists.min()) if np.isfinite(dists.min()) else None
 
@@ -552,6 +554,39 @@ def montar_texto_copia(alerta):
     else:
         linhas.insert(-1, f"* Quem recebeu o alerta: {quem}")
     return "\n".join(linhas)
+
+# ======================================================================
+# FINALIZAR ALERTA (manual) — emite o alerta verde da unidade na hora, igual ao automático.
+# ======================================================================
+def _alertas_finalizaveis():
+    """IDs dos alertas que mostram o botão \"Finalizar\": o alerta MAIS RECENTE de cada unidade, se for
+    vermelho/amarelo. Se o mais recente já é verde (unidade finalizada), ninguém daquela unidade mostra o botão."""
+    vistos, ids = set(), set()
+    for a in st.session_state.alertas_raio_ativos:  # mais novos primeiro (insert(0))
+        est = a.get("estacao")
+        if est in vistos:
+            continue
+        vistos.add(est)
+        if a.get("nivel") in ("vermelho", "amarelo"):
+            ids.add(a.get("id"))
+    return ids
+
+def _finalizar_alerta_unidade(chave_estacao):
+    """Emite o alerta verde (FIM DO ALERTA DE RAIOS) da unidade e libera o status dela, como no encerramento automático."""
+    agora_ts = time.time()
+    nome = str(chave_estacao).split(" - ")[0]
+    texto_v = montar_mensagem_alerta_verde(nome, st.session_state.get("meteorologista_nome", ""))
+    st.session_state.alertas_raio_ativos.insert(0, {
+        "id": f"{chave_estacao}_verde_{agora_ts}", "texto": texto_v, "estacao": chave_estacao,
+        "nivel": "verde", "dist_km": None, "expira": agora_ts + 3600, "quem_recebeu": "",
+    })
+    sv = st.session_state.verde_estado.setdefault(chave_estacao, {"vermelho_ativo": False, "ultimo_raio": None})
+    sv["vermelho_ativo"], sv["ultimo_raio"] = False, None   # evita um segundo verde automático depois
+    reg = st.session_state.alertas_unidade.setdefault(chave_estacao, {
+        "nivel": "vermelho", "dist_km": None, "notificado_ts": agora_ts, "expira_ts": agora_ts + 3600})
+    reg["encerrado_ts"] = agora_ts
+    reg["encerrado_km"] = 50   # finalizado à mão: raios até 50 km anteriores a agora deixam de contar
+    _salvar_estado()
 
 # ======================================================================
 # INTERFACE STREAMLIT
@@ -842,7 +877,11 @@ def _renderizar_mapa_ao_vivo():
         return {k: datetime.fromtimestamp(v["encerrado_ts"], tz=timezone.utc)
                 for k, v in st.session_state.alertas_unidade.items() if v.get("encerrado_ts")}
 
-    df_status = calcular_status_estacoes(df_stations, raios_alerta, encerrados=_encerrados_verde())
+    def _km_encerrados_verde():
+        return {k: v.get("encerrado_km", VERDE_RAIO_KM)
+                for k, v in st.session_state.alertas_unidade.items() if v.get("encerrado_ts")}
+
+    df_status = calcular_status_estacoes(df_stations, raios_alerta, encerrados=_encerrados_verde(), km_encerrados=_km_encerrados_verde())
 
     # ---- Alerta verde ----
     # Só quando o GLM foi lido com sucesso agora (sem dados não dá pra dizer que não há raios).
@@ -875,7 +914,7 @@ def _renderizar_mapa_ao_vivo():
                     "nivel": "vermelho", "dist_km": None, "notificado_ts": agora_ts_v, "expira_ts": agora_ts_v + 3600})
                 reg["encerrado_ts"] = agora_ts_v
         if notificacoes_verde:  # o status passa a refletir o encerramento já neste ciclo
-            df_status = calcular_status_estacoes(df_stations, raios_alerta, encerrados=_encerrados_verde())
+            df_status = calcular_status_estacoes(df_stations, raios_alerta, encerrados=_encerrados_verde(), km_encerrados=_km_encerrados_verde())
     st.session_state["_fragment_df_status"] = df_status
 
     estacoes_novas = []
@@ -967,8 +1006,10 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
     raios_payload = _preparar_payload_raios(raios_df, celulas_com_trajetoria)
 
     # Alertas ativos, pra aba "Alertas" do painel que fica dentro do mapa (usável em tela cheia).
+    _finalizaveis = _alertas_finalizaveis()
     alertas_payload = [
-        {"id": a["id"], "quem_recebeu": a.get("quem_recebeu", ""), "copia": montar_texto_copia(a)}
+        {"id": a["id"], "quem_recebeu": a.get("quem_recebeu", ""), "copia": montar_texto_copia(a),
+         "finalizavel": a["id"] in _finalizaveis}
         for a in st.session_state.alertas_raio_ativos
     ]
 
@@ -1008,6 +1049,10 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
                     valor = str(evento.get("valor", ""))[:200]
                     a["quem_recebeu"] = valor
                     st.session_state[f"quem_recebeu_{a['id']}"] = valor  # mantém o campo do painel lateral igual
+        elif tipo == "finalizar":
+            alvo = next((x for x in st.session_state.alertas_raio_ativos if x.get("id") == evento.get("id")), None)
+            if alvo is not None and alvo["id"] in _alertas_finalizaveis():
+                _finalizar_alerta_unidade(alvo["estacao"])
         elif tipo == "excluir":
             st.session_state.alertas_raio_ativos = [x for x in st.session_state.alertas_raio_ativos if x.get("id") != evento.get("id")]
         elif tipo == "limpar":
@@ -1080,7 +1125,8 @@ with col_lado:
                         st.session_state.alertas_raio_ativos = []
                         _salvar_estado()
                         st.rerun(scope="fragment")
-                    for a in st.session_state.alertas_raio_ativos:
+                    _finalizaveis = _alertas_finalizaveis()
+                    for a in list(st.session_state.alertas_raio_ativos):
                         with st.container(border=True):
                             col_txt, col_del = st.columns([6, 1])
                             with col_txt:
@@ -1090,6 +1136,11 @@ with col_lado:
                                 )
                                 a["quem_recebeu"] = quem
                                 st.code(montar_texto_copia(a), language=None)
+                                if a.get("id") in _finalizaveis:
+                                    if st.button("🟢 Finalizar alerta", key=f"finalizar_alerta_{a['id']}",
+                                                 help="Emite o alerta verde (fim do alerta de raios) para esta unidade"):
+                                        _finalizar_alerta_unidade(a["estacao"])
+                                        st.rerun()  # rerun completo: o mapa e o status da unidade já voltam verdes
                             with col_del:
                                 if st.button("✕", key=f"excluir_alerta_{a.get('id', a['texto'])}", help="Excluir este alerta"):
                                     st.session_state.alertas_raio_ativos = [x for x in st.session_state.alertas_raio_ativos if x.get("id") != a.get("id")]
