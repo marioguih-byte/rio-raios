@@ -1008,8 +1008,8 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
     # Alertas ativos, pra aba "Alertas" do painel que fica dentro do mapa (usável em tela cheia).
     _finalizaveis = _alertas_finalizaveis()
     alertas_payload = [
-        {"id": a["id"], "quem_recebeu": a.get("quem_recebeu", ""), "copia": montar_texto_copia(a),
-         "finalizavel": a["id"] in _finalizaveis}
+        {"id": a["id"], "estacao": a.get("estacao"), "quem_recebeu": a.get("quem_recebeu", ""),
+         "copia": montar_texto_copia(a), "finalizavel": a["id"] in _finalizaveis}
         for a in st.session_state.alertas_raio_ativos
     ]
 

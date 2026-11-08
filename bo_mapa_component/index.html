@@ -121,6 +121,8 @@
   .pe-chart { position: relative; height: 250px; }
   .pe-contatos { margin-top: 16px; padding: 11px 14px; background: #20242d; border: 1px solid #2d3340; border-radius: 8px; font-size: 12.5px; color: #c4cbd6; line-height: 1.65; }
   .pe-carregando { color: #9aa3b2; font-size: 12.5px; margin-top: 20px; }
+  .pe-alertas-tit { font-size: 14.5px; font-weight: 700; color: #fff; margin: 20px 0 8px; }
+  #pe_alertas .al-card { max-width: 560px; }
 
   /* ---------- legenda retrátil (começa recolhida) ---------- */
   #legenda-mapa { position: absolute; z-index: 1000; bottom: 22px; left: 8px; background: rgba(15,15,20,0.88);
@@ -166,6 +168,7 @@
       <span id="painel_estacao_fechar" title="Fechar (Esc)">✕</span>
     </div>
     <div id="pe_contatos" class="pe-contatos"></div>
+    <div id="pe_alertas"></div>
     <div id="pe_cards"></div>
     <div id="pe_prev"></div>
   </div>
@@ -594,6 +597,7 @@
 
   function fecharPainel() {
     document.getElementById("painel_estacao").style.display = "none";
+    painelUnidadeChave = null; renderAlertasUnidade();
     prevAtual.token++;  // ignora respostas que ainda estavam a caminho
     limparGraficos();
   }
@@ -608,6 +612,7 @@
     document.getElementById("pe_sub").textContent =
       "Modelos: ECMWF · ICON · GFS (Open-Meteo) · Raios: GLM/GOES-19 · Horário de Brasília";
     document.getElementById("pe_cards").innerHTML = cardsStatus(d);
+    painelUnidadeChave = chave; ultimaChaveAlertasUnidade = null; renderAlertasUnidade();
 
     var corpo = document.getElementById("pe_contatos");
     var contatos = d.contatos;
@@ -672,15 +677,33 @@
     ultimaChaveAlertas = chave;
     var el = document.getElementById("al_corpo_alertas");
     if (!alertas.length) { el.innerHTML = '<div class="al-vazio">✅ Nenhum alerta de raio próximo ativo.</div>'; return; }
-    el.innerHTML = '<button class="al-limpar" data-acao="limpar">🗑️ Limpar todos os alertas</button>' + alertas.map(function (a) {
-      return '<div class="al-card" data-id="' + esc(a.id) + '">' +
-        '<label style="font-size:12px;color:#c4cbd6;">Quem recebeu o alerta:</label>' +
-        '<input class="al-input" data-acao="quem" value="' + esc(a.quem_recebeu || "") + '" placeholder="nome de quem confirmou o recebimento" />' +
-        '<pre class="al-pre">' + esc(a.copia) + '</pre>' +
-        '<div class="al-acoes"><button data-acao="copiar">📋 Copiar</button>' +
-        (a.finalizavel ? '<button data-acao="finalizar" class="al-finalizar">🟢 Finalizar alerta</button>' : '') +
-        '<button data-acao="excluir">✕ Excluir</button></div></div>';
-    }).join("");
+    el.innerHTML = '<button class="al-limpar" data-acao="limpar">🗑️ Limpar todos os alertas</button>' + alertas.map(cardAlertaHtml).join("");
+  }
+
+  // Mesmo card de alerta na aba Alertas e no painel da unidade (quem recebeu, mensagem, copiar, finalizar, excluir).
+  function cardAlertaHtml(a) {
+    return '<div class="al-card" data-id="' + esc(a.id) + '">' +
+      '<label style="font-size:12px;color:#c4cbd6;">Quem recebeu o alerta:</label>' +
+      '<input class="al-input" data-acao="quem" value="' + esc(a.quem_recebeu || "") + '" placeholder="nome de quem confirmou o recebimento" />' +
+      '<pre class="al-pre">' + esc(a.copia) + '</pre>' +
+      '<div class="al-acoes"><button data-acao="copiar">📋 Copiar</button>' +
+      (a.finalizavel ? '<button data-acao="finalizar" class="al-finalizar">🟢 Finalizar alerta</button>' : '') +
+      '<button data-acao="excluir">✕ Excluir</button></div></div>';
+  }
+
+  // Alertas da unidade cujo painel está aberto (aparecem logo abaixo dos contatos).
+  var painelUnidadeChave = null;
+  var ultimaChaveAlertasUnidade = null;
+  function renderAlertasUnidade() {
+    var el = document.getElementById("pe_alertas");
+    if (!painelUnidadeChave) { el.innerHTML = ""; ultimaChaveAlertasUnidade = null; return; }
+    var meus = (dadosAlertas.alertas || []).filter(function (a) { return a.estacao === painelUnidadeChave; });
+    var chave = painelUnidadeChave + "|" + JSON.stringify(meus);
+    var ativo = document.activeElement;
+    var editando = ativo && ativo.classList && ativo.classList.contains("al-input") && el.contains(ativo);
+    if (chave === ultimaChaveAlertasUnidade || editando) return;
+    ultimaChaveAlertasUnidade = chave;
+    el.innerHTML = meus.length ? '<div class="pe-alertas-tit">🚨 Alertas desta unidade</div>' + meus.map(cardAlertaHtml).join("") : "";
   }
 
   function atualizarBadgeAlertas(risco) {
@@ -696,6 +719,7 @@
     document.getElementById("al_tab_risco").textContent = "🚨 Risco (" + risco.length + ")";
     document.getElementById("al_tab_alertas").textContent = "📋 Alertas (" + alertas.length + ")";
     atualizarBadgeAlertas(risco);
+    renderAlertasUnidade();
     if (!painelAlertasAberto) return;
     renderAbaRisco(risco);
     renderAbaAlertas(alertas);
@@ -750,6 +774,23 @@
       else if (acao === "finalizar") { enviarEvento({ tipo: "finalizar", id: id }); }
       else if (acao === "excluir") { enviarEvento({ tipo: "excluir", id: id }); }
       else if (acao === "copiar") { copiarTexto(card.querySelector(".al-pre").textContent, alvo); }
+    });
+    // Painel da unidade: mesmas ações do card (copiar, finalizar, excluir, quem recebeu).
+    var corpoUn = document.getElementById("pe_alertas");
+    corpoUn.addEventListener("click", function (ev) {
+      var alvo = ev.target.closest("[data-acao]"); if (!alvo) return;
+      var acao = alvo.getAttribute("data-acao");
+      var card = alvo.closest(".al-card"), id = card && card.getAttribute("data-id");
+      if (acao === "finalizar") { enviarEvento({ tipo: "finalizar", id: id }); }
+      else if (acao === "excluir") { enviarEvento({ tipo: "excluir", id: id }); }
+      else if (acao === "copiar") { copiarTexto(card.querySelector(".al-pre").textContent, alvo); }
+    });
+    corpoUn.addEventListener("change", function (ev) {
+      var alvo = ev.target;
+      if (alvo.getAttribute && alvo.getAttribute("data-acao") === "quem") {
+        var card = alvo.closest(".al-card");
+        enviarEvento({ tipo: "quem_recebeu", id: card.getAttribute("data-id"), valor: alvo.value });
+      }
     });
     corpoAl.addEventListener("change", function (ev) {
       var alvo = ev.target;
