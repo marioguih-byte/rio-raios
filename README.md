@@ -314,3 +314,27 @@ O Streamlit Community Cloud gratuito tem um limite de recursos (RAM/CPU)
 compartilhado por app. Pra uso por 1-2 pessoas ao mesmo tempo funciona
 bem; pra uso mais intenso, vale considerar um plano pago ou outro provedor
 (Render, Railway).
+
+## Mapas de previsão (Brasil)
+
+Seção nova no fim da página (depois dos boletins), **sem mexer em nada do que já existia**: o
+`streamlit_app.py` só ganhou o `import previsao_mapas` e a chamada `previsao_mapas.renderizar()`.
+
+- **O que gera:** mapas de **precipitação acumulada**, **rajada máxima de vento (10 m)** e **temperatura máxima/mínima
+  (2 m)** para o Brasil, **7 dias a partir de hoje** (horário de Brasília), com dados do Open-Meteo e
+  **interpolação RBF** (`scipy`, thin-plate spline) sobre uma malha de ~235 pontos (espaçamento de 2°).
+- **Como usar:** botão **🗺️ Gerar mapas de previsão** (a coleta leva ~20 s e roda em segundo plano, como os boletins, sem
+  travar o mapa de raios). Escolha a variável e o dia; a visão pode ser **Mapa do dia** (mapa grande + evolução máx/média/mín
+  + % da área acima de um limiar), **7 dias** (os 7 mapas lado a lado) ou **Dados** (pontos do Open-Meteo, com CSV). Dá para
+  baixar os PNGs.
+- **Layout:** mesmas cores do RIO (cartões e mapas no tema escuro, destaque em turquesa) e a seção é um *fragmento*: mexer
+  nos controles não recarrega o mapa de raios.
+- **Cache:** a previsão fica em memória por 3 h, **compartilhada entre os usuários** do app (quem abrir depois já vê os
+  mapas). Ela só vale se começar em hoje (Brasília); depois da meia-noite pede nova coleta. O botão vira **🔄 Atualizar
+  previsão** quando já há dados.
+- **Ajustes (expander da seção):** suavização e vizinhos da RBF, resolução da grade (0,5°/0,25°/0,15°) e espaçamento da
+  malha de consulta (3° a 1,5°; menos espaçamento = mais chamadas à API gratuita).
+- **Arquivos novos (precisam subir pro GitHub):** `previsao_mapas.py` e `data/brasil_mapa.json` (contorno do Brasil, estados e
+  países vizinhos do Natural Earth, simplificado — por isso não precisa de cartopy nem de download de shapefiles).
+  O `requirements.txt` ganhou `scipy`, `matplotlib` e `shapely`.
+- **Memória:** `scipy` e `matplotlib` só são carregados quando os mapas são gerados, então o app de raios abre como antes.

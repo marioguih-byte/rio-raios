@@ -1341,4 +1341,12 @@ def _boletins_fragmento(unidades_base):
 
 st.divider()
 st.fragment(run_every=2 if _boletins_rodando else None)(_boletins_fragmento)(unidades_boletim)
+
+# ======================================================================
+# MAPAS DE PREVISÃO (Brasil) — seção acrescentada; todo o código está em
+# previsao_mapas.py (Open-Meteo + interpolação RBF, 7 dias a partir de hoje)
+# ======================================================================
+import previsao_mapas
+st.divider()
+previsao_mapas.renderizar()
 _salvar_estado()
