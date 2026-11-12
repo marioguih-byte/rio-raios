@@ -332,8 +332,6 @@ Seção nova no fim da página (depois dos boletins), **sem mexer em nada do que
 - **Cache:** a previsão fica em memória por 3 h, **compartilhada entre os usuários** do app (quem abrir depois já vê os
   mapas). Ela só vale se começar em hoje (Brasília); depois da meia-noite pede nova coleta. O botão vira **🔄 Atualizar
   previsão** quando já há dados.
-- **Ajustes (expander da seção):** suavização e vizinhos da RBF, resolução da grade (0,5°/0,25°/0,15°) e espaçamento da
-  malha de consulta (3° a 1,5°; menos espaçamento = mais chamadas à API gratuita).
 - **Arquivos novos (precisam subir pro GitHub):** `previsao_mapas.py` e `data/brasil_mapa.json` (contorno do Brasil, estados e
   países vizinhos do Natural Earth, simplificado — por isso não precisa de cartopy nem de download de shapefiles).
   O `requirements.txt` ganhou `scipy`, `matplotlib` e `shapely`.

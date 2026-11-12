@@ -44,6 +44,11 @@ BUFFER_MASCARA_GRAUS = 0.3      # a RBF é avaliada um pouco além da fronteira 
 TAMANHO_LOTE = 50               # coordenadas por requisição
 PAUSA_LOTES_S = 1.0
 TTL_S = 3 * 3600                # cache da previsão
+# Parâmetros fixos (padrões)
+SUAVIZACAO_RBF = 0.5            # >0 suaviza e evita oscilações
+VIZINHOS_RBF = 40               # RBF local
+PASSO_GRADE = 0.25              # resolução da grade interpolada (graus)
+PASSO_MALHA = 2.0               # espaçamento da malha de consulta (graus), ~235 pontos
 DAILY_VARS = ["precipitation_sum", "wind_gusts_10m_max", "temperature_2m_max", "temperature_2m_min"]
 
 DIAS_PT = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"]
@@ -96,7 +101,7 @@ VARIAVEIS = {
     ),
 }
 
-VISOES = ["🗺️ Mapa do dia", "📅 7 dias", "📥 Dados"]
+VISOES = ["🗺️ Mapa do dia", "📅 7 dias", "Dados"]
 
 _CSS = """
 <style>
@@ -493,18 +498,7 @@ def _secao(rodando_inicio=False):
 
         var = st.radio("Variável", list(VARIAVEIS), format_func=lambda v: VARIAVEIS[v]["rotulo"],
                        horizontal=True, key="pv_var")
-        with st.expander("⚙️ Interpolação e malha de consulta"):
-            c1, c2 = st.columns(2)
-            with c1:
-                suav = st.slider("Suavização (RBF)", 0.0, 5.0, 0.5, 0.1, key="pv_suav",
-                                 help="Maior = campo mais liso; menor = acompanha mais de perto os pontos.")
-                viz = st.select_slider("Vizinhos (RBF local)", options=[20, 30, 40, 60, 80], value=40, key="pv_viz")
-            with c2:
-                grade = st.select_slider("Resolução da grade (°)", options=[0.5, 0.25, 0.15], value=0.25, key="pv_grade")
-                passo = st.select_slider("Espaçamento da malha de consulta (°)", options=[3.0, 2.5, 2.0, 1.5],
-                                         value=2.0, key="pv_passo", disabled=rodando,
-                                         help="Menor espaçamento = mais pontos e mais chamadas à API gratuita do Open-Meteo.")
-
+        suav, viz, grade, passo = SUAVIZACAO_RBF, VIZINHOS_RBF, PASSO_GRADE, PASSO_MALHA
         entrada = _entrada(passo)
         rotulo_botao = "🔄 Atualizar previsão" if entrada else "🗺️ Gerar mapas de previsão"
         if st.button(rotulo_botao, key="pv_gerar", type="secondary" if entrada else "primary", disabled=rodando):
