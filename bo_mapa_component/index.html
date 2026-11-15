@@ -33,6 +33,10 @@
   .al-acoes button:hover, .al-limpar:hover { background: #374151; }
   .al-acoes button.al-finalizar { background: #14532d; border-color: #22c55e; color: #bbf7d0; }
   .al-acoes button.al-finalizar:hover { background: #166534; }
+  .al-acoes button.al-antecipar { background: #7f1d1d; border-color: #ef4444; color: #fecaca; }
+  .al-acoes button.al-antecipar:hover { background: #991b1b; }
+  .al-dur-linha { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+  select.al-dur { width: auto; }
   .al-acoes button.al-whats { background: #075e54; border-color: #25d366; color: #d1fae5; }
   .al-acoes button.al-whats:hover { background: #128c7e; }
   .al-limpar { width: 100%; margin-bottom: 10px; padding: 6px 10px; }
@@ -688,8 +692,14 @@
       '<label style="font-size:12px;color:#c4cbd6;">Quem recebeu o alerta:</label>' +
       '<input class="al-input" data-acao="quem" value="' + esc(a.quem_recebeu || "") + '" placeholder="nome de quem confirmou o recebimento" />' +
       '<pre class="al-pre">' + esc(a.copia) + '</pre>' +
+      (a.nivel !== "verde" ? '<div class="al-dur-linha"><label style="font-size:12px;color:#c4cbd6;">Validade:</label>' +
+        '<select class="al-input al-dur" data-acao="duracao">' +
+        [[60, "1 hora"], [90, "1 hora e meia"], [120, "2 horas"]].map(function (o) {
+          return '<option value="' + o[0] + '"' + ((duracoes[a.id] || a.duracao_min || 60) === o[0] ? " selected" : "") + '>' + o[1] + '</option>';
+        }).join("") + '</select></div>' : '') +
       '<div class="al-acoes"><button data-acao="copiar" class="al-whats">📋 Copiar para o WhatsApp</button>' +
       '<button data-acao="preparar" class="al-whats" title="Precisa do script do Tampermonkey (pasta whatsapp_assistente). Abre o grupo no WhatsApp Web e deixa a mensagem digitada para você conferir e apertar Enter.">🤖 Preparar no WhatsApp</button>' +
+      (a.anteciparvel ? '<button data-acao="antecipar" class="al-antecipar">🔴 Antecipar para vermelho</button>' : '') +
       (a.finalizavel ? '<button data-acao="finalizar" class="al-finalizar">🟢 Finalizar alerta</button>' : '') +
       '<button data-acao="excluir">✕ Excluir</button></div></div>';
   }
@@ -757,21 +767,31 @@
     var o = {}; f.forEach(function (p) { o[p.type] = p.value; });
     return { data: o.day + "/" + o.month + "/" + o.year, hora: o.hour + ":" + o.minute };
   }
-  function comHorarioAtual(texto) {
-    var agora = partesBrasilia(Date.now()), fim = partesBrasilia(Date.now() + 3600000);
+  function comHorarioAtual(texto, minutos) {
+    var agora = partesBrasilia(Date.now()), fim = partesBrasilia(Date.now() + (minutos || 60) * 60000);
     return String(texto)
       .replace(/\d{2}\/\d{2}\/\d{4} - \d{2}:\d{2}/, agora.data + " - " + agora.hora)
       .replace(/Válido até as \d{2}:\d{2}/, "Válido até as " + fim.hora);
   }
+  var duracoes = {};   // duração escolhida por alerta (minutos); padrão 60
+  function duracaoDoCard(card) {
+    var sel = card.querySelector('select[data-acao="duracao"]');
+    return sel ? parseInt(sel.value, 10) || 60 : 60;
+  }
   function textoAtualizado(card) {
     var pre = card.querySelector(".al-pre");
-    pre.textContent = comHorarioAtual(pre.textContent);
+    pre.textContent = comHorarioAtual(pre.textContent, duracaoDoCard(card));
     return pre.textContent;
+  }
+  // Avisa o servidor: o alerta passa a durar a duração escolhida a partir de agora.
+  function registrarValidade(card) {
+    if (card.getAttribute("data-nivel") === "verde") return;
+    enviarEvento({ tipo: "validade", id: card.getAttribute("data-id"), minutos: duracaoDoCard(card) });
   }
   function atualizarTextoCard(input) {
     var card = input.closest(".al-card"); if (!card) return;
     var pre = card.querySelector(".al-pre");
-    if (pre && card.hasAttribute("data-base")) pre.textContent = textoComQuem(card.getAttribute("data-base"), card.getAttribute("data-nivel"), input.value);
+    if (pre && card.hasAttribute("data-base")) pre.textContent = comHorarioAtual(textoComQuem(card.getAttribute("data-base"), card.getAttribute("data-nivel"), input.value), duracaoDoCard(card));
   }
   // Manda o alerta para o script do Tampermonkey (que roda na página do app) e ele prepara a mensagem no WhatsApp Web.
   // Sem o script instalado não chega confirmação: aí o texto é só copiado (plano B).
@@ -791,9 +811,18 @@
       if (confirmou) { botao.textContent = "✔ Enviado ao WhatsApp — confira lá e dê Enter"; }
       else { copiarFallback(texto); botao.textContent = "Script não detectado — texto copiado (Ctrl+V)"; }
       setTimeout(function () { botao.textContent = rotulo; }, 4000);
+      registrarValidade(card);
     }, 1200);
   }
   function ligarCampoQuem(container) {
+    container.addEventListener("change", function (ev) {
+      var alvo = ev.target;
+      if (alvo.getAttribute && alvo.getAttribute("data-acao") === "duracao") {
+        var card = alvo.closest(".al-card");
+        duracoes[card.getAttribute("data-id")] = parseInt(alvo.value, 10) || 60;
+        textoAtualizado(card);
+      }
+    });
     container.addEventListener("input", function (ev) {
       var alvo = ev.target;
       if (alvo.getAttribute && alvo.getAttribute("data-acao") === "quem") atualizarTextoCard(alvo);
@@ -838,8 +867,9 @@
       if (acao === "limpar") { enviarEvento({ tipo: "limpar" }); }
       else if (acao === "finalizar") { enviarEvento({ tipo: "finalizar", id: id }); }
       else if (acao === "excluir") { enviarEvento({ tipo: "excluir", id: id }); }
-      else if (acao === "copiar") { copiarTexto(textoAtualizado(card), alvo); }
+      else if (acao === "copiar") { copiarTexto(textoAtualizado(card), alvo); registrarValidade(card); }
       else if (acao === "preparar") { prepararNoWhatsApp(card, alvo); }
+      else if (acao === "antecipar") { enviarEvento({ tipo: "antecipar", id: id }); }
     });
     ligarCampoQuem(corpoAl);
     // Painel da unidade: mesmas ações do card (copiar, finalizar, excluir, quem recebeu).
@@ -850,8 +880,9 @@
       var card = alvo.closest(".al-card"), id = card && card.getAttribute("data-id");
       if (acao === "finalizar") { enviarEvento({ tipo: "finalizar", id: id }); }
       else if (acao === "excluir") { enviarEvento({ tipo: "excluir", id: id }); }
-      else if (acao === "copiar") { copiarTexto(textoAtualizado(card), alvo); }
+      else if (acao === "copiar") { copiarTexto(textoAtualizado(card), alvo); registrarValidade(card); }
       else if (acao === "preparar") { prepararNoWhatsApp(card, alvo); }
+      else if (acao === "antecipar") { enviarEvento({ tipo: "antecipar", id: id }); }
     });
     ligarCampoQuem(corpoUn);
     corpoUn.addEventListener("change", function (ev) {

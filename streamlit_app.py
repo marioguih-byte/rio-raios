@@ -559,7 +559,7 @@ _HTML_PREPARAR = """<!doctype html><html><head><meta charset="utf-8"><style>
   button { cursor:pointer; border-radius:8px; border:1px solid #25d366; background:#25d366; color:#06210f; padding:7px 14px; font:600 14px 'Segoe UI', Arial, sans-serif; }
   button:hover { background:#3be07b; }
 </style></head><body><button id="b">🤖 Preparar no WhatsApp</button><script>
-  var ESTACAO = __ESTACAO__, TEXTO = __TEXTO__, ID = __ID__;
+  var ESTACAO = __ESTACAO__, TEXTO = __TEXTO__, ID = __ID__, MIN = __MIN__;
   function partes(ms) {
     var f = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit",
                                                hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(ms));
@@ -567,7 +567,7 @@ _HTML_PREPARAR = """<!doctype html><html><head><meta charset="utf-8"><style>
     return { data: o.day + "/" + o.month + "/" + o.year, hora: o.hour + ":" + o.minute };
   }
   function atual(t) {
-    var a = partes(Date.now()), fim = partes(Date.now() + 3600000);
+    var a = partes(Date.now()), fim = partes(Date.now() + MIN * 60000);
     return t.replace(/\\d{2}\\/\\d{2}\\/\\d{4} - \\d{2}:\\d{2}/, a.data + " - " + a.hora).replace(/Válido até as \\d{2}:\\d{2}/, "Válido até as " + fim.hora);
   }
   var btn = document.getElementById("b");
@@ -589,10 +589,10 @@ _HTML_PREPARAR = """<!doctype html><html><head><meta charset="utf-8"><style>
   });
 </script></body></html>"""
 
-def botao_preparar_whatsapp(estacao, texto, alerta_id):
+def botao_preparar_whatsapp(estacao, texto, alerta_id, minutos=60):
     """Botão 'Preparar no WhatsApp' (script do Tampermonkey): abre o grupo na aba já aberta e deixa o texto digitado."""
     def js(v): return json.dumps(str(v), ensure_ascii=False).replace("</", "<\\/")
-    html = (_HTML_PREPARAR.replace("__ESTACAO__", js(estacao)).replace("__TEXTO__", js(texto)).replace("__ID__", js(alerta_id)))
+    html = (_HTML_PREPARAR.replace("__ESTACAO__", js(estacao)).replace("__TEXTO__", js(texto)).replace("__ID__", js(alerta_id)).replace("__MIN__", str(int(minutos))))
     components.html(html, height=44)
 
 # ======================================================================
@@ -627,6 +627,43 @@ def _finalizar_alerta_unidade(chave_estacao):
     reg["encerrado_ts"] = agora_ts
     reg["encerrado_km"] = 50   # finalizado à mão: raios até 50 km anteriores a agora deixam de contar
     _salvar_estado()
+
+def _antecipar_para_vermelho(alerta):
+    """Gera um alerta VERMELHO para a unidade de um alerta amarelo (antecipação manual, sem esperar o raio chegar a 30 km)."""
+    chave = alerta["estacao"]
+    agora_ts = time.time()
+    nome = str(chave).split(" - ")[0]
+    texto = montar_mensagem_proximidade_raio(30, nome, st.session_state.get("meteorologista_nome", ""))
+    st.session_state.alertas_raio_ativos.insert(0, {
+        "id": f"{chave}_antecipado_{agora_ts}", "texto": texto, "estacao": chave, "nivel": "vermelho",
+        "dist_km": alerta.get("dist_km"), "expira": agora_ts + 3600, "quem_recebeu": "", "antecipado": True,
+    })
+    st.session_state.alertas_unidade[chave] = {
+        "nivel": "vermelho", "dist_km": alerta.get("dist_km"), "notificado_ts": agora_ts, "expira_ts": agora_ts + 3600,
+    }
+    _salvar_estado()
+
+DURACOES_ALERTA_MIN = (60, 90, 120)   # 1 h, 1 h 30 e 2 h
+
+def _definir_validade(alerta_id, minutos):
+    """Alerta passa a durar `minutos` a partir de AGORA (some da lista e só renotifica depois disso)."""
+    try:
+        minutos = int(minutos)
+    except (TypeError, ValueError):
+        return
+    if minutos not in DURACOES_ALERTA_MIN:
+        return
+    for a in st.session_state.alertas_raio_ativos:
+        if a.get("id") != alerta_id or a.get("nivel") == "verde":
+            continue
+        agora_ts = time.time()
+        a["expira"] = agora_ts + minutos * 60
+        a["duracao_min"] = minutos
+        reg = st.session_state.alertas_unidade.get(a.get("estacao"))
+        if reg and not reg.get("encerrado_ts") and reg.get("nivel") == a.get("nivel"):
+            reg["expira_ts"] = agora_ts + minutos * 60
+        _salvar_estado()
+        return
 
 # ======================================================================
 # INTERFACE STREAMLIT
@@ -1049,7 +1086,8 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
     _finalizaveis = _alertas_finalizaveis()
     alertas_payload = [
         {"id": a["id"], "estacao": a.get("estacao"), "quem_recebeu": a.get("quem_recebeu", ""),
-         "copia": montar_texto_copia(a), "base": a["texto"], "nivel": a.get("nivel"), "finalizavel": a["id"] in _finalizaveis}
+         "copia": montar_texto_copia(a), "base": a["texto"], "nivel": a.get("nivel"), "finalizavel": a["id"] in _finalizaveis,
+         "anteciparvel": a.get("nivel") == "amarelo" and a["id"] in _finalizaveis, "duracao_min": a.get("duracao_min", 60)}
         for a in st.session_state.alertas_raio_ativos
     ]
 
@@ -1093,6 +1131,12 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
             alvo = next((x for x in st.session_state.alertas_raio_ativos if x.get("id") == evento.get("id")), None)
             if alvo is not None and alvo["id"] in _alertas_finalizaveis():
                 _finalizar_alerta_unidade(alvo["estacao"])
+        elif tipo == "antecipar":
+            alvo = next((x for x in st.session_state.alertas_raio_ativos if x.get("id") == evento.get("id")), None)
+            if alvo is not None and alvo.get("nivel") == "amarelo" and alvo["id"] in _alertas_finalizaveis():
+                _antecipar_para_vermelho(alvo)
+        elif tipo == "validade":
+            _definir_validade(evento.get("id"), evento.get("minutos"))
         elif tipo == "excluir":
             st.session_state.alertas_raio_ativos = [x for x in st.session_state.alertas_raio_ativos if x.get("id") != evento.get("id")]
         elif tipo == "limpar":
@@ -1176,7 +1220,19 @@ with col_lado:
                                 )
                                 a["quem_recebeu"] = quem
                                 st.code(montar_texto_copia(a), language=None)
-                                botao_preparar_whatsapp(a.get("estacao", ""), montar_texto_copia(a), a.get("id", ""))
+                                _dur = 60
+                                if a.get("nivel") != "verde":
+                                    _dur = st.radio("Validade do alerta", DURACOES_ALERTA_MIN, index=DURACOES_ALERTA_MIN.index(a.get("duracao_min", 60)),
+                                                    format_func=lambda m: {60: "1 hora", 90: "1 hora e meia", 120: "2 horas"}[m],
+                                                    horizontal=True, key=f"dur_{a['id']}")
+                                    if _dur != a.get("duracao_min", 60):
+                                        _definir_validade(a["id"], _dur)
+                                botao_preparar_whatsapp(a.get("estacao", ""), montar_texto_copia(a), a.get("id", ""), _dur)
+                                if a.get("nivel") == "amarelo" and a.get("id") in _finalizaveis:
+                                    if st.button("🔴 Antecipar para vermelho", key=f"antecipar_{a['id']}",
+                                                 help="Gera um alerta vermelho para esta unidade, sem esperar o raio chegar a 30 km"):
+                                        _antecipar_para_vermelho(a)
+                                        st.rerun()
                                 if a.get("id") in _finalizaveis:
                                     if st.button("🟢 Finalizar alerta", key=f"finalizar_alerta_{a['id']}",
                                                  help="Emite o alerta verde (fim do alerta de raios) para esta unidade"):
