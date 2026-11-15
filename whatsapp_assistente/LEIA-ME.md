@@ -26,3 +26,11 @@ O script procura pelo nome da estação antes do " - " (ex.: "UTE Termobahia"), 
 - O WhatsApp muda o código da página de vez em quando; se parar de achar os grupos, o aviso
   aparece e o plano B (texto copiado) continua funcionando.
 - A aba do WhatsApp Web precisa estar aberta e logada.
+
+## Fila de boletins (todos de uma vez, com supervisão)
+Na lista de boletins, **🤖 Preparar todos (fila)** manda todas as unidades para o script. Ele abre o
+grupo da 1ª unidade e deixa o boletim digitado; **você confere e aperta Enter**. Quando a caixa
+esvazia (mensagem enviada), ele abre a próxima. Na aba do WhatsApp aparecem os botões
+**⏭ Pular este** e **⏹ Parar fila**. Se você abrir outro chat no meio, a unidade é contada como pulada.
+Grupos não encontrados são listados no resumo final (o texto é copiado para você colar à mão).
+O script nunca aperta Enter por você.

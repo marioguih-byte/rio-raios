@@ -1194,6 +1194,7 @@ _HTML_WHATSAPP = """<!doctype html><html><head><meta charset="utf-8"><style>
   .nota { color:#8b93a3; font-size:12.5px; margin:2px 2px 10px; }
 </style></head><body>
 <div class="topo">
+  <button class="principal" id="fila" title="Prepara os boletins um grupo por vez; quando voce envia um, o script abre o proximo. Precisa do script do Tampermonkey.">🤖 Preparar todos (fila)</button>
   <button class="principal" id="entrar">1️⃣ Abrir / entrar no WhatsApp Web</button>
   <span class="nota" id="nota"></span>
 </div>
@@ -1216,6 +1217,21 @@ _HTML_WHATSAPP = """<!doctype html><html><head><meta charset="utf-8"><style>
   document.getElementById("nota").textContent = celular
     ? "No celular o link abre o aplicativo do WhatsApp."
     : "Abre numa aba só; os botões abaixo reaproveitam essa mesma aba.";
+  document.getElementById("fila").addEventListener("click", function () {
+    var btn = this, rot = "🤖 Preparar todos (fila)", confirmou = false;
+    if (!confirm("Preparar " + ITENS.length + " boletins em fila? Um grupo por vez: voce confere e aperta Enter em cada um; o proximo abre sozinho.")) return;
+    function ack(ev) { if (ev.data && ev.data.fonte === "rio-raios-ack") confirmou = true; }
+    window.addEventListener("message", ack);
+    try {
+      (window.top || window.parent).postMessage({ fonte: "rio-raios", tipo: "fila",
+        itens: ITENS.map(function (i) { return { id: i.id, estacao: i.estacao, texto: i.texto }; }) }, "*");
+    } catch (e) {}
+    setTimeout(function () {
+      window.removeEventListener("message", ack);
+      btn.textContent = confirmou ? "✔ Fila enviada ao WhatsApp - va para a aba dele" : "Script nao detectado - instale o Tampermonkey";
+      setTimeout(function () { btn.textContent = rot; }, 5000);
+    }, 1200);
+  });
   document.getElementById("entrar").addEventListener("click", function () {
     abrir(celular ? "https://wa.me/" : "https://web.whatsapp.com/");
   });
@@ -1229,10 +1245,28 @@ _HTML_WHATSAPP = """<!doctype html><html><head><meta charset="utf-8"><style>
       var url = (celular ? "https://wa.me/?text=" : "https://web.whatsapp.com/send?text=") + encodeURIComponent(it.texto);
       if (abrir(url)) { gravarFlag(kAberto, true); linha.classList.add("aberto"); }
     });
+    var b2 = document.createElement("button"); b2.className = "principal"; b2.textContent = "🤖 Preparar no WhatsApp";
+    b2.title = "Precisa do script do Tampermonkey (pasta whatsapp_assistente): abre o grupo da unidade no WhatsApp Web e deixa o boletim digitado para voce conferir e apertar Enter.";
+    b2.addEventListener("click", function () {
+      var confirmou = false;
+      function ack(ev) { if (ev.data && ev.data.fonte === "rio-raios-ack") confirmou = true; }
+      window.addEventListener("message", ack);
+      try { (window.top || window.parent).postMessage({ fonte: "rio-raios", tipo: "preparar", id: it.id, estacao: it.estacao, texto: it.texto }, "*"); } catch (e) {}
+      setTimeout(function () {
+        window.removeEventListener("message", ack);
+        if (confirmou) { gravarFlag(kAberto, true); linha.classList.add("aberto"); b2.textContent = "✔ Enviado ao WhatsApp - confira la e de Enter"; }
+        else {
+          var t = document.createElement("textarea"); t.value = it.texto; t.style.position = "fixed"; t.style.opacity = "0";
+          document.body.appendChild(t); t.select(); try { document.execCommand("copy"); } catch (e) {} document.body.removeChild(t);
+          b2.textContent = "Script nao detectado - texto copiado (Ctrl+V)";
+        }
+        setTimeout(function () { b2.textContent = "🤖 Preparar no WhatsApp"; }, 4000);
+      }, 1200);
+    });
     var lab = document.createElement("label"); var cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = lerFlag(kOk);
     cb.addEventListener("change", function () { gravarFlag(kOk, cb.checked); });
     lab.appendChild(cb); lab.appendChild(document.createTextNode("enviado"));
-    linha.appendChild(nome); linha.appendChild(b); linha.appendChild(lab); lista.appendChild(linha);
+    linha.appendChild(nome); linha.appendChild(b2); linha.appendChild(b); linha.appendChild(lab); lista.appendChild(linha);
   });
 </script></body></html>"""
 
@@ -1240,9 +1274,12 @@ _HTML_WHATSAPP = """<!doctype html><html><head><meta charset="utf-8"><style>
 def _secao_whatsapp_manual(resultados, geracao_id):
     """Lista de unidades; cada botão abre o WhatsApp Web (numa aba que o app reaproveita) com o boletim já escrito.
     Quem escolhe o grupo e aperta "enviar" é a pessoa: nenhuma automação, sem risco de banimento."""
-    with st.expander("📲 Enviar pelo WhatsApp Web (manual)", expanded=True):
+    with st.expander("📲 Enviar pelo WhatsApp Web (assistido)", expanded=True):
         st.markdown(
-            "**Como usar**\n"
+            "**Recomendado:** com o script do Tampermonkey instalado (pasta `whatsapp_assistente`), clique em "
+            "**🤖 Preparar no WhatsApp** na linha da unidade: o grupo abre na aba do WhatsApp Web que já está aberta e o boletim "
+            "fica digitado; é só conferir e apertar Enter.\n\n"
+            "**Sem o script (manual)**\n"
             "1. Clique em **1️⃣ Abrir / entrar no WhatsApp Web**. Se pedir, entre com o QR code "
             "(WhatsApp no celular → *Aparelhos conectados* → *Conectar um aparelho*). Essa aba fica aberta.\n"
             "2. Na linha da unidade, clique em **Enviar no WhatsApp Web**: **a mesma aba** abre com o boletim já escrito. "
@@ -1253,7 +1290,7 @@ def _secao_whatsapp_manual(resultados, geracao_id):
                    "abre o WhatsApp Web numa aba do app, que passa a ser reaproveitada. Se já tiver outra aba do WhatsApp Web "
                    "aberta, feche-a antes (ele só funciona em uma aba por vez; se aparecer \"aberto em outra janela\", "
                    "clique em **Usar aqui**). O app não acessa a sua conta nem os seus grupos.")
-        itens = [{"id": boletins_bo.slug(n), "nome": n.split(" - ")[0], "texto": t} for n, t in resultados.items()]
+        itens = [{"id": boletins_bo.slug(n), "nome": n.split(" - ")[0], "estacao": n, "texto": t} for n, t in resultados.items()]
         html = (_HTML_WHATSAPP
                 .replace("__ITENS__", json.dumps(itens, ensure_ascii=False).replace("</", "<\\/"))
                 .replace("__GERACAO__", re.sub(r"[^0-9A-Za-z]", "", str(geracao_id))))
