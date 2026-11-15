@@ -554,10 +554,46 @@ def montar_texto_copia(alerta):
         linhas.insert(-1, f"* Quem recebeu o alerta: {quem}")
     return "\n".join(linhas)
 
-def link_whatsapp_web(texto):
-    """Link que abre o WhatsApp (Web) com o texto já preenchido; a pessoa escolhe o grupo e envia."""
-    from urllib.parse import quote
-    return "https://web.whatsapp.com/send?text=" + quote(texto, safe="")
+_HTML_PREPARAR = """<!doctype html><html><head><meta charset="utf-8"><style>
+  html, body { margin:0; padding:0; background:transparent; }
+  button { cursor:pointer; border-radius:8px; border:1px solid #25d366; background:#25d366; color:#06210f; padding:7px 14px; font:600 14px 'Segoe UI', Arial, sans-serif; }
+  button:hover { background:#3be07b; }
+</style></head><body><button id="b">🤖 Preparar no WhatsApp</button><script>
+  var ESTACAO = __ESTACAO__, TEXTO = __TEXTO__, ID = __ID__;
+  function partes(ms) {
+    var f = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit",
+                                               hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(ms));
+    var o = {}; f.forEach(function (p) { o[p.type] = p.value; });
+    return { data: o.day + "/" + o.month + "/" + o.year, hora: o.hour + ":" + o.minute };
+  }
+  function atual(t) {
+    var a = partes(Date.now()), fim = partes(Date.now() + 3600000);
+    return t.replace(/\\d{2}\\/\\d{2}\\/\\d{4} - \\d{2}:\\d{2}/, a.data + " - " + a.hora).replace(/Válido até as \\d{2}:\\d{2}/, "Válido até as " + fim.hora);
+  }
+  var btn = document.getElementById("b");
+  btn.addEventListener("click", function () {
+    var texto = atual(TEXTO), confirmou = false;
+    function ack(ev) { if (ev.data && ev.data.fonte === "rio-raios-ack") confirmou = true; }
+    window.addEventListener("message", ack);
+    try { (window.top || window.parent).postMessage({ fonte: "rio-raios", tipo: "preparar", id: ID, estacao: ESTACAO, texto: texto }, "*"); } catch (e) {}
+    setTimeout(function () {
+      window.removeEventListener("message", ack);
+      if (confirmou) { btn.textContent = "✔ Enviado ao WhatsApp - confira la e de Enter"; }
+      else {
+        var t = document.createElement("textarea"); t.value = texto; t.style.position = "fixed"; t.style.opacity = "0";
+        document.body.appendChild(t); t.select(); try { document.execCommand("copy"); } catch (e) {} document.body.removeChild(t);
+        btn.textContent = "Script nao detectado - texto copiado (Ctrl+V)";
+      }
+      setTimeout(function () { btn.textContent = "🤖 Preparar no WhatsApp"; }, 4000);
+    }, 1200);
+  });
+</script></body></html>"""
+
+def botao_preparar_whatsapp(estacao, texto, alerta_id):
+    """Botão 'Preparar no WhatsApp' (script do Tampermonkey): abre o grupo na aba já aberta e deixa o texto digitado."""
+    def js(v): return json.dumps(str(v), ensure_ascii=False).replace("</", "<\\/")
+    html = (_HTML_PREPARAR.replace("__ESTACAO__", js(estacao)).replace("__TEXTO__", js(texto)).replace("__ID__", js(alerta_id)))
+    components.html(html, height=44)
 
 # ======================================================================
 # FINALIZAR ALERTA (manual) — emite o alerta verde da unidade na hora, igual ao automático.
@@ -1140,8 +1176,7 @@ with col_lado:
                                 )
                                 a["quem_recebeu"] = quem
                                 st.code(montar_texto_copia(a), language=None)
-                                st.link_button("↗ Abrir no WhatsApp Web", url=link_whatsapp_web(montar_texto_copia(a)),
-                                               help="Abre o WhatsApp Web em outra aba com o alerta já digitado. Se o WhatsApp Web já estiver aberto, prefira copiar o texto acima (ícone de copiar) e colar no grupo")
+                                botao_preparar_whatsapp(a.get("estacao", ""), montar_texto_copia(a), a.get("id", ""))
                                 if a.get("id") in _finalizaveis:
                                     if st.button("🟢 Finalizar alerta", key=f"finalizar_alerta_{a['id']}",
                                                  help="Emite o alerta verde (fim do alerta de raios) para esta unidade"):
@@ -1195,7 +1230,6 @@ _HTML_WHATSAPP = """<!doctype html><html><head><meta charset="utf-8"><style>
 </style></head><body>
 <div class="topo">
   <button class="principal" id="fila" title="Prepara os boletins um grupo por vez; quando voce envia um, o script abre o proximo. Precisa do script do Tampermonkey.">🤖 Preparar todos (fila)</button>
-  <button class="principal" id="entrar">1️⃣ Abrir / entrar no WhatsApp Web</button>
   <span class="nota" id="nota"></span>
 </div>
 <div id="aviso"></div>
@@ -1208,15 +1242,7 @@ _HTML_WHATSAPP = """<!doctype html><html><head><meta charset="utf-8"><style>
   function lerFlag(k) { try { return sessionStorage.getItem(k) === "1"; } catch (e) { return false; } }
   function gravarFlag(k, v) { try { sessionStorage.setItem(k, v ? "1" : "0"); } catch (e) {} }
   function aviso(t) { var a = document.getElementById("aviso"); a.textContent = t; a.style.display = t ? "block" : "none"; }
-  function abrir(url) {
-    var w = window.open(url, NOME_ABA);
-    if (!w) { aviso("O navegador bloqueou a abertura da aba. Permita pop-ups para este site e clique de novo."); return false; }
-    aviso(""); try { w.focus(); } catch (e) {}
-    return true;
-  }
-  document.getElementById("nota").textContent = celular
-    ? "No celular o link abre o aplicativo do WhatsApp."
-    : "Abre numa aba só; os botões abaixo reaproveitam essa mesma aba.";
+  document.getElementById("nota").textContent = "Use com o WhatsApp Web já aberto em outra aba.";
   document.getElementById("fila").addEventListener("click", function () {
     var btn = this, rot = "🤖 Preparar todos (fila)", confirmou = false;
     if (!confirm("Preparar " + ITENS.length + " boletins em fila? Um grupo por vez: voce confere e aperta Enter em cada um; o proximo abre sozinho.")) return;
@@ -1232,19 +1258,11 @@ _HTML_WHATSAPP = """<!doctype html><html><head><meta charset="utf-8"><style>
       setTimeout(function () { btn.textContent = rot; }, 5000);
     }, 1200);
   });
-  document.getElementById("entrar").addEventListener("click", function () {
-    abrir(celular ? "https://wa.me/" : "https://web.whatsapp.com/");
-  });
   var lista = document.getElementById("lista");
   ITENS.forEach(function (it) {
     var kAberto = "rio_wa_aberto_" + GERACAO + "_" + it.id, kOk = "rio_wa_ok_" + GERACAO + "_" + it.id;
     var linha = document.createElement("div"); linha.className = "linha" + (lerFlag(kAberto) ? " aberto" : "");
     var nome = document.createElement("div"); nome.className = "nome"; nome.textContent = it.nome; nome.title = it.nome;
-    var b = document.createElement("button"); b.textContent = "📲 Enviar no WhatsApp Web";
-    b.addEventListener("click", function () {
-      var url = (celular ? "https://wa.me/?text=" : "https://web.whatsapp.com/send?text=") + encodeURIComponent(it.texto);
-      if (abrir(url)) { gravarFlag(kAberto, true); linha.classList.add("aberto"); }
-    });
     var b2 = document.createElement("button"); b2.className = "principal"; b2.textContent = "🤖 Preparar no WhatsApp";
     b2.title = "Precisa do script do Tampermonkey (pasta whatsapp_assistente): abre o grupo da unidade no WhatsApp Web e deixa o boletim digitado para voce conferir e apertar Enter.";
     b2.addEventListener("click", function () {
@@ -1266,7 +1284,7 @@ _HTML_WHATSAPP = """<!doctype html><html><head><meta charset="utf-8"><style>
     var lab = document.createElement("label"); var cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = lerFlag(kOk);
     cb.addEventListener("change", function () { gravarFlag(kOk, cb.checked); });
     lab.appendChild(cb); lab.appendChild(document.createTextNode("enviado"));
-    linha.appendChild(nome); linha.appendChild(b2); linha.appendChild(b); linha.appendChild(lab); lista.appendChild(linha);
+    linha.appendChild(nome); linha.appendChild(b2); linha.appendChild(lab); lista.appendChild(linha);
   });
 </script></body></html>"""
 
@@ -1276,20 +1294,12 @@ def _secao_whatsapp_manual(resultados, geracao_id):
     Quem escolhe o grupo e aperta "enviar" é a pessoa: nenhuma automação, sem risco de banimento."""
     with st.expander("📲 Enviar pelo WhatsApp Web (assistido)", expanded=True):
         st.markdown(
-            "**Recomendado:** com o script do Tampermonkey instalado (pasta `whatsapp_assistente`), clique em "
-            "**🤖 Preparar no WhatsApp** na linha da unidade: o grupo abre na aba do WhatsApp Web que já está aberta e o boletim "
-            "fica digitado; é só conferir e apertar Enter.\n\n"
-            "**Sem o script (manual)**\n"
-            "1. Clique em **1️⃣ Abrir / entrar no WhatsApp Web**. Se pedir, entre com o QR code "
-            "(WhatsApp no celular → *Aparelhos conectados* → *Conectar um aparelho*). Essa aba fica aberta.\n"
-            "2. Na linha da unidade, clique em **Enviar no WhatsApp Web**: **a mesma aba** abre com o boletim já escrito. "
-            "Escolha o **grupo** da unidade e envie.\n"
-            "3. Volte para esta aba, clique na próxima unidade e marque **enviado** para controlar."
+            "Com o script do Tampermonkey instalado (pasta `whatsapp_assistente`), clique em **🤖 Preparar no WhatsApp** "
+            "na linha da unidade (ou em **🤖 Preparar todos (fila)**): o grupo abre na aba do WhatsApp Web que **já está aberta** "
+            "e o boletim fica digitado; é só conferir e apertar Enter. Depois marque **enviado** para controlar."
         )
-        st.caption("O navegador não deixa um site controlar uma aba que você abriu por conta própria: por isso o primeiro botão "
-                   "abre o WhatsApp Web numa aba do app, que passa a ser reaproveitada. Se já tiver outra aba do WhatsApp Web "
-                   "aberta, feche-a antes (ele só funciona em uma aba por vez; se aparecer \"aberto em outra janela\", "
-                   "clique em **Usar aqui**). O app não acessa a sua conta nem os seus grupos.")
+        st.caption("Mantenha o WhatsApp Web aberto e logado em uma aba. O WhatsApp só funciona em uma aba por vez, "
+                   "então o app não abre outra aba por conta própria. Sem o script, o botão apenas copia o boletim para você colar no grupo.")
         itens = [{"id": boletins_bo.slug(n), "nome": n.split(" - ")[0], "estacao": n, "texto": t} for n, t in resultados.items()]
         html = (_HTML_WHATSAPP
                 .replace("__ITENS__", json.dumps(itens, ensure_ascii=False).replace("</", "<\\/"))

@@ -63,17 +63,12 @@ mapa não carrega.
   legenda e o controle de camadas vão junto. Se o navegador não permitir a tela cheia nativa dentro do
   quadro do Streamlit, o botão passa a **aumentar a altura do mapa** (e reduzir ao clicar de novo).
 
-## Enviar os boletins pelo WhatsApp Web (manual)
+## Enviar os boletins pelo WhatsApp (assistido)
 
-Na seção de boletins, depois de gerar, há **📲 Enviar pelo WhatsApp Web (manual)**: uma lista com todas as unidades.
-1. **1️⃣ Abrir / entrar no WhatsApp Web** abre o WhatsApp Web numa aba nomeada pelo app (entre com o QR code se pedir).
-2. **Enviar no WhatsApp Web**, na linha da unidade, abre **essa mesma aba** com o boletim já escrito; você escolhe o grupo e envia.
-   A linha clicada fica verde e há uma caixa **enviado** (lembrada na aba do navegador, recomeça ao gerar novos boletins).
-- O navegador não deixa um site controlar uma aba aberta por você; por isso o app reaproveita a aba que ele mesmo abriu.
-  Se já houver outra aba do WhatsApp Web aberta, feche-a antes (ele só funciona em uma aba por vez; se aparecer "aberto em
-  outra janela", clique em **Usar aqui**). Se o navegador bloquear a aba, permita pop-ups para o site.
-- No celular os botões abrem o aplicativo do WhatsApp (`wa.me`).
-- Não há automação (sem risco de banimento) e o app não acessa a conta nem os grupos do WhatsApp.
+Na seção de boletins, depois de gerar, há **📲 Enviar pelo WhatsApp Web (assistido)**: uma lista com todas as unidades.
+Cada linha tem **🤖 Preparar no WhatsApp** (e há **🤖 Preparar todos (fila)** no topo), que usa o script do Tampermonkey
+em `whatsapp_assistente/` para abrir o grupo da unidade na aba do WhatsApp Web **que já está aberta** e deixar o boletim
+digitado; você confere e aperta Enter. Marque **enviado** para controlar. O app nunca abre outra aba do WhatsApp.
 
 ## Ordem alfabética
 
@@ -337,14 +332,9 @@ Seção nova no fim da página (depois dos boletins), **sem mexer em nada do que
   O `requirements.txt` ganhou `scipy`, `matplotlib` e `shapely`.
 - **Memória:** `scipy` e `matplotlib` só são carregados quando os mapas são gerados, então o app de raios abre como antes.
 
-## Enviar o alerta ao WhatsApp
+## Enviar o alerta ao WhatsApp (assistido)
 
-Cada alerta tem o botão **📋 Copiar para o WhatsApp**: copia o texto (com "Quem recebeu o alerta")
-e você só cola (Ctrl+V) no grupo da unidade, na aba do WhatsApp Web que já está aberta.
-Existe também **↗ Abrir no WhatsApp Web**, que abre uma nova aba com o texto preenchido, mas o
-WhatsApp Web só funciona em uma aba por vez: ao abrir outra, a primeira pede para "usar aqui".
-
-### Envio assistido (com supervisão)
-O botão **🤖 Preparar no WhatsApp** (no painel de alertas do mapa) abre o grupo da unidade no WhatsApp Web
-e deixa a mensagem digitada; você confere e aperta Enter. Precisa do script em `whatsapp_assistente/`
-(veja o `LEIA-ME.md` dessa pasta).
+Cada alerta tem o botão **🤖 Preparar no WhatsApp** (no painel do mapa e no painel lateral): o script do Tampermonkey
+(`whatsapp_assistente/`) abre o grupo da unidade na aba do WhatsApp Web já aberta e deixa a mensagem digitada, com o
+horário atual e validade de 1 hora; você confere e aperta Enter. No painel do mapa há também **📋 Copiar para o WhatsApp**
+(só copia o texto). O app não abre outra aba do WhatsApp.

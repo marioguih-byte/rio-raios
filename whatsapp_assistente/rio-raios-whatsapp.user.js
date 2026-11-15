@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RIO Raios → WhatsApp Web (assistente com supervisão)
 // @namespace    rio-raios
-// @version      1.5
+// @version      1.6
 // @description  Recebe o alerta do app RIO Raios, abre o grupo da unidade no WhatsApp Web e deixa a mensagem DIGITADA. Você confere e aperta Enter.
 // @match        https://web.whatsapp.com/*
 // @match        https://*.streamlit.app/*
@@ -118,20 +118,25 @@
   }
 
   function caixaBusca() {
-    var todas = Array.prototype.slice.call(document.querySelectorAll('div[contenteditable="true"]'))
-      .filter(function (e) { return !e.closest("footer") && !e.closest("#main"); });
-    var pref = todas.filter(function (e) {
-      var rot = norm((e.getAttribute("aria-label") || "") + " " + (e.getAttribute("data-tab") || "") + " " + (e.getAttribute("title") || ""));
-      return /pesquis|search|3/.test(rot);
-    })[0];
-    return pref || todas[0] || null;
+    // Na versão atual do WhatsApp Web a busca pode ser um <input> ou um campo editável; procura os dois.
+    var todas = Array.prototype.slice.call(document.querySelectorAll('input, div[contenteditable="true"], [role="textbox"], [role="searchbox"]'))
+      .filter(function (e) { return !e.closest("footer") && !e.closest("#main") && e.getBoundingClientRect().width > 0; });
+    function rotulo(e) {
+      return norm((e.getAttribute("aria-label") || "") + " " + (e.getAttribute("placeholder") || "") + " " + (e.getAttribute("title") || "") + " " + (e.getAttribute("data-tab") || ""));
+    }
+    var pref = todas.filter(function (e) { return /pesquis|search|conversa/.test(rotulo(e)); })[0];
+    if (pref) return pref;
+    // plano B: o campo mais alto na coluna da esquerda
+    var esq = todas.filter(function (e) { return e.getBoundingClientRect().left < 500; })
+      .sort(function (a, b) { return a.getBoundingClientRect().top - b.getBoundingClientRect().top; });
+    return esq[0] || null;
   }
   function caixaMensagem() {
     return document.querySelector('#main footer div[contenteditable="true"]') || document.querySelector('footer div[contenteditable="true"]');
   }
   function limparEDigitar(el, texto) {
     el.focus();
-    document.execCommand("selectAll", false, null);
+    if (el.tagName === "INPUT" && el.select) el.select(); else document.execCommand("selectAll", false, null);
     document.execCommand("delete", false, null);
     if (texto) document.execCommand("insertText", false, texto);
   }
