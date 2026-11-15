@@ -34,3 +34,8 @@ esvazia (mensagem enviada), ele abre a próxima. Na aba do WhatsApp aparecem os 
 **⏭ Pular este** e **⏹ Parar fila**. Se você abrir outro chat no meio, a unidade é contada como pulada.
 Grupos não encontrados são listados no resumo final (o texto é copiado para você colar à mão).
 O script nunca aperta Enter por você.
+
+## Registrar no site da BlueOcean (v1.7)
+Botão **📝 Registrar no site** (painel do alerta e card do mapa). Com a aba *Registro de eventos críticos* (`/alerts`) aberta, o script preenche **Unidade, Início (agora, Brasília), Vencimento (início + validade escolhida), Nível e RAIOS (sempre marcado)**. O texto vem do modo *Automático* do site. O script **nunca clica em Salvar**: confira e clique em *Salvar alerta automático*.
+- Atualize o script no Tampermonkey (v1.7) e **recarregue a aba do site** depois.
+- No alerta verde (fim do alerta) unidade, início, nível e RAIOS são preenchidos; o vencimento fica como o site sugere.

@@ -595,6 +595,32 @@ def botao_preparar_whatsapp(estacao, texto, alerta_id, minutos=60):
     html = (_HTML_PREPARAR.replace("__ESTACAO__", js(estacao)).replace("__TEXTO__", js(texto)).replace("__ID__", js(alerta_id)).replace("__MIN__", str(int(minutos))))
     components.html(html, height=44)
 
+_HTML_REGISTRAR = """<!doctype html><html><head><meta charset="utf-8"><style>
+  html, body { margin:0; padding:0; background:transparent; }
+  button { cursor:pointer; border-radius:8px; border:1px solid #1d70b8; background:#1d70b8; color:#fff; padding:7px 14px; font:600 14px 'Segoe UI', Arial, sans-serif; }
+  button:hover { background:#2a86d6; }
+</style></head><body><button id="b">📝 Registrar no site</button><script>
+  var ESTACAO = __ESTACAO__, NIVEL = __NIVEL__, MIN = __MIN__;
+  var btn = document.getElementById("b");
+  btn.addEventListener("click", function () {
+    var confirmou = false;
+    function ack(ev) { if (ev.data && ev.data.fonte === "rio-raios-ack") confirmou = true; }
+    window.addEventListener("message", ack);
+    try { (window.top || window.parent).postMessage({ fonte: "rio-raios", tipo: "registrar", estacao: ESTACAO, nivel: NIVEL, minutos: MIN }, "*"); } catch (e) {}
+    setTimeout(function () {
+      window.removeEventListener("message", ack);
+      btn.textContent = confirmou ? "✔ Enviado - confira o formulario na aba do site e salve" : "Script nao detectado (atualize o Tampermonkey)";
+      setTimeout(function () { btn.textContent = "📝 Registrar no site"; }, 4000);
+    }, 1200);
+  });
+</script></body></html>"""
+
+def botao_registrar_site(estacao, nivel, minutos=60):
+    """Botão 'Registrar no site': o Tampermonkey preenche o formulário 'Novo evento' da BlueOcean (aba /alerts já aberta). Você confere e salva."""
+    def js(v): return json.dumps(str(v), ensure_ascii=False).replace("</", "<\\/")
+    html = _HTML_REGISTRAR.replace("__ESTACAO__", js(estacao)).replace("__NIVEL__", js(nivel)).replace("__MIN__", str(int(minutos)))
+    components.html(html, height=44)
+
 # ======================================================================
 # FINALIZAR ALERTA (manual) — emite o alerta verde da unidade na hora, igual ao automático.
 # ======================================================================
@@ -1228,6 +1254,7 @@ with col_lado:
                                     if _dur != a.get("duracao_min", 60):
                                         _definir_validade(a["id"], _dur)
                                 botao_preparar_whatsapp(a.get("estacao", ""), montar_texto_copia(a), a.get("id", ""), _dur)
+                                botao_registrar_site(a.get("estacao", ""), a.get("nivel", "vermelho"), _dur)
                                 if a.get("nivel") == "amarelo" and a.get("id") in _finalizaveis:
                                     if st.button("🔴 Antecipar para vermelho", key=f"antecipar_{a['id']}",
                                                  help="Gera um alerta vermelho para esta unidade, sem esperar o raio chegar a 30 km"):

@@ -699,6 +699,7 @@
         }).join("") + '</select></div>' : '') +
       '<div class="al-acoes"><button data-acao="copiar" class="al-whats">📋 Copiar para o WhatsApp</button>' +
       '<button data-acao="preparar" class="al-whats" title="Precisa do script do Tampermonkey (pasta whatsapp_assistente). Abre o grupo no WhatsApp Web e deixa a mensagem digitada para você conferir e apertar Enter.">🤖 Preparar no WhatsApp</button>' +
+      '<button data-acao="registrar" class="al-whats" style="background:#1d70b8;border-color:#1d70b8;color:#fff" title="Precisa do script do Tampermonkey e da aba Registro de eventos críticos aberta. Preenche o formulário Novo evento; você confere e clica em Salvar.">📝 Registrar no site</button>' +
       (a.anteciparvel ? '<button data-acao="antecipar" class="al-antecipar">🔴 Antecipar para vermelho</button>' : '') +
       (a.finalizavel ? '<button data-acao="finalizar" class="al-finalizar">🟢 Finalizar alerta</button>' : '') +
       '<button data-acao="excluir">✕ Excluir</button></div></div>';
@@ -814,6 +815,23 @@
       registrarValidade(card);
     }, 1200);
   }
+  function registrarNoSite(card, botao) {
+    var rotulo = botao.getAttribute("data-rotulo") || botao.textContent;
+    botao.setAttribute("data-rotulo", rotulo);
+    var confirmou = false;
+    function ack(ev) { if (ev.data && ev.data.fonte === "rio-raios-ack") confirmou = true; }
+    window.addEventListener("message", ack);
+    try {
+      (window.top || window.parent).postMessage({ fonte: "rio-raios", tipo: "registrar", estacao: card.getAttribute("data-estacao") || "",
+                                  nivel: card.getAttribute("data-nivel") || "vermelho", minutos: duracaoDoCard(card) }, "*");
+    } catch (e) {}
+    setTimeout(function () {
+      window.removeEventListener("message", ack);
+      botao.textContent = confirmou ? "✔ Enviado — confira o formulário na aba do site e salve" : "Script não detectado (atualize o Tampermonkey)";
+      setTimeout(function () { botao.textContent = rotulo; }, 4000);
+      if (confirmou) registrarValidade(card);
+    }, 1200);
+  }
   function ligarCampoQuem(container) {
     container.addEventListener("change", function (ev) {
       var alvo = ev.target;
@@ -869,6 +887,7 @@
       else if (acao === "excluir") { enviarEvento({ tipo: "excluir", id: id }); }
       else if (acao === "copiar") { copiarTexto(textoAtualizado(card), alvo); registrarValidade(card); }
       else if (acao === "preparar") { prepararNoWhatsApp(card, alvo); }
+      else if (acao === "registrar") { registrarNoSite(card, alvo); }
       else if (acao === "antecipar") { enviarEvento({ tipo: "antecipar", id: id }); }
     });
     ligarCampoQuem(corpoAl);
@@ -882,6 +901,7 @@
       else if (acao === "excluir") { enviarEvento({ tipo: "excluir", id: id }); }
       else if (acao === "copiar") { copiarTexto(textoAtualizado(card), alvo); registrarValidade(card); }
       else if (acao === "preparar") { prepararNoWhatsApp(card, alvo); }
+      else if (acao === "registrar") { registrarNoSite(card, alvo); }
       else if (acao === "antecipar") { enviarEvento({ tipo: "antecipar", id: id }); }
     });
     ligarCampoQuem(corpoUn);

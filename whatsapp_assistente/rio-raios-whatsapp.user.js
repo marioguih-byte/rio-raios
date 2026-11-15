@@ -1,11 +1,13 @@
 // ==UserScript==
 // @name         RIO Raios → WhatsApp Web (assistente com supervisão)
 // @namespace    rio-raios
-// @version      1.6
-// @description  Recebe o alerta do app RIO Raios, abre o grupo da unidade no WhatsApp Web e deixa a mensagem DIGITADA. Você confere e aperta Enter.
+// @version      1.7
+// @description  Recebe o alerta do app RIO Raios, abre o grupo da unidade no WhatsApp Web e deixa a mensagem DIGITADA, e preenche o formulário do site da BlueOcean. Você confere e confirma.
 // @match        https://web.whatsapp.com/*
 // @match        https://*.streamlit.app/*
 // @match        http://localhost:*/*
+// @match        https://previsoesbrblueocean.com.br/*
+// @match        https://www.previsoesbrblueocean.com.br/*
 // @noframes
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -69,7 +71,9 @@
 
   var CHAVE = "rio_envio";
   var CHAVE_FILA = "rio_fila";
+  var CHAVE_REGISTRO = "rio_registro";
   var ehWhatsApp = location.hostname === "web.whatsapp.com";
+  var ehSite = /previsoesbrblueocean\.com\.br$/.test(location.hostname);
 
   function norm(t) {
     return String(t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
@@ -84,7 +88,7 @@
   // ------------------------------------------------------------------
   // LADO DO APP (streamlit): repassa a mensagem do mapa para a aba do WhatsApp
   // ------------------------------------------------------------------
-  if (!ehWhatsApp) {
+  if (!ehWhatsApp && !ehSite) {
     window.addEventListener("message", function (ev) {
       var d = ev.data;
       if (!d || d.fonte !== "rio-raios") return;
@@ -93,9 +97,147 @@
         try { ev.source && ev.source.postMessage({ fonte: "rio-raios-ack" }, "*"); } catch (e) {}
         return;
       }
+      if (d.tipo === "registrar") {
+        GM_setValue(CHAVE_REGISTRO, { estacao: String(d.estacao || ""), nivel: String(d.nivel || "vermelho"), minutos: parseInt(d.minutos, 10) || 60, ts: Date.now() });
+        try { ev.source && ev.source.postMessage({ fonte: "rio-raios-ack" }, "*"); } catch (e) {}
+        return;
+      }
       if (d.tipo !== "preparar") return;
       GM_setValue(CHAVE, { estacao: String(d.estacao || ""), texto: String(d.texto || ""), id: String(d.id || ""), ts: Date.now() });
       try { ev.source && ev.source.postMessage({ fonte: "rio-raios-ack" }, "*"); } catch (e) {}
+    });
+    return;
+  }
+
+
+  // ------------------------------------------------------------------
+  // LADO DO SITE DA BLUEOCEAN (Registro de eventos críticos): preenche o formulário "Novo evento".
+  // NUNCA clica em "Salvar": você confere e salva.
+  // ------------------------------------------------------------------
+  if (ehSite) {
+    var alnum = function (t) { return norm(t).replace(/[^a-z0-9]/g, ""); };
+    var faixaSite = null;
+    var avisoSite = function (msg, cor) {
+      if (!faixaSite) {
+        faixaSite = document.createElement("div");
+        faixaSite.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:2147483647;padding:10px 16px;font:600 14px sans-serif;color:#fff;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.4);cursor:pointer;";
+        faixaSite.title = "Clique para fechar";
+        faixaSite.addEventListener("click", function () { faixaSite.style.display = "none"; });
+        document.body.appendChild(faixaSite);
+      }
+      faixaSite.style.background = cor || "#075e54"; faixaSite.textContent = msg; faixaSite.style.display = "block";
+    };
+    var setarValor = function (el, v) {
+      var proto = el.tagName === "SELECT" ? HTMLSelectElement.prototype : el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      var setter = Object.getOwnPropertyDescriptor(proto, "value").set;
+      setter.call(el, v);
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+    var raizForm = function () {
+      var t = Array.from(document.querySelectorAll("h1,h2,h3,h4,h5,h6,div,span,p")).find(function (e) { return e.children.length === 0 && norm(e.textContent) === "novo evento"; });
+      var p = t;
+      for (var i = 0; p && i < 8; i++, p = p.parentElement) if (p.querySelector("select")) return p;
+      return document.body;
+    };
+    var controlePorRotulo = function (raiz, rotulo) {
+      var alvo = norm(rotulo);
+      var els = Array.from(raiz.querySelectorAll("label,span,div,p,small,strong"));
+      for (var k = 0; k < els.length; k++) {
+        var el = els[k];
+        if (norm(el.textContent) !== alvo || el.querySelector("input,select,textarea")) continue;
+        if (el.htmlFor) { var c0 = document.getElementById(el.htmlFor); if (c0) return c0; }
+        var p = el;
+        for (var i = 0; i < 4; i++) {
+          p = p.parentElement; if (!p) break;
+          var c = p.querySelector("select,input:not([type=checkbox]),textarea");
+          if (c) return c;
+        }
+      }
+      return null;
+    };
+    var acharOpcao = function (sel, estacao) {
+      var opcoes = Array.from(sel.options).filter(function (o) { return o.value !== "" || alnum(o.textContent) !== "selecione"; });
+      var alvo = alnum(estacao);
+      var e = opcoes.find(function (o) { return alnum(o.textContent) === alvo; });
+      if (e) return e;
+      if (/boaventura|itaborai/.test(alvo)) { e = opcoes.find(function (o) { return /itaborai/.test(alnum(o.textContent)); }); if (e) return e; }
+      var sigla = alnum(String(estacao).split(" - ").slice(-1)[0]);
+      e = opcoes.find(function (o) { var a = alnum(o.textContent); return a.length > 5 && (a.indexOf(alvo) >= 0 || alvo.indexOf(a) >= 0); });
+      if (e) return e;
+      if (sigla.length >= 3) { e = opcoes.find(function (o) { return alnum(o.textContent).slice(-sigla.length) === sigla; }); if (e) return e; }
+      var toks = norm(estacao).split(/[^a-z0-9]+/).filter(function (t) { return t.length > 2; });
+      var melhor = null, nota = 0;
+      opcoes.forEach(function (o) {
+        var n = norm(o.textContent), ok = toks.filter(function (t) { return n.indexOf(t) >= 0; }).length / (toks.length || 1);
+        if (ok > nota) { nota = ok; melhor = o; }
+      });
+      return nota >= 0.7 ? melhor : null;
+    };
+    var partesSP = function (ms) {
+      var f = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(ms));
+      var o = {}; f.forEach(function (p) { o[p.type] = p.value; });
+      return o.year + "-" + o.month + "-" + o.day + "T" + o.hour + ":" + o.minute;
+    };
+    var estaLigado = function (el) {
+      var cb = el.matches("input[type=checkbox]") ? el : el.querySelector("input[type=checkbox]");
+      if (cb) return cb.checked;
+      var x = el.closest("[aria-pressed],[aria-checked]") || el;
+      var a = x.getAttribute("aria-pressed") || x.getAttribute("aria-checked");
+      if (a === "true") return true;
+      if (a === "false") return false;
+      if (/(^|[\s-_])(active|selected|checked|on)([\s-_]|$)/i.test(el.className || "")) return true;
+      return null;
+    };
+    var preencherSite = async function (d) {
+      if (!/\/alerts/.test(location.pathname)) { avisoSite("⚠️ Abra a página 'Registro de eventos críticos' (/alerts) e envie de novo pelo app.", "#b45309"); return; }
+      var raiz = raizForm();
+      raiz.scrollIntoView({ block: "center", behavior: "smooth" });
+      var falhas = [];
+      // 1) Unidade
+      var selU = controlePorRotulo(raiz, "Unidade");
+      if (!selU || selU.tagName !== "SELECT") falhas.push("campo Unidade");
+      else {
+        var op = acharOpcao(selU, d.estacao);
+        if (!op) falhas.push("unidade '" + d.estacao + "' não encontrada na lista"); else setarValor(selU, op.value);
+      }
+      await esperar(300);
+      // 2) Datas (início = agora em Brasília; vencimento = início + validade; verde mantém o vencimento do site)
+      var agora = Date.now();
+      var ini = controlePorRotulo(raiz, "Início");
+      if (!ini) falhas.push("campo Início"); else setarValor(ini, partesSP(agora));
+      if (d.nivel !== "verde") {
+        var ven = controlePorRotulo(raiz, "Vencimento");
+        if (!ven) falhas.push("campo Vencimento"); else setarValor(ven, partesSP(agora + d.minutos * 60000));
+      }
+      await esperar(200);
+      // 3) Nível
+      var selN = controlePorRotulo(raiz, "Nível");
+      var palavra = { verde: "verde", amarelo: "amarelo", vermelho: "vermelho" }[d.nivel] || "vermelho";
+      if (!selN || selN.tagName !== "SELECT") falhas.push("campo Nível");
+      else {
+        var on = Array.from(selN.options).find(function (o) { return norm(o.textContent).indexOf(palavra) >= 0; });
+        if (!on) falhas.push("nível " + palavra); else setarValor(selN, on.value);
+      }
+      await esperar(300);
+      // 4) Parâmetro RAIOS: sempre marcado (inclusive no alerta verde)
+      var avisoRaios = "";
+      {
+        var bt = Array.from(raiz.querySelectorAll("button,label,[role=button],[role=checkbox]")).find(function (e) { return norm(e.textContent) === "raios"; });
+        if (!bt) falhas.push("botão RAIOS");
+        else {
+          var ligado = estaLigado(bt);
+          if (ligado === false || ligado === null) { bt.click(); if (ligado === null) avisoRaios = " Confira se RAIOS ficou marcado."; }
+        }
+      }
+      await esperar(400);
+      var ta = Array.from(raiz.querySelectorAll("textarea"))[0];
+      var texto = ta ? (ta.value || "").slice(0, 60) : "";
+      if (falhas.length) avisoSite("⚠️ Preenchi o que deu, mas não achei: " + falhas.join("; ") + ". Complete à mão e salve.", "#b45309");
+      else avisoSite("✅ Formulário preenchido (" + d.estacao.split(" - ")[0] + ", " + palavra + ", " + (d.nivel === "verde" ? "fim do alerta" : d.minutos + " min") + "). Confira o texto e clique em 'Salvar alerta automático'." + avisoRaios, "#075e54");
+    };
+    GM_addValueChangeListener(CHAVE_REGISTRO, function (nome, antigo, novo, remoto) {
+      if (remoto && novo && novo.estacao) preencherSite(novo);
     });
     return;
   }
