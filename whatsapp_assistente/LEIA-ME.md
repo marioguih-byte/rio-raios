@@ -8,7 +8,7 @@ O script NUNCA envia sozinho.
 ## Instalação (uma vez, no Edge/Chrome)
 1. Instale a extensão **Tampermonkey**.
 2. Tampermonkey → *Criar novo script* → apague tudo, cole o conteúdo de `rio-raios-whatsapp.user.js` → salvar.
-3. Se o endereço do app NÃO for `*.streamlit.app` ou `localhost`, acrescente uma linha
+3. O app em `rio-raios.streamlit.app` já é reconhecido. Se usar outro endereço, acrescente `// @match https://SEU-ENDERECO/*` no cabeçalho do script.
    `// @match https://SEU-ENDERECO/*` no cabeçalho do script.
 4. Deixe abertas as duas abas: o app RIO Raios e o WhatsApp Web (logado). Recarregue as duas.
 

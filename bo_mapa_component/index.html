@@ -765,7 +765,7 @@
     function ack(ev) { if (ev.data && ev.data.fonte === "rio-raios-ack") confirmou = true; }
     window.addEventListener("message", ack);
     try {
-      window.parent.postMessage({ fonte: "rio-raios", tipo: "preparar", id: card.getAttribute("data-id"),
+      (window.top || window.parent).postMessage({ fonte: "rio-raios", tipo: "preparar", id: card.getAttribute("data-id"),
                                   estacao: card.getAttribute("data-estacao") || "", texto: texto }, "*");
     } catch (e) {}
     setTimeout(function () {
