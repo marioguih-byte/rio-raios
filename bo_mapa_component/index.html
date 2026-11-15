@@ -684,12 +684,12 @@
 
   // Mesmo card de alerta na aba Alertas e no painel da unidade (quem recebeu, mensagem, copiar, finalizar, excluir).
   function cardAlertaHtml(a) {
-    return '<div class="al-card" data-id="' + esc(a.id) + '" data-nivel="' + esc(a.nivel || "") + '" data-base="' + esc(a.base || "") + '">' +
+    return '<div class="al-card" data-id="' + esc(a.id) + '" data-estacao="' + esc(a.estacao || "") + '" data-nivel="' + esc(a.nivel || "") + '" data-base="' + esc(a.base || "") + '">' +
       '<label style="font-size:12px;color:#c4cbd6;">Quem recebeu o alerta:</label>' +
       '<input class="al-input" data-acao="quem" value="' + esc(a.quem_recebeu || "") + '" placeholder="nome de quem confirmou o recebimento" />' +
       '<pre class="al-pre">' + esc(a.copia) + '</pre>' +
-      '<div class="al-acoes"><button data-acao="copiar">📋 Copiar</button>' +
-      '<button data-acao="whatsapp" class="al-whats">📲 Enviar pelo WhatsApp</button>' +
+      '<div class="al-acoes"><button data-acao="copiar" class="al-whats">📋 Copiar para o WhatsApp</button>' +
+      '<button data-acao="preparar" class="al-whats" title="Precisa do script do Tampermonkey (pasta whatsapp_assistente). Abre o grupo no WhatsApp Web e deixa a mensagem digitada para você conferir e apertar Enter.">🤖 Preparar no WhatsApp</button>' +
       (a.finalizavel ? '<button data-acao="finalizar" class="al-finalizar">🟢 Finalizar alerta</button>' : '') +
       '<button data-acao="excluir">✕ Excluir</button></div></div>';
   }
@@ -755,9 +755,25 @@
     var pre = card.querySelector(".al-pre");
     if (pre && card.hasAttribute("data-base")) pre.textContent = textoComQuem(card.getAttribute("data-base"), card.getAttribute("data-nivel"), input.value);
   }
-  function abrirWhatsApp(card) {
-    var txt = card.querySelector(".al-pre").textContent;
-    window.open("https://wa.me/?text=" + encodeURIComponent(txt), "_blank", "noopener");
+  // Manda o alerta para o script do Tampermonkey (que roda na página do app) e ele prepara a mensagem no WhatsApp Web.
+  // Sem o script instalado não chega confirmação: aí o texto é só copiado (plano B).
+  function prepararNoWhatsApp(card, botao) {
+    var texto = card.querySelector(".al-pre").textContent;
+    var rotulo = botao.getAttribute("data-rotulo") || botao.textContent;
+    botao.setAttribute("data-rotulo", rotulo);
+    var confirmou = false;
+    function ack(ev) { if (ev.data && ev.data.fonte === "rio-raios-ack") confirmou = true; }
+    window.addEventListener("message", ack);
+    try {
+      window.parent.postMessage({ fonte: "rio-raios", tipo: "preparar", id: card.getAttribute("data-id"),
+                                  estacao: card.getAttribute("data-estacao") || "", texto: texto }, "*");
+    } catch (e) {}
+    setTimeout(function () {
+      window.removeEventListener("message", ack);
+      if (confirmou) { botao.textContent = "✔ Enviado ao WhatsApp — confira lá e dê Enter"; }
+      else { copiarFallback(texto); botao.textContent = "Script não detectado — texto copiado (Ctrl+V)"; }
+      setTimeout(function () { botao.textContent = rotulo; }, 4000);
+    }, 1200);
   }
   function ligarCampoQuem(container) {
     container.addEventListener("input", function (ev) {
@@ -771,7 +787,7 @@
   }
 
   function copiarTexto(txt, botao) {
-    function feito() { var o = botao.textContent; botao.textContent = "✔ Copiado"; setTimeout(function () { botao.textContent = o; }, 1500); }
+    function feito() { var o = botao.textContent; botao.textContent = "✔ Copiado! Cole no grupo (Ctrl+V)"; setTimeout(function () { botao.textContent = o; }, 1500); }
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(txt).then(feito).catch(function () { copiarFallback(txt); feito(); });
     } else { copiarFallback(txt); feito(); }
@@ -805,7 +821,7 @@
       else if (acao === "finalizar") { enviarEvento({ tipo: "finalizar", id: id }); }
       else if (acao === "excluir") { enviarEvento({ tipo: "excluir", id: id }); }
       else if (acao === "copiar") { copiarTexto(card.querySelector(".al-pre").textContent, alvo); }
-      else if (acao === "whatsapp") { abrirWhatsApp(card); }
+      else if (acao === "preparar") { prepararNoWhatsApp(card, alvo); }
     });
     ligarCampoQuem(corpoAl);
     // Painel da unidade: mesmas ações do card (copiar, finalizar, excluir, quem recebeu).
@@ -817,7 +833,7 @@
       if (acao === "finalizar") { enviarEvento({ tipo: "finalizar", id: id }); }
       else if (acao === "excluir") { enviarEvento({ tipo: "excluir", id: id }); }
       else if (acao === "copiar") { copiarTexto(card.querySelector(".al-pre").textContent, alvo); }
-      else if (acao === "whatsapp") { abrirWhatsApp(card); }
+      else if (acao === "preparar") { prepararNoWhatsApp(card, alvo); }
     });
     ligarCampoQuem(corpoUn);
     corpoUn.addEventListener("change", function (ev) {

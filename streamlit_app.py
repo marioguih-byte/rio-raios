@@ -557,7 +557,7 @@ def montar_texto_copia(alerta):
 def link_whatsapp_web(texto):
     """Link que abre o WhatsApp (Web) com o texto já preenchido; a pessoa escolhe o grupo e envia."""
     from urllib.parse import quote
-    return "https://wa.me/?text=" + quote(texto, safe="")
+    return "https://web.whatsapp.com/send?text=" + quote(texto, safe="")
 
 # ======================================================================
 # FINALIZAR ALERTA (manual) — emite o alerta verde da unidade na hora, igual ao automático.
@@ -1140,8 +1140,8 @@ with col_lado:
                                 )
                                 a["quem_recebeu"] = quem
                                 st.code(montar_texto_copia(a), language=None)
-                                st.link_button("📲 Enviar pelo WhatsApp Web", url=link_whatsapp_web(montar_texto_copia(a)),
-                                               help="Abre o WhatsApp Web com o alerta já digitado: é só escolher o grupo da unidade e enviar")
+                                st.link_button("↗ Abrir no WhatsApp Web", url=link_whatsapp_web(montar_texto_copia(a)),
+                                               help="Abre o WhatsApp Web em outra aba com o alerta já digitado. Se o WhatsApp Web já estiver aberto, prefira copiar o texto acima (ícone de copiar) e colar no grupo")
                                 if a.get("id") in _finalizaveis:
                                     if st.button("🟢 Finalizar alerta", key=f"finalizar_alerta_{a['id']}",
                                                  help="Emite o alerta verde (fim do alerta de raios) para esta unidade"):

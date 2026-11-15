@@ -337,9 +337,14 @@ Seção nova no fim da página (depois dos boletins), **sem mexer em nada do que
   O `requirements.txt` ganhou `scipy`, `matplotlib` e `shapely`.
 - **Memória:** `scipy` e `matplotlib` só são carregados quando os mapas são gerados, então o app de raios abre como antes.
 
-## Enviar o alerta pelo WhatsApp Web
+## Enviar o alerta ao WhatsApp
 
-Cada alerta, na aba **Alertas**, tem o botão **📲 Enviar pelo WhatsApp Web**. Ele abre o
-WhatsApp Web (é preciso estar logado) com o texto do alerta já digitado, incluindo
-"Quem recebeu o alerta". Basta escolher o grupo da unidade e enviar.
-Não usa API nem servidor. Preencha o campo "Quem recebeu o alerta" antes de clicar.
+Cada alerta tem o botão **📋 Copiar para o WhatsApp**: copia o texto (com "Quem recebeu o alerta")
+e você só cola (Ctrl+V) no grupo da unidade, na aba do WhatsApp Web que já está aberta.
+Existe também **↗ Abrir no WhatsApp Web**, que abre uma nova aba com o texto preenchido, mas o
+WhatsApp Web só funciona em uma aba por vez: ao abrir outra, a primeira pede para "usar aqui".
+
+### Envio assistido (com supervisão)
+O botão **🤖 Preparar no WhatsApp** (no painel de alertas do mapa) abre o grupo da unidade no WhatsApp Web
+e deixa a mensagem digitada; você confere e aperta Enter. Precisa do script em `whatsapp_assistente/`
+(veja o `LEIA-ME.md` dessa pasta).
