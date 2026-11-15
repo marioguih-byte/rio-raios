@@ -1364,12 +1364,41 @@ _HTML_WHATSAPP = """<!doctype html><html><head><meta charset="utf-8"><style>
         setTimeout(function () { b2.textContent = "🤖 Preparar no WhatsApp"; }, 4000);
       }, 1200);
     });
+    var b3 = document.createElement("button"); b3.textContent = "📝 Registrar no site";
+    b3.title = "Preenche 'Novo boletim' no site da BlueOcean (aba Histórico de Boletins aberta). Você confere e clica em Adicionar boletim.";
+    b3.style.cssText = "background:#1d70b8;border-color:#1d70b8;color:#fff";
+    b3.addEventListener("click", function () {
+      var confirmou = false;
+      function ack(ev) { if (ev.data && ev.data.fonte === "rio-raios-ack") confirmou = true; }
+      window.addEventListener("message", ack);
+      try { (window.top || window.parent).postMessage({ fonte: "rio-raios", tipo: "boletim", estacao: it.estacao, status: it.status,
+                                                         titulo: it.titulo, resumo: it.resumo, texto: it.texto_site }, "*"); } catch (e) {}
+      setTimeout(function () {
+        window.removeEventListener("message", ack);
+        b3.textContent = confirmou ? "✔ Enviado - confira o formulario na aba do site" : "Script nao detectado (atualize o Tampermonkey)";
+        setTimeout(function () { b3.textContent = "📝 Registrar no site"; }, 4000);
+      }, 1200);
+    });
     var lab = document.createElement("label"); var cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = lerFlag(kOk);
     cb.addEventListener("change", function () { gravarFlag(kOk, cb.checked); });
     lab.appendChild(cb); lab.appendChild(document.createTextNode("enviado"));
-    linha.appendChild(nome); linha.appendChild(b2); linha.appendChild(lab); lista.appendChild(linha);
+    linha.appendChild(nome); linha.appendChild(b2); linha.appendChild(b3); linha.appendChild(lab); lista.appendChild(linha);
   });
 </script></body></html>"""
+
+
+def _dados_site_boletim(nome, texto):
+    """Campos do formulário 'Novo boletim' do site: status pelas bolinhas (qualquer 🔴 = vermelho; senão qualquer 🟡 = amarelo; senão verde),
+    título = primeira linha da mensagem no formato "<unidade> - Boletim de previsão do tempo" e texto = resto da mensagem sem a marcação do WhatsApp. Sem resumo."""
+    status = "vermelho" if "🔴" in texto else ("amarelo" if "🟡" in texto else "verde")
+    linhas = []
+    for l in texto.splitlines():
+        l = l.replace("*", "")
+        if l.startswith("_") and l.endswith("_"):
+            l = l[1:-1]
+        linhas.append(l)
+    return {"status": status, "titulo": f"{nome} - Boletim de previsão do tempo", "resumo": "",
+            "texto_site": "\n".join(linhas[1:]).strip()}
 
 
 def _secao_whatsapp_manual(resultados, geracao_id):
@@ -1383,7 +1412,7 @@ def _secao_whatsapp_manual(resultados, geracao_id):
         )
         st.caption("Mantenha o WhatsApp Web aberto e logado em uma aba. O WhatsApp só funciona em uma aba por vez, "
                    "então o app não abre outra aba por conta própria. Sem o script, o botão apenas copia o boletim para você colar no grupo.")
-        itens = [{"id": boletins_bo.slug(n), "nome": n.split(" - ")[0], "estacao": n, "texto": t} for n, t in resultados.items()]
+        itens = [dict({"id": boletins_bo.slug(n), "nome": n.split(" - ")[0], "estacao": n, "texto": t}, **_dados_site_boletim(n, t)) for n, t in resultados.items()]
         html = (_HTML_WHATSAPP
                 .replace("__ITENS__", json.dumps(itens, ensure_ascii=False).replace("</", "<\\/"))
                 .replace("__GERACAO__", re.sub(r"[^0-9A-Za-z]", "", str(geracao_id))))

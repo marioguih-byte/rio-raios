@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RIO Raios → WhatsApp Web (assistente com supervisão)
 // @namespace    rio-raios
-// @version      1.8
+// @version      2.0
 // @description  Recebe o alerta do app RIO Raios, abre o grupo da unidade no WhatsApp Web e deixa a mensagem DIGITADA, e preenche o formulário do site da BlueOcean. Você confere e confirma.
 // @match        https://web.whatsapp.com/*
 // @match        https://*.streamlit.app/*
@@ -72,6 +72,7 @@
   var CHAVE = "rio_envio";
   var CHAVE_FILA = "rio_fila";
   var CHAVE_REGISTRO = "rio_registro";
+  var CHAVE_BOLETIM = "rio_boletim";
   var ehWhatsApp = location.hostname === "web.whatsapp.com";
   var ehSite = /previsoesbrblueocean\.com\.br$/.test(location.hostname);
 
@@ -99,6 +100,12 @@
       }
       if (d.tipo === "registrar") {
         GM_setValue(CHAVE_REGISTRO, { estacao: String(d.estacao || ""), nivel: String(d.nivel || "vermelho"), minutos: parseInt(d.minutos, 10) || 60, ts: Date.now() });
+        try { ev.source && ev.source.postMessage({ fonte: "rio-raios-ack" }, "*"); } catch (e) {}
+        return;
+      }
+      if (d.tipo === "boletim") {
+        GM_setValue(CHAVE_BOLETIM, { estacao: String(d.estacao || ""), status: String(d.status || "verde"), titulo: String(d.titulo || ""),
+                                     resumo: String(d.resumo || ""), texto: String(d.texto || ""), ts: Date.now() });
         try { ev.source && ev.source.postMessage({ fonte: "rio-raios-ack" }, "*"); } catch (e) {}
         return;
       }
@@ -134,8 +141,8 @@
       el.dispatchEvent(new Event("input", { bubbles: true }));
       el.dispatchEvent(new Event("change", { bubbles: true }));
     };
-    var raizForm = function () {
-      var t = Array.from(document.querySelectorAll("h1,h2,h3,h4,h5,h6,div,span,p")).find(function (e) { return e.children.length === 0 && norm(e.textContent) === "novo evento"; });
+    var raizForm = function (titulo) {
+      var t = Array.from(document.querySelectorAll("h1,h2,h3,h4,h5,h6,div,span,p")).find(function (e) { return e.children.length === 0 && norm(e.textContent) === (titulo || "novo evento"); });
       var p = t;
       for (var i = 0; p && i < 8; i++, p = p.parentElement) if (p.querySelector("select")) return p;
       return document.body;
@@ -248,6 +255,34 @@
       if (falhas.length) avisoSite("⚠️ Preenchi o que deu, mas não achei: " + falhas.join("; ") + ". Complete à mão e salve.", "#b45309");
       else avisoSite("✅ Formulário preenchido (" + d.estacao.split(" - ")[0] + ", " + palavra + ", " + (d.nivel === "verde" ? "fim do alerta" : d.minutos + " min") + "). Confira o texto e clique em 'Salvar alerta automático'." + avisoRaios, "#075e54");
     };
+    var preencherBoletim = async function (d) {
+      if (!/\/newsletter/.test(location.pathname)) { avisoSite("⚠️ Abra a página 'Histórico de Boletins' (/newsletter) e envie de novo pelo app.", "#b45309"); return; }
+      var raiz = raizForm("novo boletim");
+      raiz.scrollIntoView({ block: "center", behavior: "smooth" });
+      var falhas = [];
+      var selU = controlePorRotulo(raiz, "Unidade", { seletor: "select", indice: 0 });
+      if (!selU || selU.tagName !== "SELECT") falhas.push("campo Unidade");
+      else { var op = acharOpcao(selU, d.estacao); if (!op) falhas.push("unidade '" + d.estacao + "' não encontrada na lista"); else setarValor(selU, op.value); }
+      await esperar(300);
+      var selS = controlePorRotulo(raiz, "Status", { seletor: "select", indice: 1 });
+      if (!selS || selS.tagName !== "SELECT") falhas.push("campo Status");
+      else { var os = Array.from(selS.options).find(function (o) { return norm(o.textContent).indexOf(d.status) >= 0; }); if (!os) falhas.push("status " + d.status); else setarValor(selS, os.value); }
+      var dt = controlePorRotulo(raiz, "Data e hora de emissão (Brasília)", { seletor: "input[type=datetime-local]", indice: 0 });
+      if (!dt) falhas.push("campo Data e hora"); else setarValor(dt, partesSP(Date.now()));
+      var textos = Array.from(raiz.querySelectorAll("input:not([type=datetime-local]):not([type=checkbox]):not([type=radio])"));
+      var tit = controlePorRotulo(raiz, "Título", { seletor: "input:not([type=datetime-local])", indice: 0 }) || textos[0];
+      var res = controlePorRotulo(raiz, "Resumo", { seletor: "input:not([type=datetime-local])", indice: 1 }) || textos[1];
+      var tx = raiz.querySelector("textarea");
+      if (!tit) falhas.push("campo Título"); else setarValor(tit, d.titulo);
+      if (d.resumo) { if (!res) falhas.push("campo Resumo"); else setarValor(res, d.resumo); }
+      if (!tx || tx.tagName !== "TEXTAREA") falhas.push("campo Texto"); else setarValor(tx, d.texto);
+      await esperar(300);
+      if (falhas.length) avisoSite("⚠️ Preenchi o que deu, mas não achei: " + falhas.join("; ") + ". Complete à mão e salve.", "#b45309");
+      else avisoSite("✅ Boletim preenchido (" + d.estacao.split(" - ")[0] + ", status " + d.status + "). Confira e clique em 'Adicionar boletim'.", "#075e54");
+    };
+    GM_addValueChangeListener(CHAVE_BOLETIM, function (nome, antigo, novo, remoto) {
+      if (remoto && novo && novo.estacao) preencherBoletim(novo);
+    });
     GM_addValueChangeListener(CHAVE_REGISTRO, function (nome, antigo, novo, remoto) {
       if (remoto && novo && novo.estacao) preencherSite(novo);
     });
