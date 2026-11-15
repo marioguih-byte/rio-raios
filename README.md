@@ -336,3 +336,20 @@ Seção nova no fim da página (depois dos boletins), **sem mexer em nada do que
   países vizinhos do Natural Earth, simplificado — por isso não precisa de cartopy nem de download de shapefiles).
   O `requirements.txt` ganhou `scipy`, `matplotlib` e `shapely`.
 - **Memória:** `scipy` e `matplotlib` só são carregados quando os mapas são gerados, então o app de raios abre como antes.
+
+## Envio do alerta ao grupo de WhatsApp (Evolution API)
+
+Cada alerta, na aba **Alertas**, ganhou o botão **📲 Enviar ao grupo**: ele manda o
+texto do alerta (já com "Quem recebeu o alerta") ao grupo de WhatsApp da unidade.
+Depois de enviado, o botão vira **Reenviar** e mostra o horário do envio.
+
+1. Configure a Evolution API em `.streamlit/secrets.toml` (veja `.streamlit/secrets.toml.example`;
+   no Streamlit Cloud: *Settings → Secrets*) ou pelas variáveis `EVOLUTION_URL`,
+   `EVOLUTION_APIKEY` e `EVOLUTION_INSTANCE`.
+2. Preencha o ID de cada grupo (`xxxxxxxxxxxx@g.us`) em `data/grupos_whatsapp.json`
+   (um por unidade; unidade sem ID fica com o botão desativado) ou na seção
+   `[whatsapp_grupos]` dos secrets.
+   Dica: o ID dos grupos sai de `GET /group/fetchAllGroups/<instancia>?getParticipants=false` na Evolution API.
+3. O número conectado na instância precisa ser participante dos grupos.
+
+> Não suba o `secrets.toml` para o GitHub (só o `.example`).
