@@ -38,7 +38,7 @@ O script nunca aperta Enter por você.
 ## Registrar no site da BlueOcean (v1.7)
 Botão **📝 Registrar no site** (painel do alerta e card do mapa). Com a aba *Registro de eventos críticos* (`/alerts`) aberta, o script preenche **Unidade, Início (agora, Brasília), Vencimento (início + validade escolhida), Nível e RAIOS (sempre marcado)**. O texto vem do modo *Automático* do site. O script **nunca clica em Salvar**: confira e clique em *Salvar alerta automático*.
 - Atualize o script no Tampermonkey (v1.7) e **recarregue a aba do site** depois.
-- No alerta verde (fim do alerta) unidade, início, nível e RAIOS são preenchidos; o vencimento fica como o site sugere.
+- No alerta verde (fim do alerta) o vencimento é sempre início + 1 hora.
 
 ## Boletins no site (v1.9)
 Em cada linha dos boletins há **📝 Registrar no site**: com a aba *Histórico de Boletins* (`/newsletter`) aberta, o script preenche Unidade, Status (qualquer 🔴 = Vermelho; senão qualquer 🟡 = Amarelo; senão Verde), Data e hora (agora, Brasília), Título (`<unidade> - Boletim de previsão do tempo`) e Texto (a mensagem sem a primeira linha). O Resumo fica vazio. Você confere e clica em *Adicionar boletim*.

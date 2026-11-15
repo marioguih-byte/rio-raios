@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RIO Raios → WhatsApp Web (assistente com supervisão)
 // @namespace    rio-raios
-// @version      2.0
+// @version      2.1
 // @description  Recebe o alerta do app RIO Raios, abre o grupo da unidade no WhatsApp Web e deixa a mensagem DIGITADA, e preenche o formulário do site da BlueOcean. Você confere e confirma.
 // @match        https://web.whatsapp.com/*
 // @match        https://*.streamlit.app/*
@@ -225,9 +225,10 @@
       var agora = Date.now();
       var ini = controlePorRotulo(raiz, "Início", { seletor: "input[type=datetime-local]", indice: 0 });
       if (!ini) falhas.push("campo Início"); else setarValor(ini, partesSP(agora));
-      if (d.nivel !== "verde") {
+      {
+        var minVenc = d.nivel === "verde" ? 60 : d.minutos;   // alerta verde: sempre 1 hora a partir de agora
         var ven = controlePorRotulo(raiz, "Vencimento", { seletor: "input[type=datetime-local]", indice: 1 });
-        if (!ven) falhas.push("campo Vencimento"); else setarValor(ven, partesSP(agora + d.minutos * 60000));
+        if (!ven) falhas.push("campo Vencimento"); else setarValor(ven, partesSP(agora + minVenc * 60000));
       }
       await esperar(200);
       // 3) Nível
@@ -253,7 +254,7 @@
       var ta = Array.from(raiz.querySelectorAll("textarea"))[0];
       var texto = ta ? (ta.value || "").slice(0, 60) : "";
       if (falhas.length) avisoSite("⚠️ Preenchi o que deu, mas não achei: " + falhas.join("; ") + ". Complete à mão e salve.", "#b45309");
-      else avisoSite("✅ Formulário preenchido (" + d.estacao.split(" - ")[0] + ", " + palavra + ", " + (d.nivel === "verde" ? "fim do alerta" : d.minutos + " min") + "). Confira o texto e clique em 'Salvar alerta automático'." + avisoRaios, "#075e54");
+      else avisoSite("✅ Formulário preenchido (" + d.estacao.split(" - ")[0] + ", " + palavra + ", " + (d.nivel === "verde" ? "fim do alerta, +60 min" : d.minutos + " min") + "). Confira o texto e clique em 'Salvar alerta automático'." + avisoRaios, "#075e54");
     };
     var preencherBoletim = async function (d) {
       if (!/\/newsletter/.test(location.pathname)) { avisoSite("⚠️ Abra a página 'Histórico de Boletins' (/newsletter) e envie de novo pelo app.", "#b45309"); return; }
