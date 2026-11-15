@@ -554,6 +554,11 @@ def montar_texto_copia(alerta):
         linhas.insert(-1, f"* Quem recebeu o alerta: {quem}")
     return "\n".join(linhas)
 
+def link_whatsapp_web(texto):
+    """Link que abre o WhatsApp (Web) com o texto já preenchido; a pessoa escolhe o grupo e envia."""
+    from urllib.parse import quote
+    return "https://wa.me/?text=" + quote(texto, safe="")
+
 # ======================================================================
 # FINALIZAR ALERTA (manual) — emite o alerta verde da unidade na hora, igual ao automático.
 # ======================================================================
@@ -586,76 +591,6 @@ def _finalizar_alerta_unidade(chave_estacao):
     reg["encerrado_ts"] = agora_ts
     reg["encerrado_km"] = 50   # finalizado à mão: raios até 50 km anteriores a agora deixam de contar
     _salvar_estado()
-
-# ======================================================================
-# WHATSAPP — envio do alerta ao grupo da unidade (Evolution API)
-# Configuração (em .streamlit/secrets.toml ou variáveis de ambiente):
-#   [evolution]
-#   url = "https://sua-evolution.exemplo.com"
-#   apikey = "CHAVE"
-#   instance = "nome-da-instancia"
-# Grupos: data/grupos_whatsapp.json  ->  {"REPLAN": "1203630XXXXXXXXX@g.us", ...}
-# (ou [whatsapp_grupos] no secrets.toml, que tem prioridade sobre o arquivo).
-# ======================================================================
-def _config_evolution():
-    try:
-        sec = dict(st.secrets.get("evolution", {}))
-    except Exception:
-        sec = {}
-    url = (sec.get("url") or os.environ.get("EVOLUTION_URL", "")).strip().rstrip("/")
-    apikey = (sec.get("apikey") or os.environ.get("EVOLUTION_APIKEY", "")).strip()
-    instance = (sec.get("instance") or os.environ.get("EVOLUTION_INSTANCE", "")).strip()
-    return url, apikey, instance
-
-@st.cache_data(show_spinner=False, ttl=60)
-def _grupos_whatsapp():
-    grupos = {}
-    try:
-        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "grupos_whatsapp.json"), encoding="utf-8") as fh:
-            grupos.update(json.load(fh))
-    except Exception:
-        pass
-    try:
-        grupos.update(dict(st.secrets.get("whatsapp_grupos", {})))
-    except Exception:
-        pass
-    return {str(k): str(v).strip() for k, v in grupos.items() if str(v).strip()}
-
-def grupo_whatsapp_da_estacao(chave_estacao):
-    """JID do grupo (xxxx@g.us) da unidade, ou None se não cadastrado."""
-    nome = str(chave_estacao).split(" - ")[0]
-    grupos = _grupos_whatsapp()
-    alvo = _normalizar_nome(nome)
-    for k, v in grupos.items():
-        if _normalizar_nome(k) == alvo:
-            return v
-    return None
-
-def enviar_whatsapp_grupo(jid, texto):
-    """Envia texto ao grupo via Evolution API. Retorna (ok, mensagem)."""
-    url, apikey, instance = _config_evolution()
-    if not (url and apikey and instance):
-        return False, "Evolution API não configurada (url/apikey/instance)."
-    try:
-        r = requests.post(f"{url}/message/sendText/{instance}",
-                          headers={"apikey": apikey, "Content-Type": "application/json"},
-                          json={"number": jid, "text": texto}, timeout=20)
-        if r.status_code in (200, 201):
-            return True, "Enviado."
-        return False, f"Erro {r.status_code}: {r.text[:200]}"
-    except Exception as exc:
-        return False, f"Falha de conexão: {exc}"
-
-def _enviar_alerta_ao_grupo(alerta):
-    jid = grupo_whatsapp_da_estacao(alerta.get("estacao"))
-    if not jid:
-        return False, "Esta unidade não tem grupo de WhatsApp cadastrado."
-    ok, msg = enviar_whatsapp_grupo(jid, montar_texto_copia(alerta))
-    if ok:
-        alerta["enviado_whatsapp"] = datetime.now(timezone.utc).timestamp()
-        _salvar_estado()
-    return ok, msg
-
 
 # ======================================================================
 # INTERFACE STREAMLIT
@@ -799,13 +734,6 @@ with st.sidebar:
     st.caption("🔊 O som e o pop-up automático de alerta ficam sempre ativos.")
     arquivo_som = st.file_uploader("Trocar o som de alerta (opcional)", type=["mp3", "wav", "ogg", "m4a"])
     mostrar_deslocamento = st.checkbox("Mostrar deslocamento das células de tempestade", value=True)
-
-    _u, _k, _i = _config_evolution()
-    st.subheader("📲 WhatsApp (grupos das unidades)")
-    if _u and _k and _i:
-        st.caption(f"✅ Evolution API configurada · {len(_grupos_whatsapp())} grupo(s) cadastrado(s)")
-    else:
-        st.caption("⚠️ Evolution API não configurada — veja o README.")
 
     st.subheader("📏 Anéis de distância no mapa")
     mostrar_aneis = st.checkbox("Mostrar anéis de distância ao redor das unidades", value=True)
@@ -1212,16 +1140,8 @@ with col_lado:
                                 )
                                 a["quem_recebeu"] = quem
                                 st.code(montar_texto_copia(a), language=None)
-                                _jid_zap = grupo_whatsapp_da_estacao(a.get("estacao"))
-                                _ja_env = a.get("enviado_whatsapp")
-                                _rot = "📲 Reenviar ao grupo" if _ja_env else "📲 Enviar ao grupo"
-                                if st.button(_rot, key=f"enviar_zap_{a['id']}", disabled=not _jid_zap,
-                                             help="Envia este alerta ao grupo de WhatsApp da unidade" if _jid_zap
-                                             else "Cadastre o grupo desta unidade em data/grupos_whatsapp.json"):
-                                    _ok, _msg = _enviar_alerta_ao_grupo(a)
-                                    (st.success if _ok else st.error)(_msg)
-                                if _ja_env:
-                                    st.caption("✅ Enviado ao grupo às " + utc_para_brasilia(datetime.fromtimestamp(_ja_env, timezone.utc)).strftime("%H:%M"))
+                                st.link_button("📲 Enviar pelo WhatsApp Web", url=link_whatsapp_web(montar_texto_copia(a)),
+                                               help="Abre o WhatsApp Web com o alerta já digitado: é só escolher o grupo da unidade e enviar")
                                 if a.get("id") in _finalizaveis:
                                     if st.button("🟢 Finalizar alerta", key=f"finalizar_alerta_{a['id']}",
                                                  help="Emite o alerta verde (fim do alerta de raios) para esta unidade"):
