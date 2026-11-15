@@ -50,7 +50,6 @@ LIM_UMID = (40, 12)       # %, INVERTIDO: verde >= 40 · amarelo 12–39 · verm
 
 # 40 unidades (nome, (lat, lon))
 UNIDADES = {
-    "UTE Termocamaçari - UTE TCA": (-12.666868, -38.314687),
     "UTE Termobahia - UTE TBA": (-12.703235, -38.564904),
     "UTE Termoceará - UTE TCE": (-3.692456, -38.870605),
     "UTE Vale do Açu - UTE VLA": (-5.381685, -36.819754),
