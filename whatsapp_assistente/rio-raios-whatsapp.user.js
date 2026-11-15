@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RIO Raios → WhatsApp Web (assistente com supervisão)
 // @namespace    rio-raios
-// @version      1.7
+// @version      1.8
 // @description  Recebe o alerta do app RIO Raios, abre o grupo da unidade no WhatsApp Web e deixa a mensagem DIGITADA, e preenche o formulário do site da BlueOcean. Você confere e confirma.
 // @match        https://web.whatsapp.com/*
 // @match        https://*.streamlit.app/*
@@ -140,19 +140,31 @@
       for (var i = 0; p && i < 8; i++, p = p.parentElement) if (p.querySelector("select")) return p;
       return document.body;
     };
-    var controlePorRotulo = function (raiz, rotulo) {
+    var textoProprio = function (el) {
+      return Array.from(el.childNodes).filter(function (n) { return n.nodeType === 3; }).map(function (n) { return n.textContent; }).join(" ");
+    };
+    var SEL_CTRL = "select,input:not([type=checkbox]):not([type=radio]),textarea";
+    var controlePorRotulo = function (raiz, rotulo, posicao) {
       var alvo = norm(rotulo);
       var els = Array.from(raiz.querySelectorAll("label,span,div,p,small,strong"));
       for (var k = 0; k < els.length; k++) {
         var el = els[k];
-        if (norm(el.textContent) !== alvo || el.querySelector("input,select,textarea")) continue;
+        var igual = norm(el.textContent) === alvo || norm(textoProprio(el)) === alvo;
+        if (!igual) continue;
         if (el.htmlFor) { var c0 = document.getElementById(el.htmlFor); if (c0) return c0; }
+        var dentro = el.querySelector(SEL_CTRL);
+        if (dentro) return dentro;
         var p = el;
         for (var i = 0; i < 4; i++) {
           p = p.parentElement; if (!p) break;
-          var c = p.querySelector("select,input:not([type=checkbox]),textarea");
+          var c = p.querySelector(SEL_CTRL);
           if (c) return c;
         }
+      }
+      // plano B: posição dentro do formulário
+      if (posicao) {
+        var lista = Array.from(raiz.querySelectorAll(posicao.seletor));
+        return lista[posicao.indice] || null;
       }
       return null;
     };
@@ -195,7 +207,7 @@
       raiz.scrollIntoView({ block: "center", behavior: "smooth" });
       var falhas = [];
       // 1) Unidade
-      var selU = controlePorRotulo(raiz, "Unidade");
+      var selU = controlePorRotulo(raiz, "Unidade", { seletor: "select", indice: 0 });
       if (!selU || selU.tagName !== "SELECT") falhas.push("campo Unidade");
       else {
         var op = acharOpcao(selU, d.estacao);
@@ -204,15 +216,15 @@
       await esperar(300);
       // 2) Datas (início = agora em Brasília; vencimento = início + validade; verde mantém o vencimento do site)
       var agora = Date.now();
-      var ini = controlePorRotulo(raiz, "Início");
+      var ini = controlePorRotulo(raiz, "Início", { seletor: "input[type=datetime-local]", indice: 0 });
       if (!ini) falhas.push("campo Início"); else setarValor(ini, partesSP(agora));
       if (d.nivel !== "verde") {
-        var ven = controlePorRotulo(raiz, "Vencimento");
+        var ven = controlePorRotulo(raiz, "Vencimento", { seletor: "input[type=datetime-local]", indice: 1 });
         if (!ven) falhas.push("campo Vencimento"); else setarValor(ven, partesSP(agora + d.minutos * 60000));
       }
       await esperar(200);
       // 3) Nível
-      var selN = controlePorRotulo(raiz, "Nível");
+      var selN = controlePorRotulo(raiz, "Nível", { seletor: "select", indice: 1 });
       var palavra = { verde: "verde", amarelo: "amarelo", vermelho: "vermelho" }[d.nivel] || "vermelho";
       if (!selN || selN.tagName !== "SELECT") falhas.push("campo Nível");
       else {
