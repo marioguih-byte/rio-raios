@@ -1005,6 +1005,12 @@
       atualizarPillGOES();
     };
 
+    // Se nem o WMTS nem o WMS do GIBS entregarem tiles, o navegador/rede provavelmente está bloqueando o NASA GIBS
+    // (VPN, firewall da empresa, bloqueador de anúncios...): avisa na tela em vez de mostrar o mapa "sem GOES" em silêncio.
+    var goesBloqueado = false;
+    gibsWms._aoFalharMuito = function () { goesBloqueado = true; atualizarPillGOES(); avisoMapa("GOES não carregou: este navegador/rede pode estar bloqueando gibs.earthdata.nasa.gov"); };
+    gibsWms.on("tileload", function () { if (goesBloqueado) { goesBloqueado = false; atualizarPillGOES(); } });
+
     // Alternativa mais "quase tempo real": SSEC RealEarth (GOES-19 com poucos minutos de atraso). Fica desligada
     // por padrão. O horário da imagem mais recente é consultado a cada 5 min e mostrado no mapa. Se o SSEC não
     // entregar nenhum tile, o mapa troca sozinho pro GIBS.
@@ -1046,11 +1052,14 @@
       var el = document.getElementById("goes-status");
       var ativo = PRODUTOS_GOES.filter(function (p) { return map.hasLayer(goesInfo[p.id].camada); })[0];
       if (!ativo) {
-        if (map.hasLayer(gibsAtiva)) { el.style.display = "block"; el.textContent = "🛰️ GOES-East · NASA GIBS (imagem com ~30 min de atraso)"; }
+        if (goesBloqueado && map.hasLayer(gibsAtiva)) {
+          el.style.display = "block"; el.style.background = "rgba(150,30,30,0.9)";
+          el.textContent = "⚠️ GOES não carregou neste navegador/rede (NASA GIBS bloqueado?). Teste sem VPN/bloqueador ou em outra rede.";
+        } else if (map.hasLayer(gibsAtiva)) { el.style.background = ""; el.style.display = "block"; el.textContent = "🛰️ GOES-East · NASA GIBS (imagem com ~30 min de atraso)"; }
         else el.style.display = "none";
         return;
       }
-      el.style.display = "block";
+      el.style.display = "block"; el.style.background = "";
       var info = goesInfo[ativo.id];
       if (!info.t) { el.textContent = "🛰️ GOES-East (SSEC): imagem mais recente disponível"; return; }
       var min = Math.max(0, Math.round((Date.now() - info.t.getTime()) / 60000));

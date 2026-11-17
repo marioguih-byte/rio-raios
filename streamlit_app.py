@@ -1010,25 +1010,6 @@ def _quadro_fragmento():
         for n in vistos_on - atuais_on:
             st.toast(f"👋 {n.title()} saiu do site", icon="⚪")
     st.session_state["_online_vistos"] = atuais_on
-    # --- turno: a entrada é registrada sozinha quando a pessoa abre o site com o nome; a saída, no botão "Saindo do Turno" ---
-    if meu:
-        _turno_entrada_automatica(_nome_atual())
-    _turno_fechar_esquecidos()
-    abertos = _ponto_abertos()
-    st.markdown("**👥 De plantão agora (turno em andamento):** " + ("" if abertos else "_ninguém com turno em andamento_"))
-    for r in abertos:
-        st.markdown(f"🟢 **{r['nome']}** — entrou às {_fmt_hm(r['entrada_ts'])} (há {_fmt_duracao(time.time() - r['entrada_ts'])})")
-    if meu and any(r["nome"].strip().lower() == meu for r in abertos):
-        if st.button("🚪 Saindo do Turno", key="psair", type="primary", help="Registra a sua saída. A entrada já foi registrada quando você abriu o site."):
-            _ponto_sair(_nome_atual())
-            st.toast("Saída registrada. Bom descanso! 👋", icon="🚪")
-            _rerun_fragmento()
-    elif meu:
-        if st.button("🟢 Voltar ao turno", key="pvoltar", help="Registra uma nova entrada (você tinha saído do turno)"):
-            _ponto_entrar(_nome_atual(), forcar=True)
-            _rerun_fragmento()
-    else:
-        st.caption("Informe seu nome na barra lateral: sua entrada é registrada automaticamente.")
     if not itens:
         st.caption("📡 Nenhum alerta emitido no momento.")
     avisados = st.session_state.setdefault("_avisados_quadro", set())
@@ -1826,9 +1807,16 @@ _HTML_WHATSAPP = """<!doctype html><html><head><meta charset="utf-8"><style>
   });
   var lista = document.getElementById("lista");
   ITENS.forEach(function (it) {
-    var kAberto = "rio_wa_aberto_" + GERACAO + "_" + it.id, kOk = "rio_wa_ok_" + GERACAO + "_" + it.id;
+    var kAberto = "rio_wa_aberto_" + GERACAO + "_" + it.id, kWa = "rio_wa_check_" + GERACAO + "_" + it.id, kSite = "rio_site_check_" + GERACAO + "_" + it.id;
     var linha = document.createElement("div"); linha.className = "linha" + (lerFlag(kAberto) ? " aberto" : "");
     var nome = document.createElement("div"); nome.className = "nome"; nome.textContent = it.nome; nome.title = it.nome;
+    function marcador(chave, texto) {
+      var l = document.createElement("label"); var c = document.createElement("input"); c.type = "checkbox"; c.checked = lerFlag(chave);
+      c.addEventListener("change", function () { gravarFlag(chave, c.checked); });
+      l.appendChild(c); l.appendChild(document.createTextNode(texto)); return { lab: l, cb: c };
+    }
+    var mWa = marcador(kWa, "WhatsApp"), mSite = marcador(kSite, "Site");
+    var cbWa = mWa.cb, cbSite = mSite.cb, labWa = mWa.lab, labSite = mSite.lab;
     var b2 = document.createElement("button"); b2.className = "principal"; b2.textContent = "🤖 Preparar no WhatsApp";
     b2.title = "Precisa do script do Tampermonkey (pasta whatsapp_assistente): abre o grupo da unidade no WhatsApp Web e deixa o boletim digitado para voce conferir e apertar Enter.";
     b2.addEventListener("click", function () {
@@ -1838,7 +1826,7 @@ _HTML_WHATSAPP = """<!doctype html><html><head><meta charset="utf-8"><style>
       try { (window.top || window.parent).postMessage({ fonte: "rio-raios", tipo: "preparar", id: it.id, estacao: it.estacao, texto: it.texto }, "*"); } catch (e) {}
       setTimeout(function () {
         window.removeEventListener("message", ack);
-        if (confirmou) { gravarFlag(kAberto, true); linha.classList.add("aberto"); b2.textContent = "✔ Enviado ao WhatsApp - confira la e de Enter"; }
+        if (confirmou) { gravarFlag(kAberto, true); linha.classList.add("aberto"); cbWa.checked = true; gravarFlag(kWa, true); b2.textContent = "✔ Enviado ao WhatsApp - confira la e de Enter"; }
         else {
           var t = document.createElement("textarea"); t.value = it.texto; t.style.position = "fixed"; t.style.opacity = "0";
           document.body.appendChild(t); t.select(); try { document.execCommand("copy"); } catch (e) {} document.body.removeChild(t);
@@ -1858,14 +1846,12 @@ _HTML_WHATSAPP = """<!doctype html><html><head><meta charset="utf-8"><style>
                                                          titulo: it.titulo, resumo: it.resumo, texto: it.texto_site }, "*"); } catch (e) {}
       setTimeout(function () {
         window.removeEventListener("message", ack);
+        if (confirmou) { cbSite.checked = true; gravarFlag(kSite, true); }
         b3.textContent = confirmou ? "✔ Enviado - confira o formulario na aba do site" : "Script nao detectado (atualize o Tampermonkey)";
         setTimeout(function () { b3.textContent = "📝 Registrar no site"; }, 4000);
       }, 1200);
     });
-    var lab = document.createElement("label"); var cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = lerFlag(kOk);
-    cb.addEventListener("change", function () { gravarFlag(kOk, cb.checked); });
-    lab.appendChild(cb); lab.appendChild(document.createTextNode("enviado"));
-    linha.appendChild(nome); linha.appendChild(b2); linha.appendChild(b3); linha.appendChild(lab); lista.appendChild(linha);
+    linha.appendChild(nome); linha.appendChild(b2); linha.appendChild(labWa); linha.appendChild(b3); linha.appendChild(labSite); lista.appendChild(linha);
   });
 </script></body></html>"""
 
