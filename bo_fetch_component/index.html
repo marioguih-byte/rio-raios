@@ -1,21 +1,30 @@
-<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0;background:transparent">
+<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0;background:transparent;font:12px sans-serif;color:#8b93a3">
+<div id="st"></div>
 <script>
 // Baixa URLs (Open-Meteo) DIRETO PELO NAVEGADOR de quem clicou, em sequência, e devolve ao app.
 // Assim o limite diário do Open-Meteo conta no IP de cada pessoa, e não no IP compartilhado do servidor.
 (function () {
   function enviar(type, data) { window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: type }, data), "*"); }
-  var iniciado = null;
+  var iniciado = null, msgAtual = "";
+  function mostrar(m) {
+    msgAtual = m;
+    var e = document.getElementById("st"); if (e) e.textContent = m;
+    enviar("streamlit:setFrameHeight", { height: m ? 22 : 0 });
+  }
   function esperar(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   async function buscar(url) {
     // devolve {ok, dados} ou {ok:false, msg, fatal}
     for (var t = 0; t < 4; t++) {
       try {
-        var r = await fetch(url, { cache: "no-store" });
-        var txt = await r.text();
+        var ctl = new AbortController(), tm = setTimeout(function () { ctl.abort(); }, 45000);
+        var r, txt;
+        try { r = await fetch(url, { cache: "no-store", signal: ctl.signal }); txt = await r.text(); }
+        finally { clearTimeout(tm); }
         if (r.status === 429) {
           var motivo = txt; try { motivo = JSON.parse(txt).reason || txt; } catch (e) {}
           var m = String(motivo).toLowerCase();
           if (m.indexOf("daily") >= 0 || m.indexOf("hourly") >= 0 || t >= 2) return { ok: false, fatal: true, msg: "HTTP 429: " + motivo };
+          mostrar("Limite por minuto do Open-Meteo: aguardando 15 s para tentar de novo…");
           await esperar(15000);   // limite por minuto: espera e tenta de novo
           continue;
         }
@@ -23,6 +32,7 @@
         return { ok: true, dados: JSON.parse(txt) };
       } catch (e) {
         if (t === 3) return { ok: false, fatal: false, msg: "Falha de rede no navegador: " + e };
+        mostrar("Falha ao baixar (" + e + "); tentando de novo…");
         await esperar(1500 * (t + 1));
       }
     }
@@ -30,17 +40,20 @@
   }
   async function rodar(reqs, pausa) {
     var res = {}, erros = {}, feitos = 0, ultimo = 0, abortado = "";
+    enviar("streamlit:setComponentValue", { value: { tipo: "prog", feitos: 0, total: reqs.length, atual: "", msg: "Navegador iniciou o download" }, dataType: "json" });
     for (var i = 0; i < reqs.length; i++) {
       var q = reqs[i];
+      mostrar("Baixando lote " + (i + 1) + " de " + reqs.length + "…");
       var o = await buscar(q.url);
       if (o.ok) res[q.id] = o.dados; else { erros[q.id] = o.msg; if (o.fatal) { abortado = o.msg; feitos++; break; } }
       feitos++;
       if (Date.now() - ultimo > 1200) {
         ultimo = Date.now();
-        enviar("streamlit:setComponentValue", { value: { tipo: "prog", feitos: feitos, total: reqs.length, atual: q.id }, dataType: "json" });
+        enviar("streamlit:setComponentValue", { value: { tipo: "prog", feitos: feitos, total: reqs.length, atual: q.id, msg: msgAtual }, dataType: "json" });
       }
       await esperar(pausa);
     }
+    mostrar("");
     enviar("streamlit:setComponentValue", { value: { tipo: "fim", feitos: feitos, total: reqs.length, results: res, erros: erros, abortado: abortado }, dataType: "json" });
   }
   window.addEventListener("message", function (ev) {

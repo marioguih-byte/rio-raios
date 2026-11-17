@@ -561,6 +561,10 @@ def _secao(rodando_inicio=False):
             val = _fetch_navegador(reqs=nav["reqs"], pausa_ms=1000, assinatura=nav["id"], key=f"pvfetch_{nav['id']}", default=None)
             feitos = (val or {}).get("feitos", 0)
             st.progress(min(feitos / max(len(nav["reqs"]), 1), 1.0), text=f"Baixando a previsão do Open-Meteo… [{feitos}/{len(nav['reqs'])} lotes]")
+            if not val:
+                st.caption("Aguardando o navegador iniciar o download… se isto durar mais de 10 s, recarregue a página (F5) e tente de novo.")
+            elif (val or {}).get("msg"):
+                st.caption(val["msg"])
             if val and val.get("tipo") == "fim":
                 st.session_state.pop("pv_nav", None)
                 try:
