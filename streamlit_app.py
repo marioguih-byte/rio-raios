@@ -1029,8 +1029,6 @@ def _quadro_fragmento():
             _rerun_fragmento()
     else:
         st.caption("Informe seu nome na barra lateral: sua entrada é registrada automaticamente.")
-    if previsto:
-        st.caption("📅 Previsto na escala agora: " + ", ".join(previsto))
     if not itens:
         st.caption("📡 Nenhum alerta emitido no momento.")
     avisados = st.session_state.setdefault("_avisados_quadro", set())
@@ -1150,7 +1148,7 @@ def _quadro_escala_editor():
                              hide_index=True, use_container_width=True)
 
 def _quadro_historico_expander():
-    with st.expander("🕘 Histórico de alertas (compartilhado)"):
+    with st.expander("🕘 Histórico de alertas"):
         df = _quadro_historico_df()
         if df.empty:
             st.caption("Ainda sem registros.")
@@ -1355,11 +1353,9 @@ st.markdown(f"""
 
 with st.container(border=True):
     _cq1, _cq2 = st.columns([5, 1.5], vertical_alignment="center")
-    _cq1.markdown("##### 📡 Quadro de operação (compartilhado)")
+    _cq1.markdown("##### 📡 Quadro de operação")
     _cq2.toggle("🔔 Som do quadro", value=True, key="som_quadro", help="Sinal sonoro para alerta novo de outra pessoa e para os avisos de 5 min e 1 min do fim do alerta.")
     st.fragment(run_every=5)(_quadro_fragmento)()
-    _quadro_ponto_expander()
-    _quadro_escala_editor()
     _quadro_historico_expander()
 
 # Painel de alertas retrátil: recolhido, o mapa ocupa a largura toda. As colunas continuam as mesmas
