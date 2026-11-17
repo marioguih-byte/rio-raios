@@ -69,8 +69,6 @@
     #painel_alertas { top: 88px; left: 8px; right: 8px; bottom: 30px; width: auto; max-width: none; }
     #legenda-mapa { max-width: 200px; }
     #goes-status { font-size: 10.5px; bottom: 22px; }
-    #extra-status { font-size: 10.5px; bottom: 44px; max-width: 70vw; }
-    #legenda-rajadas { bottom: 88px; }
   }
   /* telas de toque: alvos de toque maiores e campos de texto sem o zoom automático do iOS (fonte >= 16px) */
   @media (pointer: coarse) {
@@ -88,14 +86,6 @@
   .leaflet-bar a.bo-tela-cheia { display: flex; align-items: center; justify-content: center; }
   #goes-status { display: none; position: absolute; z-index: 1000; bottom: 26px; right: 8px; background: rgba(15,15,20,0.8);
     color: #e5e7eb; padding: 3px 9px; border-radius: 6px; font: 11px 'Segoe UI', sans-serif; }
-  #extra-status { display: none; position: absolute; z-index: 1000; bottom: 50px; right: 8px; background: rgba(15,15,20,0.85);
-    color: #e5e7eb; padding: 4px 9px; border-radius: 6px; font: 11px 'Segoe UI', sans-serif; max-width: 340px; line-height: 1.45; }
-  .rajada-ico { display: flex; align-items: center; justify-content: center; gap: 2px; border-radius: 11px; padding: 1px 5px; font: 700 11px 'Segoe UI', sans-serif;
-    color: #fff; border: 1px solid rgba(0,0,0,.45); text-shadow: 0 0 2px #000; white-space: nowrap; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
-  .rajada-ico span.seta { display: inline-block; font-size: 12px; line-height: 1; }
-  #legenda-rajadas { display: none; position: absolute; z-index: 1000; bottom: 96px; right: 8px; background: rgba(15,15,20,0.85); color: #e5e7eb;
-    padding: 5px 9px; border-radius: 6px; font: 11px 'Segoe UI', sans-serif; }
-  #legenda-rajadas i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 4px 0 8px; vertical-align: -1px; }
   /* barra de rolagem mais grossa (Chrome/Edge/Safari; no Firefox vale a espessura "auto") */
   @supports selector(::-webkit-scrollbar) {
     #painel_estacao::-webkit-scrollbar { width: 16px; }
@@ -170,8 +160,6 @@
     <div class="al-corpo" id="al_corpo_alertas" style="display:none;"></div>
   </div>
   <div id="goes-status"></div>
-  <div id="extra-status"></div>
-  <div id="legenda-rajadas"><b>Rajada (km/h)</b><i style="background:#2fa84f"></i>&lt;30<i style="background:#f2c200"></i>30–50<i style="background:#f77f00"></i>50–70<i style="background:#e5383b"></i>≥70</div>
   <div id="toast-mapa"></div>
   <div id="busca-unidade-bar">
     <input id="busca-unidade-input" list="busca-unidade-lista" placeholder="🔎 Buscar unidade…" autocomplete="off" />
@@ -1023,89 +1011,50 @@
     gibsWms._aoFalharMuito = function () { goesBloqueado = true; atualizarPillGOES(); avisoMapa("GOES não carregou: este navegador/rede pode estar bloqueando gibs.earthdata.nasa.gov"); };
     gibsWms.on("tileload", function () { if (goesBloqueado) { goesBloqueado = false; atualizarPillGOES(); } });
 
-    // Alternativa mais "quase tempo real": SSEC RealEarth (GOES-19 com poucos minutos de atraso). Fica desligada
-    // por padrão. O horário da imagem mais recente é consultado a cada 5 min e mostrado no mapa. Se o SSEC não
-    // entregar nenhum tile, o mapa troca sozinho pro GIBS.
-    var RE = "https://realearth.ssec.wisc.edu";
-    var PRODUTOS_GOES = [
-      { id: "G19-ABI-FD-BAND13-GRAD", rotulo: "🌡️ Temperatura de brilho do topo das nuvens (IR B13 realçado) · SSEC", nativo: 6 },
-      { id: "G19-ABI-FD-BAND13", rotulo: "🛰️ GOES-East IR banda 13 · SSEC", nativo: 6 },
-      { id: "G19-ABI-FD-ir-sandwich", rotulo: "🛰️ GOES-East IR Sandwich (topos convectivos) · SSEC", nativo: 6 },
-      { id: "G19-ABI-FD-geo-color", rotulo: "🛰️ GOES-East GeoColor · SSEC", nativo: 7 },
-    ];
-    function fallbackParaGibs(camada) {
-      return function () {
-        if (!map.hasLayer(camada)) return;
-        map.removeLayer(camada);
-        if (!map.hasLayer(gibsAtiva)) gibsAtiva.addTo(map);
-        avisoMapa("O SSEC não respondeu: usando o GOES-East do NASA GIBS.");
+    // Satélites: só NASA GIBS · GOES-East (Infravermelho banda 13, GeoColor e Massa de ar). Cada um usa tiles prontos (WMTS)
+    // e, se o serviço não responder, cai sozinho no WMS (mesma imagem). Só um satélite fica ligado por vez.
+    var GIBS_WMS = "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi";
+    function gibsExtra(nome, id, nivel, rotulo) {
+      var r = { nome: nome, rotulo: rotulo };
+      r.wmts = robustecer(L.tileLayer("https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/" + id + "/default/default/GoogleMapsCompatible_Level" + nivel + "/{z}/{y}/{x}.png", opcoesTiles({
+        opacity: 0.6, zIndex: 10, maxNativeZoom: nivel, maxZoom: 11, attribution: ATRIB_GIBS })));
+      r.wms = robustecer(L.tileLayer.wms(GIBS_WMS, opcoesTiles({
+        layers: id, format: "image/png", transparent: true, version: "1.1.1", opacity: 0.6, zIndex: 10, maxNativeZoom: nivel, maxZoom: 11, attribution: ATRIB_GIBS })));
+      r.ativa = r.wmts;
+      r.wmts._aoFalharMuito = function () {
+        var ligada = map.hasLayer(r.wmts);
+        layersControl.removeLayer(r.wmts);
+        if (ligada) map.removeLayer(r.wmts);
+        layersControl.addOverlay(r.wms, rotulo);
+        if (ligada) r.wms.addTo(map);
+        r.ativa = r.wms; atualizarPillGOES();
       };
+      r.wms._aoFalharMuito = function () { goesBloqueado = true; atualizarPillGOES(); avisoMapa("GOES não carregou: este navegador/rede pode estar bloqueando gibs.earthdata.nasa.gov"); };
+      r.wms.on("tileload", function () { if (goesBloqueado) { goesBloqueado = false; atualizarPillGOES(); } });
+      return r;
     }
-    function criarSSEC(p, url) {
-      var camada = robustecer(L.tileLayer(url, opcoesTiles({
-        opacity: 0.6, zIndex: 10, maxNativeZoom: p.nativo, maxZoom: 11, attribution: "Source: SSEC RealEarth, UW-Madison"
-      })));
-      camada._aoFalharMuito = fallbackParaGibs(camada);
-      return camada;
-    }
-
-    var goesInfo = {};
+    var SATS = [
+      { nome: "Infravermelho (banda 13)", rotulo: ROTULO_GIBS, wmts: gibsWmts, wms: gibsWms, get ativa() { return gibsAtiva; } },
+      gibsExtra("GeoColor", "GOES-East_ABI_GeoColor", 7, "🛰️ GOES-East GeoColor · NASA GIBS (~30 min de atraso)"),
+      gibsExtra("Massa de ar", "GOES-East_ABI_Air_Mass", 6, "🛰️ GOES-East Massa de ar · NASA GIBS (~30 min de atraso)")
+    ];
     var overlaysGoes = {};
-    overlaysGoes[ROTULO_GIBS] = gibsWmts;
+    SATS.forEach(function (sat) { overlaysGoes[sat.rotulo] = sat.wmts; });
     fundoOSM.addTo(map);
-    gibsWmts.addTo(map);                                  // GOES-East (NASA GIBS) ligado por padrão
-    PRODUTOS_GOES.forEach(function (p) {
-      var camada = criarSSEC(p, RE + "/tiles/" + p.id + "/{z}/{x}/{y}.png");
-      goesInfo[p.id] = { camada: camada, t: null, url: null };
-      overlaysGoes[p.rotulo] = camada;
-    });
+    gibsWmts.addTo(map);                                  // GOES-East infravermelho ligado por padrão
 
+    function satDe(camada) { return SATS.filter(function (sat) { return sat.wmts === camada || sat.wms === camada; })[0]; }
     function atualizarPillGOES() {
       var el = document.getElementById("goes-status");
-      var ativo = PRODUTOS_GOES.filter(function (p) { return map.hasLayer(goesInfo[p.id].camada); })[0];
-      if (!ativo) {
-        if (goesBloqueado && map.hasLayer(gibsAtiva)) {
-          el.style.display = "block"; el.style.background = "rgba(150,30,30,0.9)";
-          el.textContent = "⚠️ GOES não carregou neste navegador/rede (NASA GIBS bloqueado?). Teste sem VPN/bloqueador ou em outra rede.";
-        } else if (map.hasLayer(gibsAtiva)) { el.style.background = ""; el.style.display = "block"; el.textContent = "🛰️ GOES-East · NASA GIBS (imagem com ~30 min de atraso)"; }
-        else el.style.display = "none";
-        return;
+      var ativo = SATS.filter(function (sat) { return map.hasLayer(sat.ativa); })[0];
+      if (!ativo) { el.style.display = "none"; return; }
+      if (goesBloqueado && ativo.ativa === ativo.wms) {
+        el.style.display = "block"; el.style.background = "rgba(150,30,30,0.9)";
+        el.textContent = "⚠️ GOES não carregou neste navegador/rede (NASA GIBS bloqueado?). Teste sem VPN/bloqueador ou em outra rede.";
+      } else {
+        el.style.display = "block"; el.style.background = "";
+        el.textContent = "🛰️ GOES-East · " + ativo.nome + " · NASA GIBS (imagem com ~30 min de atraso)";
       }
-      el.style.display = "block"; el.style.background = "";
-      var info = goesInfo[ativo.id];
-      if (!info.t) { el.textContent = "🛰️ GOES-East (SSEC): imagem mais recente disponível"; return; }
-      var min = Math.max(0, Math.round((Date.now() - info.t.getTime()) / 60000));
-      var hora = info.t.toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
-      el.textContent = "🛰️ GOES-East · imagem das " + hora + " (há " + min + " min)";
-    }
-    // Troca de imagem do SSEC sem "piscar": a camada nova carrega por cima e a antiga só sai quando a nova terminou.
-    function trocarUrl(p, url) {
-      var info = goesInfo[p.id], antiga = info.camada;
-      if (!info.url) { info.url = url; antiga.setUrl(url); return; }   // 1ª vez: só aponta pra imagem datada
-      info.url = url;
-      if (!map.hasLayer(antiga)) { antiga.setUrl(url, true); return; }    // camada desligada: só troca a URL
-      var nova = criarSSEC(p, url);
-      nova.once("load", function () { if (map.hasLayer(antiga)) map.removeLayer(antiga); });
-      nova.addTo(map);
-      layersControl.removeLayer(antiga);
-      layersControl.addOverlay(nova, p.rotulo);
-      info.camada = nova;
-    }
-    function atualizarGOES(p) {
-      var info = goesInfo[p.id];
-      return fetch(RE + "/api/time?products=" + p.id)
-        .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
-        .then(function (txt) {
-          var achados = txt.match(/\d{8}_\d{6}/g);
-          if (!achados || !achados.length) throw new Error("sem horários");
-          achados.sort();
-          var ult = achados[achados.length - 1], d = ult.slice(0, 8), h = ult.slice(9, 15);
-          var url = RE + "/tiles/" + p.id + "/" + d + "/" + h + "/{z}/{x}/{y}.png";
-          if (url !== info.url) trocarUrl(p, url);
-          info.t = new Date(Date.UTC(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8), +h.slice(0, 2), +h.slice(2, 4), +h.slice(4, 6)));
-        })
-        .catch(function () { info.t = null; })
-        .then(atualizarPillGOES);
     }
 
     layersControl = L.control.layers(
@@ -1114,106 +1063,18 @@
       { position: "topright", collapsed: true }
     ).addTo(map);
     map.on("overlayadd overlayremove", function (ev) {
-      PRODUTOS_GOES.forEach(function (p) { if (goesInfo[p.id].camada === ev.layer && ev.type === "overlayadd") atualizarGOES(p); });
+      var novo = ev.type === "overlayadd" ? satDe(ev.layer) : null;
+      if (novo) SATS.forEach(function (sat) {        // um satélite por vez
+        if (sat === novo) return;
+        [sat.wmts, sat.wms].forEach(function (c) { if (map.hasLayer(c)) map.removeLayer(c); });
+      });
       atualizarPillGOES();
     });
     atualizarPillGOES();
-    PRODUTOS_GOES.forEach(function (p) { if (map.hasLayer(goesInfo[p.id].camada)) atualizarGOES(p); });
-    // a cada 5 min o SSEC procura imagem nova; o GIBS atualiza a cada 10 min, então os tiles são recarregados nesse ritmo
-    setInterval(function () { PRODUTOS_GOES.forEach(function (p) { if (map.hasLayer(goesInfo[p.id].camada)) atualizarGOES(p); }); }, 300000);
-    setInterval(function () { if (map.hasLayer(gibsAtiva)) gibsAtiva.redraw(); }, 600000);
+    // o GIBS atualiza a cada 10 min: os tiles são recarregados nesse ritmo
+    setInterval(function () { SATS.forEach(function (sat) { if (map.hasLayer(sat.ativa)) sat.ativa.redraw(); }); }, 600000);
     setInterval(atualizarPillGOES, 30000);
 
-    // ------------------------------------------------------------------
-    // CAMADAS EXTRAS: radar de chuva (RainViewer) e rajadas de vento (grade Open-Meteo, baixada pelo navegador)
-    // ------------------------------------------------------------------
-    var extraMsg = { radar: "", rajadas: "" };
-    function atualizarExtra() {
-      var el = document.getElementById("extra-status"), leg = document.getElementById("legenda-rajadas");
-      var linhas = [];
-      if (map.hasLayer(radarCamada) && extraMsg.radar) linhas.push(extraMsg.radar);
-      if (map.hasLayer(rajadasGrupo) && extraMsg.rajadas) linhas.push(extraMsg.rajadas);
-      el.innerHTML = linhas.join("<br>"); el.style.display = linhas.length ? "block" : "none";
-      leg.style.display = map.hasLayer(rajadasGrupo) ? "block" : "none";
-    }
-
-    // Radar (RainViewer, camada gratuita: zoom nativo até 7, cobertura depende das redes de radar de cada país)
-    var radarCamada = robustecer(L.tileLayer(PIXEL_TRANSPARENTE, opcoesTiles({
-      opacity: 0.75, zIndex: 12, maxNativeZoom: 7, maxZoom: 11,
-      attribution: 'Weather data by <a href="https://www.rainviewer.com" target="_blank" rel="noopener">RainViewer</a>'
-    })));
-    var radarInfo = { url: null, t: null };
-    radarCamada._aoFalharMuito = function () { extraMsg.radar = "🌧️ Radar: o RainViewer não respondeu neste navegador/rede."; atualizarExtra(); };
-    function atualizarRadar() {
-      return fetch("https://api.rainviewer.com/public/weather-maps.json", { cache: "no-store" })
-        .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-        .then(function (j) {
-          var past = j && j.radar && j.radar.past; if (!past || !past.length) throw new Error("sem quadros");
-          var q = past[past.length - 1];
-          var url = (j.host || "https://tilecache.rainviewer.com") + q.path + "/256/{z}/{x}/{y}/2/1_1.png";
-          if (url !== radarInfo.url) { radarInfo.url = url; radarCamada.setUrl(url); }
-          radarInfo.t = new Date(q.time * 1000);
-          var min = Math.max(0, Math.round((Date.now() - radarInfo.t.getTime()) / 60000));
-          extraMsg.radar = "🌧️ Radar de chuva · RainViewer · quadro de há ~" + min + " min (onde há radar; cobertura limitada no Brasil)";
-        })
-        .catch(function (e) { extraMsg.radar = "🌧️ Radar indisponível agora (" + e.message + ")."; })
-        .then(atualizarExtra);
-    }
-
-    // Rajadas de vento: uma grade de até 100 pontos sobre a área visível, vento ATUAL do Open-Meteo, 1 requisição.
-    var rajadasGrupo = L.layerGroup();
-    var rajEstado = { t: 0, chave: "", ocupado: false, timer: null };
-    function corRajada(v) { return v >= 70 ? "#e5383b" : v >= 50 ? "#f77f00" : v >= 30 ? "#f2c200" : "#2fa84f"; }
-    function carregarRajadas(forcar) {
-      if (rajEstado.ocupado || !map.hasLayer(rajadasGrupo)) return;
-      var b = map.getBounds().pad(-0.03), n = 10, lats = [], lons = [];
-      var s = Math.max(b.getSouth(), -60), nn = Math.min(b.getNorth(), 15), w = Math.max(b.getWest(), -120), e = Math.min(b.getEast(), -10);
-      var chave = [s, nn, w, e].map(function (v) { return Math.round(v * 2) / 2; }).join(",");
-      if (!forcar && chave === rajEstado.chave && Date.now() - rajEstado.t < 15 * 60000) return;
-      if (!forcar && Date.now() - rajEstado.t < 20000) return;
-      for (var i = 0; i < n; i++) for (var k = 0; k < n; k++) {
-        lats.push((s + (nn - s) * (i + 0.5) / n).toFixed(2)); lons.push((w + (e - w) * (k + 0.5) / n).toFixed(2));
-      }
-      rajEstado.ocupado = true; extraMsg.rajadas = "💨 Rajadas: baixando a grade do Open-Meteo…"; atualizarExtra();
-      var url = "https://api.open-meteo.com/v1/forecast?latitude=" + lats.join(",") + "&longitude=" + lons.join(",") +
-        "&current=wind_gusts_10m,wind_speed_10m,wind_direction_10m&wind_speed_unit=kmh&timezone=America%2FSao_Paulo";
-      fetch(url, { cache: "no-store" })
-        .then(function (r) {
-          if (r.status === 429) throw new Error("limite do Open-Meteo atingido para o seu navegador/rede (tente mais tarde)");
-          if (!r.ok) throw new Error("HTTP " + r.status);
-          return r.json();
-        })
-        .then(function (j) {
-          var lista = Array.isArray(j) ? j : [j];
-          rajadasGrupo.clearLayers();
-          lista.forEach(function (d) {
-            var c = d && d.current; if (!c || c.wind_gusts_10m == null) return;
-            var g = Math.round(c.wind_gusts_10m), dir = c.wind_direction_10m || 0;
-            var html = '<div class="rajada-ico" style="background:' + corRajada(g) + 'D9"><span class="seta" style="transform:rotate(' + Math.round(dir + 180) + 'deg)">↑</span>' + g + '</div>';
-            L.marker([d.latitude, d.longitude], { interactive: false, keyboard: false,
-              icon: L.divIcon({ className: "", html: html, iconSize: [46, 22], iconAnchor: [23, 11] }) }).addTo(rajadasGrupo);
-          });
-          rajEstado.t = Date.now(); rajEstado.chave = chave;
-          var hora = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
-          extraMsg.rajadas = "💨 Rajadas (km/h) · grade Open-Meteo · atualizado às " + hora + " (seta = para onde o vento sopra; a grade acompanha a área visível)";
-        })
-        .catch(function (e) { rajEstado.t = Date.now(); extraMsg.rajadas = "💨 Rajadas indisponíveis: " + e.message; })
-        .then(function () { rajEstado.ocupado = false; atualizarExtra(); });
-    }
-    map.on("moveend", function () {
-      if (!map.hasLayer(rajadasGrupo)) return;
-      clearTimeout(rajEstado.timer); rajEstado.timer = setTimeout(function () { carregarRajadas(false); }, 1500);
-    });
-
-    layersControl.addOverlay(radarCamada, "🌧️ Radar de chuva · RainViewer");
-    layersControl.addOverlay(rajadasGrupo, "💨 Rajadas de vento (grade Open-Meteo)");
-    map.on("overlayadd overlayremove", function (ev) {
-      if (ev.layer === radarCamada && ev.type === "overlayadd") atualizarRadar();
-      if (ev.layer === rajadasGrupo && ev.type === "overlayadd") carregarRajadas(true);
-      atualizarExtra();
-    });
-    setInterval(function () { if (map.hasLayer(radarCamada)) atualizarRadar(); }, 300000);
-    setInterval(function () { if (map.hasLayer(rajadasGrupo)) carregarRajadas(true); }, 15 * 60000);
 
     var bb = { lat_min: -34.0, lat_max: 5.5, lon_min: -74.5, lon_max: -32.0 };
     map.fitBounds([[bb.lat_min, bb.lon_min], [bb.lat_max, bb.lon_max]]);

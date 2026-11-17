@@ -67,6 +67,6 @@ Sem chave de API, ao clicar em *Gerar boletins* ou *Gerar mapas de previsão* o 
 4. Botões do painel: **✔ Salvei → próximo** (se a detecção automática não confirmar), **↻ Preencher de novo**, **⏭ Pular**, **⏹ Parar fila**.
 5. O script nunca clica em salvar. Atualize o script do Tampermonkey para a **v2.3**.
 
-## Camadas extras do mapa
+## Satélites do mapa
 
-No botão de camadas do mapa: **🌧️ Radar de chuva (RainViewer)**, **🌡️ Temperatura de brilho do topo das nuvens (IR B13 realçado, SSEC)** e **💨 Rajadas de vento (grade Open-Meteo, baixada pelo seu navegador)**.
+Todos NASA GIBS · GOES-East: Infravermelho, GeoColor e Massa de ar; um por vez.

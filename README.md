@@ -78,19 +78,15 @@ digitado; você confere e aperta Enter. Marque **enviado** para controlar. O app
 
 ## GOES-East e tiles do mapa
 
-- **GOES-East padrão: NASA GIBS (banda 13, infravermelho limpo, ~30 min de atraso).** Usa os tiles prontos
-  (WMTS), que são rápidos e ficam em cache; se esse serviço não responder, o mapa cai sozinho no WMS do
-  GIBS (mais lento, mesma imagem). Os tiles são recarregados a cada 10 min.
-- **Alternativa quase em tempo real: SSEC RealEarth** (desligada por padrão; ligue no controle de camadas
-  do mapa): IR realçado, banda 13, IR Sandwich e GeoColor. Mostra "imagem das HH:MM (há X min)". Se o
-  SSEC não entregar nenhum tile, o mapa volta sozinho para o GIBS. Crédito: "Source: SSEC RealEarth,
-  UW-Madison". O SSEC pode exibir uma marca d'água ("Size limit exceeded") quando passa do limite gratuito.
+- **Satélites (só NASA GIBS · GOES-East, ~30 min de atraso):** Infravermelho (banda 13, ligado por padrão),
+  GeoColor e Massa de ar. Só um fica ligado por vez no controle de camadas. Cada um usa os tiles prontos
+  (WMTS), rápidos e em cache; se esse serviço não responder, o mapa cai sozinho no WMS do GIBS (mais lento,
+  mesma imagem). Os tiles são recarregados a cada 10 min.
 - **Tiles sem problema ao arrastar/dar zoom** (todas as camadas de tiles): mais tiles guardados em volta da
   área visível, tiles carregados enquanto arrasta, sem buscar níveis intermediários durante o zoom,
   sem o "fade" que fazia as sobreposições piscarem, tile com erro tentado de novo e depois transparente
   (sem ícone de imagem quebrada), e acima do nível em que o provedor tem imagem o mapa amplia o último nível
   em vez de pedir tiles que não existem (GOES: nível 6; satélite Esri: nível 17; OSM: nível 19).
-- A troca de imagem do SSEC é feita sem piscar: a camada nova carrega por cima e a antiga só sai depois.
 
 ## Barra de rolagem
 
