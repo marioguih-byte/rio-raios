@@ -1670,12 +1670,41 @@ if st.session_state.get("dialog_raio_pendente"):
     st.dialog(_titulo_dialog)(_corpo_dialog_alerta_raio)()
 st.session_state["_run_completo"] = False
 
+def _painel_alertas_ativos():
+    """Aba 'Ativos' do painel lateral: alertas emitidos por qualquer meteorologista (quadro compartilhado)."""
+    itens, agora = _quadro_listar(), time.time()
+    if not itens:
+        st.success("Nenhum alerta ativo no momento.")
+        return
+    for it in itens:
+        resta = max(int(it["expira_ts"] - agora), 0)
+        nome = str(it["estacao"]).split(" - ")[0]
+        verm = it.get("nivel") == "vermelho"
+        emoji, cor = ("🔴", "#ff8a80") if verm else ("🟡", "#ffd166")
+        quem = it.get("meteorologista") or "(sem nome)"
+        vias = " · ".join(it.get("vias", []))
+        corcont = "#ff8a80" if resta <= AVISO_FIM_ALERTA_SEG else "#e5e7eb"
+        with st.container(border=True):
+            st.markdown(
+                f"<div style='border-left:4px solid {cor};padding-left:10px'>"
+                f"<div style='font-weight:700'>{emoji} {nome}</div>"
+                f"<div style='color:{cor};font-size:13px'>Alerta {'vermelho' if verm else 'amarelo'}</div>"
+                f"<div style='font-size:13px;margin-top:2px'>Emitido por <b>{quem}</b> às {_fmt_hm(it['emitido_ts'])}" + (f" ({vias})" if vias else "") + "</div>"
+                f"<div style='font-size:13px'>Válido até <b>{_fmt_hm(it['expira_ts'])}</b> · faltam "
+                f"<b style='color:{corcont}'>{resta // 60:02d}:{resta % 60:02d}</b></div></div>", unsafe_allow_html=True)
+            if st.button("✖ Tirar", key=f"ativo_tirar_{it['estacao']}", help="Remove do quadro (alerta encerrado)"):
+                _quadro_remover(estacao=it["estacao"], motivo="removido do quadro")
+                _rerun_fragmento()
+
 with col_lado:
   if mostrar_painel_alertas:
     with st.container(key="painel_lateral"):
         def _corpo_painel_lateral():
             df_status = st.session_state.get("_fragment_df_status", pd.DataFrame())
-            tab_risco, tab_alertas = st.tabs(["🚨 Risco", "📋 Alertas"])
+            tab_ativos, tab_risco, tab_alertas = st.tabs(["📡 Ativos", "🚨 Risco", "📋 Alertas"])
+
+            with tab_ativos:
+                st.fragment(run_every=5)(_painel_alertas_ativos)()   # alertas de todos os meteorologistas; atualiza a cada 5 s
 
             with tab_risco:
                 if df_status.empty:
