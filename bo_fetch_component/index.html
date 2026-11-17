@@ -1,0 +1,56 @@
+<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0;background:transparent">
+<script>
+// Baixa URLs (Open-Meteo) DIRETO PELO NAVEGADOR de quem clicou, em sequência, e devolve ao app.
+// Assim o limite diário do Open-Meteo conta no IP de cada pessoa, e não no IP compartilhado do servidor.
+(function () {
+  function enviar(type, data) { window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: type }, data), "*"); }
+  var iniciado = null;
+  function esperar(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  async function buscar(url) {
+    // devolve {ok, dados} ou {ok:false, msg, fatal}
+    for (var t = 0; t < 4; t++) {
+      try {
+        var r = await fetch(url, { cache: "no-store" });
+        var txt = await r.text();
+        if (r.status === 429) {
+          var motivo = txt; try { motivo = JSON.parse(txt).reason || txt; } catch (e) {}
+          var m = String(motivo).toLowerCase();
+          if (m.indexOf("daily") >= 0 || m.indexOf("hourly") >= 0 || t >= 2) return { ok: false, fatal: true, msg: "HTTP 429: " + motivo };
+          await esperar(15000);   // limite por minuto: espera e tenta de novo
+          continue;
+        }
+        if (!r.ok) return { ok: false, fatal: false, msg: "HTTP " + r.status + ": " + txt.slice(0, 160) };
+        return { ok: true, dados: JSON.parse(txt) };
+      } catch (e) {
+        if (t === 3) return { ok: false, fatal: false, msg: "Falha de rede no navegador: " + e };
+        await esperar(1500 * (t + 1));
+      }
+    }
+    return { ok: false, fatal: false, msg: "Falha ao baixar" };
+  }
+  async function rodar(reqs, pausa) {
+    var res = {}, erros = {}, feitos = 0, ultimo = 0, abortado = "";
+    for (var i = 0; i < reqs.length; i++) {
+      var q = reqs[i];
+      var o = await buscar(q.url);
+      if (o.ok) res[q.id] = o.dados; else { erros[q.id] = o.msg; if (o.fatal) { abortado = o.msg; feitos++; break; } }
+      feitos++;
+      if (Date.now() - ultimo > 1200) {
+        ultimo = Date.now();
+        enviar("streamlit:setComponentValue", { value: { tipo: "prog", feitos: feitos, total: reqs.length, atual: q.id }, dataType: "json" });
+      }
+      await esperar(pausa);
+    }
+    enviar("streamlit:setComponentValue", { value: { tipo: "fim", feitos: feitos, total: reqs.length, results: res, erros: erros, abortado: abortado }, dataType: "json" });
+  }
+  window.addEventListener("message", function (ev) {
+    if (!ev.data || ev.data.type !== "streamlit:render" || !ev.data.args) return;
+    var a = ev.data.args, assinatura = a.assinatura || "";
+    if (iniciado === assinatura) return;   // já rodando/rodou esta lista: ignora os re-renders
+    iniciado = assinatura;
+    rodar(a.reqs || [], a.pausa_ms || 300);
+  });
+  enviar("streamlit:componentReady", { apiVersion: 1 });
+  enviar("streamlit:setFrameHeight", { height: 0 });
+})();
+</script></body></html>

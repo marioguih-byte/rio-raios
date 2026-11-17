@@ -57,6 +57,9 @@ _APP_DIR_COMPONENTE = os.path.dirname(os.path.abspath(__file__))
 _mapa_raios_component = components.declare_component(
     "bo_mapa_raios", path=os.path.join(_APP_DIR_COMPONENTE, "bo_mapa_component")
 )
+_bo_fetch_boletins = components.declare_component(
+    "bo_fetch_boletins", path=os.path.join(_APP_DIR_COMPONENTE, "bo_fetch_component")
+)
 _botoes_envio = components.declare_component(
     "bo_botoes_envio", path=os.path.join(_APP_DIR_COMPONENTE, "bo_botoes_component")
 )
@@ -1750,11 +1753,15 @@ with col_lado:
 # numa thread em segundo plano: não trava o mapa nem é interrompida pelas
 # atualizações automáticas dos raios.
 # ======================================================================
-def _worker_boletins(estado, unidades, dias):
+def _worker_boletins(estado, unidades, dias, usar_servidor=True):
     total = len(unidades)
     seguidas = 0
     for i, (nome, (lat, lon)) in enumerate(unidades.items(), 1):
         estado["atual"] = nome
+        if not usar_servidor and not boletins_bo.em_cache(lat, lon, dias):
+            estado["erros"].append((nome, "Os dados desta unidade não foram baixados pelo navegador (veja o aviso acima)."))
+            estado["feitos"] = i
+            continue
         try:
             estado["resultados"][nome] = boletins_bo.boletim_unidade(nome, lat, lon, dias)
             seguidas = 0
@@ -1910,7 +1917,7 @@ def _secao_boletins(unidades_base):
     st.caption("ENSEMBLE (média consenso) entre ECMWF, ICON e GFS do Open-Meteo.")
 
     estado = st.session_state.get("boletins_estado")
-    rodando = bool(estado and estado["rodando"])
+    rodando = bool(estado and estado["rodando"]) or bool(st.session_state.get("bol_pre"))
 
     c1, c2 = st.columns([3, 1])
     with c1:
@@ -1922,14 +1929,51 @@ def _secao_boletins(unidades_base):
                 if not filtro or filtro.lower() in n.lower()}   # ordem alfabética: vale para a geração, o arquivo e a lista do WhatsApp
     st.caption(f"{len(unidades)} unidade(s) selecionada(s).")
 
-    if st.button(f"📨 Gerar boletins ({len(unidades)})", key="bol_gerar", type="primary", disabled=(not unidades) or rodando):
-        novo = {"rodando": True, "resultados": {}, "erros": [], "feitos": 0, "total": len(unidades), "atual": "",
+    def _iniciar(unidades_, dias_, usar_servidor):
+        novo = {"rodando": True, "resultados": {}, "erros": [], "feitos": 0, "total": len(unidades_), "atual": "",
                 "data": utc_para_brasilia(datetime.now(timezone.utc)).strftime("%Y%m%d"),
                 "hoje_dd_mm": utc_para_brasilia(datetime.now(timezone.utc)).strftime("%d/%m")}
         novo["gerado_id"] = f"{int(time.time())}"   # muda a cada geração: o "enviado/aberto" da lista recomeça
         st.session_state["boletins_estado"] = novo
-        threading.Thread(target=_worker_boletins, args=(novo, unidades, int(dias)), daemon=True).start()
+        threading.Thread(target=_worker_boletins, args=(novo, unidades_, int(dias_), usar_servidor), daemon=True).start()
+
+    pre = st.session_state.get("bol_pre")
+    if st.button(f"📨 Gerar boletins ({len(unidades)})", key="bol_gerar", type="primary", disabled=(not unidades) or rodando or bool(pre)):
+        faltam = {n: c for n, c in unidades.items() if not boletins_bo.em_cache(c[0], c[1], int(dias))}
+        if boletins_bo.API_KEY or not faltam:
+            _iniciar(unidades, dias, True)          # chave paga no servidor, ou tudo já em cache
+        else:
+            # Sem chave: o NAVEGADOR de quem clicou baixa do Open-Meteo (o limite diário conta no IP dessa pessoa,
+            # não no IP compartilhado do servidor). Os dados caem no cache e o gerador de boletins roda em seguida.
+            reqs = [{"id": n, "url": boletins_bo.montar_url(lat, lon, int(dias))} for n, (lat, lon) in faltam.items()]
+            st.session_state["bol_pre"] = {"id": f"{time.time():.3f}", "reqs": reqs, "unidades": unidades, "dias": int(dias)}
+            st.session_state.pop("boletins_estado", None)
         st.rerun()
+
+    if pre:
+        st.caption("⬇️ Baixando a previsão do Open-Meteo pelo seu navegador…")
+        val = _bo_fetch_boletins(reqs=pre["reqs"], pausa_ms=300, assinatura=pre["id"], key=f"bolfetch_{pre['id']}", default=None)
+        feitos = (val or {}).get("feitos", 0)
+        st.progress(min(feitos / max(len(pre["reqs"]), 1), 1.0), text=f"[{feitos}/{len(pre['reqs'])}] {(val or {}).get('atual', 'iniciando…')}")
+        if val and val.get("tipo") == "fim":
+            for n, dados in val["results"].items():
+                lat, lon = pre["unidades"][n]
+                if isinstance(dados, dict) and "hourly" in dados:
+                    boletins_bo.guardar_em_cache(lat, lon, pre["dias"], dados["hourly"])
+            st.session_state.pop("bol_pre", None)
+            if val.get("abortado"):
+                st.session_state["bol_pre_aviso"] = ("O Open-Meteo recusou o acesso a partir do SEU navegador/rede (" + val["abortado"] +
+                                                      "). Se o limite diário foi atingido, tente de novo depois do reset (cerca de 21h, horário de Brasília) ou use outra rede.")
+            elif val.get("erros"):
+                st.session_state["bol_pre_aviso"] = f"{len(val['erros'])} unidade(s) não baixaram: " + "; ".join(f"{k}: {v}" for k, v in list(val["erros"].items())[:3])
+            else:
+                st.session_state.pop("bol_pre_aviso", None)
+            _iniciar({n: c for n, c in pre["unidades"].items()}, pre["dias"], False)
+            st.rerun()
+        return
+
+    if st.session_state.get("bol_pre_aviso"):
+        st.warning(st.session_state["bol_pre_aviso"])
 
     if not estado: return
 

@@ -27,6 +27,7 @@ import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -226,6 +227,30 @@ def _baixar_lote(sessao, lats, lons):
     return lista
 
 
+def _guardar_coleta(armazem, passo, lon, lat, resultados):
+    """Monta e guarda no armazém compartilhado a previsão coletada (vinda do servidor ou do navegador)."""
+    datas = resultados[0]["daily"]["time"]
+    dados = {v: np.array([r["daily"][v] for r in resultados], dtype=float) for v in DAILY_VARS}
+    with armazem["lock"]:
+        armazem["dados"][passo] = {
+            "datas": datas, "lon": lon, "lat": lat, "dados": dados, "ts": time.time(),
+            "atualizado": _agora_brasilia().strftime("%d/%m/%Y %H:%M"),
+        }
+
+
+def _url_lote(lats, lons):
+    """URL (sem chave) de um lote de pontos: o NAVEGADOR de quem clicou baixa direto do Open-Meteo."""
+    params = {
+        "latitude": ",".join(f"{v:.3f}" for v in lats), "longitude": ",".join(f"{v:.3f}" for v in lons),
+        "daily": ",".join(DAILY_VARS), "timezone": TZ_OPEN_METEO, "forecast_days": N_DIAS,
+        "wind_speed_unit": "kmh", "precipitation_unit": "mm", "temperature_unit": "celsius",
+    }
+    return requests.Request("GET", "https://api.open-meteo.com/v1/forecast", params=params).prepare().url
+
+
+_fetch_navegador = components.declare_component("bo_fetch_mapas", path=os.path.join(APP_DIR, "bo_fetch_component"))
+
+
 def _worker_coleta(estado, armazem, passo, lon, lat):
     """Roda em thread: baixa a previsão e guarda no armazém compartilhado. Não usa st.*."""
     try:
@@ -237,13 +262,7 @@ def _worker_coleta(estado, armazem, passo, lon, lat):
             resultados.extend(_baixar_lote(sessao, lat[sl], lon[sl]))
             estado["feitos"] = min(i + TAMANHO_LOTE, n)
             time.sleep(PAUSA_LOTES_S)
-        datas = resultados[0]["daily"]["time"]
-        dados = {v: np.array([r["daily"][v] for r in resultados], dtype=float) for v in DAILY_VARS}
-        with armazem["lock"]:
-            armazem["dados"][passo] = {
-                "datas": datas, "lon": lon, "lat": lat, "dados": dados, "ts": time.time(),
-                "atualizado": _agora_brasilia().strftime("%d/%m/%Y %H:%M"),
-            }
+        _guardar_coleta(armazem, passo, lon, lat, resultados)
     except Exception as e:
         estado["erro"] = f"{type(e).__name__}: {e}"
     finally:
@@ -499,7 +518,8 @@ def _secao(rodando_inicio=False):
                    "7 dias a partir de hoje (horário de Brasília).")
 
         estado = st.session_state.get("pv_estado")
-        rodando = bool(estado and estado["rodando"])
+        nav = st.session_state.get("pv_nav")
+        rodando = bool(estado and estado["rodando"]) or bool(nav)
         # A coleta terminou enquanto o fragmento se atualizava sozinho: um rerun completo desliga o auto-refresh.
         if rodando_inicio and estado is not None and not estado["rodando"]:
             st.rerun()
@@ -511,10 +531,21 @@ def _secao(rodando_inicio=False):
         rotulo_botao = "🔄 Atualizar previsão" if entrada else "🗺️ Gerar mapas de previsão"
         if st.button(rotulo_botao, key="pv_gerar", type="secondary" if entrada else "primary", disabled=rodando):
             armazem = _armazem()
+            existente_nav = None
             with armazem["lock"]:
                 existente = armazem["rodando"].get(passo)
                 if existente is not None and existente["rodando"]:     # outra sessão já está coletando
                     novo, iniciar = existente, False
+                elif not API_KEY:
+                    # Sem chave: o NAVEGADOR de quem clicou baixa do Open-Meteo (o limite diário conta no IP dessa
+                    # pessoa, não no IP compartilhado do servidor); depois todos reaproveitam por 3 h.
+                    lon, lat = _pontos_consulta(passo)
+                    reqs = [{"id": str(k), "url": _url_lote(lat[i:i + TAMANHO_LOTE], lon[i:i + TAMANHO_LOTE])}
+                            for k, i in enumerate(range(0, len(lon), TAMANHO_LOTE))]
+                    st.session_state["pv_nav"] = {"id": f"{time.time():.3f}", "passo": passo, "lon": lon, "lat": lat, "reqs": reqs}
+                    st.session_state.pop("pv_erro_nav", None)
+                    st.session_state.pop("pv_estado", None)
+                    st.rerun()
                 else:
                     lon, lat = _pontos_consulta(passo)
                     novo = {"rodando": True, "feitos": 0, "total": len(lon), "erro": None}
@@ -525,10 +556,35 @@ def _secao(rodando_inicio=False):
                 threading.Thread(target=_worker_coleta, args=(novo, armazem, passo, lon, lat), daemon=True).start()
             st.rerun()
 
+        if nav:
+            st.caption("⬇️ Baixando a previsão do Open-Meteo pelo seu navegador…")
+            val = _fetch_navegador(reqs=nav["reqs"], pausa_ms=1000, assinatura=nav["id"], key=f"pvfetch_{nav['id']}", default=None)
+            feitos = (val or {}).get("feitos", 0)
+            st.progress(min(feitos / max(len(nav["reqs"]), 1), 1.0), text=f"Baixando a previsão do Open-Meteo… [{feitos}/{len(nav['reqs'])} lotes]")
+            if val and val.get("tipo") == "fim":
+                st.session_state.pop("pv_nav", None)
+                try:
+                    if val.get("abortado") or val.get("erros") or len(val["results"]) != len(nav["reqs"]):
+                        motivo = val.get("abortado") or "; ".join(f"{k}: {v}" for k, v in list(val.get("erros", {}).items())[:2]) or "dados incompletos"
+                        raise RuntimeError("O Open-Meteo recusou ou falhou a partir do SEU navegador/rede (" + motivo + "). "
+                                           "Se o limite diário foi atingido, tente depois do reset (cerca de 21h, horário de Brasília) ou em outra rede.")
+                    resultados = []
+                    for i in range(len(nav["reqs"])):
+                        d = val["results"][str(i)]
+                        resultados.extend(d if isinstance(d, list) else [d])
+                    if len(resultados) != len(nav["lon"]):
+                        raise RuntimeError("Open-Meteo devolveu um número de pontos diferente do pedido.")
+                    _guardar_coleta(_armazem(), nav["passo"], nav["lon"], nav["lat"], resultados)
+                except Exception as e:
+                    st.session_state["pv_erro_nav"] = f"{type(e).__name__}: {e}"
+                st.rerun()
+            return
         if rodando:
             st.progress(min(estado["feitos"] / max(estado["total"], 1), 1.0),
                         text=f"Baixando a previsão do Open-Meteo… [{estado['feitos']}/{estado['total']} pontos]")
             return
+        if st.session_state.get("pv_erro_nav") and not entrada:
+            st.error(f"Não foi possível baixar a previsão: {st.session_state['pv_erro_nav']}")
         if estado is not None and estado.get("erro") and not entrada:
             st.error(f"Não foi possível baixar a previsão: {estado['erro']}")
         if not entrada:

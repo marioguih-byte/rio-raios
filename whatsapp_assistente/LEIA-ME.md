@@ -55,3 +55,6 @@ No topo do app, visível para todos os usuários conectados (atualiza a cada 5 s
 - **Histórico de alertas** compartilhado (últimos 500 registros: emitido, renovado, finalizado, vencido, removido, escala atualizada) com download em CSV.
 
 Os dados ficam na memória do servidor e num arquivo temporário (sobrevivem a reinícios simples, não a um novo deploy). Para fixar a escala no GitHub, crie `data/escala.json`: `[{"nome":"Fulano","dia":"Todos os dias","data":"","inicio":"08:00","fim":"17:00"}]`.
+
+## Boletins e mapas baixados pelo navegador
+Sem chave de API, ao clicar em *Gerar boletins* ou *Gerar mapas de previsão* o **navegador de quem clicou** baixa os dados do Open-Meteo (o limite diário conta no IP dessa pessoa, não no do servidor). Os dados voltam ao app e ficam em cache para todos (boletins 30 min, mapas 3 h). Com `OPEN_METEO_API_KEY` configurada, o servidor baixa como antes.

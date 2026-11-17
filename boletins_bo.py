@@ -118,8 +118,8 @@ def baixar(lat, lon, dias=DIAS_PREVISAO, tentativas=4):
     return dados
 
 
-def _baixar_sem_cache(lat, lon, dias=DIAS_PREVISAO, tentativas=4):
-    params = {
+def parametros(lat, lon, dias=DIAS_PREVISAO):
+    return {
         "latitude": lat, "longitude": lon,
         "hourly": ",".join(VARIAVEIS),
         "models": ",".join(MODELOS),
@@ -131,6 +131,28 @@ def _baixar_sem_cache(lat, lon, dias=DIAS_PREVISAO, tentativas=4):
         "forecast_days": dias + 1,
         "wind_speed_unit": "kmh",
     }
+
+
+def montar_url(lat, lon, dias=DIAS_PREVISAO):
+    """URL completa da consulta (sem chave de API): usada para baixar PELO NAVEGADOR de quem clicou."""
+    return requests.Request("GET", "https://api.open-meteo.com/v1/forecast", params=parametros(lat, lon, dias)).prepare().url
+
+
+def _chave_cache(lat, lon, dias):
+    return (round(float(lat), 4), round(float(lon), 4), int(dias))
+
+
+def em_cache(lat, lon, dias):
+    g = _CACHE_BAIXAR.get(_chave_cache(lat, lon, dias))
+    return bool(g and time.time() - g[0] < _CACHE_BAIXAR_SEG)
+
+
+def guardar_em_cache(lat, lon, dias, hourly):
+    _CACHE_BAIXAR[_chave_cache(lat, lon, dias)] = (time.time(), hourly)
+
+
+def _baixar_sem_cache(lat, lon, dias=DIAS_PREVISAO, tentativas=4):
+    params = parametros(lat, lon, dias)
     if API_KEY:
         params["apikey"] = API_KEY
     ultimo = ""
