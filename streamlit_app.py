@@ -712,10 +712,14 @@ AVISO_FIM_ALERTA_SEG = 5 * 60
 AVISO_ULTIMO_MIN_SEG = 60
 RENOVAR_QUADRO_MIN = 30
 HISTORICO_MAX = 500
+PONTO_MAX = 1000
+SAIDA_SEM_REENTRADA_SEG = 60 * 60   # após "Saindo do Turno", não reabre o turno sozinho por 1 h
+TURNO_MAX_H = 16                    # turno aberto há mais que isso é fechado sozinho (esqueceram de sair)
+PRESENCA_SEG = 75   # sem sinal de vida por mais que isso = saiu do site
 
 @st.cache_resource
 def _quadro():
-    q = {"lock": threading.RLock(), "emitidos": {}, "escala": [], "historico": []}
+    q = {"lock": threading.RLock(), "emitidos": {}, "escala": [], "historico": [], "ponto": [], "online": {}}
     try:
         with open(_ARQ_ESCALA_PADRAO, encoding="utf-8") as f:   # escala "de fábrica" (opcional, vinda do GitHub)
             q["escala"] = json.load(f)
@@ -726,6 +730,7 @@ def _quadro():
             d = json.load(f)
         q["emitidos"] = d.get("emitidos", {})
         q["historico"] = d.get("historico", [])
+        q["ponto"] = d.get("ponto", [])
         if d.get("escala") is not None:
             q["escala"] = d["escala"]
     except Exception:
@@ -735,7 +740,7 @@ def _quadro():
 def _quadro_gravar(q):
     try:
         with open(_ARQ_QUADRO, "w", encoding="utf-8") as f:
-            json.dump({"emitidos": q["emitidos"], "escala": q["escala"], "historico": q["historico"]}, f, ensure_ascii=False)
+            json.dump({"emitidos": q["emitidos"], "escala": q["escala"], "historico": q["historico"], "ponto": q["ponto"]}, f, ensure_ascii=False)
     except Exception:
         pass   # gravar nunca pode derrubar o app
 
@@ -859,6 +864,101 @@ def _plantao_agora(escala):
             nomes.append(nome)
     return nomes
 
+# ---- Ponto (entrada/saída) e presença online ----
+def _ponto_abertos():
+    q = _quadro()
+    with q["lock"]:
+        return [dict(r) for r in q["ponto"] if not r.get("saida_ts")]
+
+def _ponto_entrar(nome, forcar=False, automatica=False):
+    nome = str(nome or "").strip()
+    if not nome:
+        return False
+    q = _quadro()
+    with q["lock"]:
+        if automatica and not forcar:
+            # saiu do turno há pouco (ex.: apertou "Saindo do Turno" e atualizou a página): não reabre sozinho
+            for r in q["ponto"]:
+                if r["nome"].strip().lower() == nome.lower() and r.get("saida_ts") and time.time() - r["saida_ts"] < SAIDA_SEM_REENTRADA_SEG:
+                    return False
+        if any(not r.get("saida_ts") and r["nome"].strip().lower() == nome.lower() for r in q["ponto"]):
+            return False   # já está com a entrada batida
+        q["ponto"].append({"nome": nome, "entrada_ts": time.time(), "saida_ts": None, "saida_por": ""})
+        if len(q["ponto"]) > PONTO_MAX:
+            del q["ponto"][:len(q["ponto"]) - PONTO_MAX]
+        _quadro_log(q, "entrada no turno", "", "", nome)
+        _quadro_gravar(q)
+    return True
+
+def _ponto_sair(nome):
+    nome = str(nome or "").strip().lower()
+    q = _quadro()
+    with q["lock"]:
+        for r in q["ponto"]:
+            if not r.get("saida_ts") and r["nome"].strip().lower() == nome:
+                r["saida_ts"] = time.time()
+                r["saida_por"] = _nome_atual()
+                _quadro_log(q, "saída do turno", "", "", r["nome"])
+                _quadro_gravar(q)
+                return True
+    return False
+
+def _turno_entrada_automatica(nome):
+    return _ponto_entrar(nome, automatica=True)
+
+def _turno_fechar_esquecidos():
+    q, agora = _quadro(), time.time()
+    with q["lock"]:
+        mudou = False
+        for r in q["ponto"]:
+            if not r.get("saida_ts") and agora - r["entrada_ts"] > TURNO_MAX_H * 3600:
+                r["saida_ts"], r["saida_por"] = r["entrada_ts"] + TURNO_MAX_H * 3600, "automático (16 h)"
+                _quadro_log(q, "saída do turno (automática após 16 h)", "", "", r["nome"])
+                mudou = True
+        if mudou:
+            _quadro_gravar(q)
+
+def _fmt_duracao(seg):
+    seg = max(int(seg), 0)
+    return f"{seg // 3600}h{(seg % 3600) // 60:02d}"
+
+def _presenca_batimento():
+    """Marca esta sessão como online e devolve os nomes de quem está no site (inclui esta sessão)."""
+    q, agora = _quadro(), time.time()
+    sid = st.session_state.setdefault("_presenca_id", uuid.uuid4().hex[:10])
+    nome = _nome_atual() or "(sem nome)"
+    with q["lock"]:
+        antigo = q["online"].get(sid, {})
+        q["online"][sid] = {"nome": nome, "ts": agora, "desde": antigo.get("desde", agora)}
+        for k in [k for k, v in q["online"].items() if agora - v["ts"] > PRESENCA_SEG * 3]:
+            q["online"].pop(k, None)
+        vivos = [v for v in q["online"].values() if agora - v["ts"] <= PRESENCA_SEG]
+    por_nome = {}
+    for v in sorted(vivos, key=lambda v: v["desde"]):
+        por_nome.setdefault(v["nome"], v)
+    return list(por_nome.values())
+
+def _quadro_ponto_expander():
+    with st.expander("🕒 Registro de turnos (entradas e saídas)"):
+        q = _quadro()
+        with q["lock"]:
+            regs = [dict(r) for r in q["ponto"]]
+        linhas = []
+        for r in reversed(regs):
+            ent = datetime.fromtimestamp(r["entrada_ts"], tz=timezone.utc) - timedelta(hours=3)
+            sai = r.get("saida_ts")
+            linhas.append({"Meteorologista": r["nome"], "Data": ent.strftime("%d/%m/%Y"), "Entrada": ent.strftime("%H:%M"),
+                           "Saída": _fmt_hm(sai) if sai else "— em plantão —",
+                           "Duração": _fmt_duracao((sai or time.time()) - r["entrada_ts"]),
+                           "Observação": r.get("saida_por", "") if str(r.get("saida_por", "")).startswith("auto") else ""})
+        if not linhas:
+            st.caption("Ainda sem registros de turnos.")
+        else:
+            df = pd.DataFrame(linhas)
+            st.dataframe(df.head(100), hide_index=True, use_container_width=True)
+            st.download_button("⬇️ Baixar turnos (CSV)", df.to_csv(index=False).encode("utf-8-sig"), file_name="turnos_meteorologistas.csv", mime="text/csv")
+        st.caption("A entrada é registrada sozinha ao abrir o site com seu nome; a saída, no botão “Saindo do Turno”. Turnos esquecidos são fechados sozinhos após 16 h.")
+
 _HTML_BIP_5MIN = """<!doctype html><html><body><script>
   // token: __T__   modo: __M__
   (function () {
@@ -894,11 +994,45 @@ def _quadro_fragmento():
     faltando 5 min e faltando 1 min para o fim."""
     q = _quadro()
     itens, agora = _quadro_listar(), time.time()
-    plantao = _plantao_agora(q["escala"])
-    st.markdown("**👥 De plantão agora:** " + (", ".join(f"`{n}`" for n in plantao) if plantao else "_ninguém na escala neste horário (edite a escala abaixo)_"))
+    previsto = _plantao_agora(q["escala"])
+    meu = _nome_atual().lower()
+    # --- presença online ---
+    online = _presenca_batimento()
+    nomes_on = [("Você (" + v["nome"] + ")" if v["nome"].strip().lower() == meu else v["nome"]) for v in online]
+    st.markdown(f"**🟢 Online agora ({len(online)}):** " + (", ".join(f"`{n}`" for n in nomes_on) if nomes_on else "_só você_"))
+    vistos_on = st.session_state.get("_online_vistos")
+    atuais_on = {v["nome"].strip().lower() for v in online}
+    if vistos_on is not None:
+        for v in online:
+            n = v["nome"].strip().lower()
+            if n not in vistos_on and n != meu:
+                st.toast(f"👋 {v['nome']} entrou no site", icon="🟢")
+        for n in vistos_on - atuais_on:
+            st.toast(f"👋 {n.title()} saiu do site", icon="⚪")
+    st.session_state["_online_vistos"] = atuais_on
+    # --- turno: a entrada é registrada sozinha quando a pessoa abre o site com o nome; a saída, no botão "Saindo do Turno" ---
+    if meu:
+        _turno_entrada_automatica(_nome_atual())
+    _turno_fechar_esquecidos()
+    abertos = _ponto_abertos()
+    st.markdown("**👥 De plantão agora (turno em andamento):** " + ("" if abertos else "_ninguém com turno em andamento_"))
+    for r in abertos:
+        st.markdown(f"🟢 **{r['nome']}** — entrou às {_fmt_hm(r['entrada_ts'])} (há {_fmt_duracao(time.time() - r['entrada_ts'])})")
+    if meu and any(r["nome"].strip().lower() == meu for r in abertos):
+        if st.button("🚪 Saindo do Turno", key="psair", type="primary", help="Registra a sua saída. A entrada já foi registrada quando você abriu o site."):
+            _ponto_sair(_nome_atual())
+            st.toast("Saída registrada. Bom descanso! 👋", icon="🚪")
+            _rerun_fragmento()
+    elif meu:
+        if st.button("🟢 Voltar ao turno", key="pvoltar", help="Registra uma nova entrada (você tinha saído do turno)"):
+            _ponto_entrar(_nome_atual(), forcar=True)
+            _rerun_fragmento()
+    else:
+        st.caption("Informe seu nome na barra lateral: sua entrada é registrada automaticamente.")
+    if previsto:
+        st.caption("📅 Previsto na escala agora: " + ", ".join(previsto))
     if not itens:
         st.caption("📡 Nenhum alerta emitido no momento.")
-    meu = _nome_atual().lower()
     avisados = st.session_state.setdefault("_avisados_quadro", set())
     primeira = "_quadro_iniciado" not in st.session_state
     st.session_state["_quadro_iniciado"] = True
@@ -964,7 +1098,7 @@ def _quadro_historico_df():
 
 def _quadro_escala_editor():
     q = _quadro()
-    with st.expander("📅 Escala dos meteorologistas (compartilhada)"):
+    with st.expander("📅 Escala prevista dos meteorologistas (compartilhada)"):
         st.caption("Qualquer pessoa que use o app vê e pode editar. Horários em Brasília; turnos que viram a noite "
                    "(ex.: 22:00 → 06:00) são aceitos. “Todos os dias” vale para a semana inteira. Preencha **Data** "
                    "(DD/MM/AAAA) para uma troca pontual: a linha vale só naquele dia e o dia da semana é ignorado.")
@@ -1224,6 +1358,7 @@ with st.container(border=True):
     _cq1.markdown("##### 📡 Quadro de operação (compartilhado)")
     _cq2.toggle("🔔 Som do quadro", value=True, key="som_quadro", help="Sinal sonoro para alerta novo de outra pessoa e para os avisos de 5 min e 1 min do fim do alerta.")
     st.fragment(run_every=5)(_quadro_fragmento)()
+    _quadro_ponto_expander()
     _quadro_escala_editor()
     _quadro_historico_expander()
 

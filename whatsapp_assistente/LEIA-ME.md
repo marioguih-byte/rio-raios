@@ -45,7 +45,9 @@ Em cada linha dos boletins há **📝 Registrar no site**: com a aba *Histórico
 
 ## Quadro de operação compartilhado
 No topo do app, visível para todos os usuários conectados (atualiza a cada 5 s):
-- **De plantão agora**, pela escala (horário de Brasília; turnos que viram a noite; linhas com **Data** valem só naquele dia = troca pontual).
+- **🟢 Online agora**: quem está com o site aberto (você e os outros), com aviso quando alguém entra ou sai do site.
+- **👥 De plantão agora**: a **entrada** é registrada sozinha quando a pessoa abre o site com o seu nome; a **saída**, ao apertar **🚪 Saindo do Turno**. Depois de sair, o turno não reabre sozinho por 1 h (há o botão **🟢 Voltar ao turno**); turnos esquecidos fecham sozinhos após 16 h. **🕒 Registro de turnos** guarda entrada, saída e duração, com CSV.
+- A **escala prevista** (horário de Brasília; turnos que viram a noite; linhas com **Data** = troca pontual) aparece só como referência: “Previsto na escala agora”.
 - **Alertas emitidos** por qualquer meteorologista: unidade, quem emitiu, horário, via (WhatsApp / Site / Copiado), validade e contagem regressiva. Botões **➕ 30 min** (renovar) e **✖ Tirar** (remover do quadro) para qualquer usuário.
 - Entra no quadro ao clicar em *Preparar no WhatsApp*, *Registrar no site* ou *Copiar*; **some** ao finalizar (alerta verde), excluir, tirar ou vencer.
 - **Avisos com mensagem e sinal sonoro** (uma vez por alerta em cada sessão): alerta novo emitido por outra pessoa, faltando **5 min** e faltando **1 min** (sinal mais urgente). Liga/desliga em *🔔 Som do quadro*.
