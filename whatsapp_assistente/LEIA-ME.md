@@ -74,3 +74,7 @@ Todos NASA GIBS · GOES-East: Infravermelho, GeoColor e Massa de ar; um por vez.
 ## Alertas ativos no painel lateral
 
 Os alertas emitidos por qualquer meteorologista aparecem na aba **📡 Ativos** do painel "Alertas e riscos" (lateral do mapa) e também no painel de alertas ao lado do mapa, com quem emitiu, a via, o horário, a validade e a contagem regressiva. O painel ocupa a altura do mapa e rola para cima e para baixo. **✖ Tirar** remove o alerta do quadro. O "Quadro de operação" mantém quem está online, o histórico e os avisos (mensagem + som) de 5 min e 1 min.
+
+## Quem encerra o alerta é você
+
+Os alertas amarelo/vermelho **não terminam sozinhos**: nem quando os raios se afastam, nem quando a validade acaba. Não há mais alerta verde automático nem nova notificação por vencimento. O alerta sai da lista só quando você usa **🟢 Finalizar alerta**, **🟢 Emitir alerta verde**, **✖ Tirar** (aba Ativos) ou **✕ Excluir**. A validade (1 h, 1 h 30 ou 2 h) continua valendo para o horário enviado ao WhatsApp e ao site; passado o prazo, o card mostra "prazo vencido: segue ativo até você encerrar". Os avisos de 5 min e 1 min antes do prazo continuam.

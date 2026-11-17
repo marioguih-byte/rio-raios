@@ -767,7 +767,7 @@
         '<div class="al-tit" data-acao="ver">' + (verm ? "🔴" : "🟡") + " " + esc(nomeCurtoUnidade(i.estacao)) + '</div>' +
         '<div class="al-sub" style="color:' + cor + ';">Alerta ' + (verm ? "vermelho" : "amarelo") + '</div>' +
         '<div class="al-sub">Emitido por <b>' + esc(i.quem || "(sem nome)") + '</b> às ' + esc(i.emitido_hm) + (i.vias ? " (" + esc(i.vias) + ")" : "") + '</div>' +
-        '<div class="al-sub">Válido até <b>' + esc(i.expira_hm) + '</b> · faltam <span class="al-resta" data-k="' + k + '"></span></div>' +
+        '<div class="al-sub">Válido até <b>' + esc(i.expira_hm) + '</b> · <span class="al-resta" data-k="' + k + '"></span></div>' +
         '<div class="al-acoes"><button data-acao="ver">📍 Ver no mapa</button><button data-acao="tirar_quadro" title="Remove do quadro (alerta encerrado)">✖ Tirar</button></div></div>';
     }).join("");
     tickAtivos();
@@ -777,7 +777,7 @@
     Array.prototype.forEach.call(document.querySelectorAll("#al_corpo_ativos .al-resta"), function (sp) {
       var i = quadroItens[parseInt(sp.getAttribute("data-k"), 10)]; if (!i) return;
       var resta = (i.fimLocal - agora) / 1000;
-      sp.textContent = fmtResta(resta);
+      sp.textContent = resta > 0 ? "faltam " + fmtResta(resta) : "⏰ prazo vencido: segue ativo até você encerrar";
       sp.style.color = resta <= 300 ? "#ff8a80" : "";
     });
   }

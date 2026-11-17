@@ -822,14 +822,9 @@ def _quadro_renovar(estacao, minutos=RENOVAR_QUADRO_MIN):
             _quadro_gravar(q)
 
 def _quadro_listar():
-    q, agora = _quadro(), time.time()
+    """Alertas ativos do quadro. NÃO vencem sozinhos: ficam até o meteorologista encerrar (verde, "Tirar" ou excluir)."""
+    q = _quadro()
     with q["lock"]:
-        vencidos = [k for k, v in q["emitidos"].items() if v.get("expira_ts", 0) <= agora]
-        for k in vencidos:
-            v = q["emitidos"].pop(k)
-            _quadro_log(q, "vencido", k, v.get("nivel", ""), v.get("meteorologista", ""))
-        if vencidos:
-            _quadro_gravar(q)
         return sorted((dict(v) for v in q["emitidos"].values()), key=lambda v: v.get("expira_ts", 0))
 
 def _emitir_alerta_evento(alerta_id, minutos, via):
@@ -1469,38 +1464,9 @@ def _renderizar_mapa_ao_vivo():
     df_status = calcular_status_estacoes(df_stations, raios_alerta, encerrados=_encerrados_verde(), km_encerrados=_km_encerrados_verde())
 
     # ---- Alerta verde ----
-    # Só quando o GLM foi lido com sucesso agora (sem dados não dá pra dizer que não há raios).
+    # SÓ MANUAL: o alerta continua ativo mesmo que a unidade saia do alerta (os raios se afastem ou parem);
+    # quem encerra é o meteorologista, em "Finalizar alerta" / "Emitir alerta verde" / "Tirar".
     notificacoes_verde = []
-    if erro is None:
-        agora_utc = datetime.now(timezone.utc)
-        for _, est in df_status.iterrows():
-            chave_v = est["estacao"]
-            sv = st.session_state.verde_estado.setdefault(chave_v, {"vermelho_ativo": False, "ultimo_raio": None})
-            if est["nivel_chave"] == "vermelho":
-                sv["vermelho_ativo"] = True
-            if not sv["vermelho_ativo"]:
-                continue
-            ultimo = ultimo_raio_ate_km(raios_df, float(est["lat"]), float(est["lon"]), VERDE_RAIO_KM)
-            if ultimo is not None and (sv["ultimo_raio"] is None or ultimo > sv["ultimo_raio"]):
-                sv["ultimo_raio"] = ultimo
-            if sv["ultimo_raio"] is None:
-                continue
-            # o último ponto some do mapa depois de `raios_minutos` min; a partir daí, espera mais VERDE_MINUTOS_SEM_RAIO
-            if (agora_utc - sv["ultimo_raio"]) >= timedelta(minutes=raios_minutos + VERDE_MINUTOS_SEM_RAIO):
-                agora_ts_v = time.time()
-                texto_v = montar_mensagem_alerta_verde(est["nome"], meteorologista)
-                st.session_state.alertas_raio_ativos.insert(0, {
-                    "id": f"{chave_v}_verde_{agora_ts_v}", "texto": texto_v, "estacao": chave_v,
-                    "nivel": "verde", "dist_km": None, "expira": agora_ts_v + 3600, "quem_recebeu": "",
-                })
-                notificacoes_verde.append(montar_texto_copia({"texto": texto_v, "nivel": "verde", "quem_recebeu": ""}))  # no pop-up já com a linha "Quem Recebeu o Alerta:"
-                sv["vermelho_ativo"], sv["ultimo_raio"] = False, None
-                reg = st.session_state.alertas_unidade.setdefault(chave_v, {
-                    "nivel": "vermelho", "dist_km": None, "notificado_ts": agora_ts_v, "expira_ts": agora_ts_v + 3600})
-                reg["encerrado_ts"] = agora_ts_v
-                _quadro_remover(estacao=chave_v)   # fim automático do alerta: some do quadro compartilhado
-        if notificacoes_verde:  # o status passa a refletir o encerramento já neste ciclo
-            df_status = calcular_status_estacoes(df_stations, raios_alerta, encerrados=_encerrados_verde(), km_encerrados=_km_encerrados_verde())
     st.session_state["_fragment_df_status"] = df_status
 
     estacoes_novas = []
@@ -1530,8 +1496,7 @@ def _renderizar_mapa_ao_vivo():
                 deve_notificar = True
             elif nivel_atual == "vermelho" and existente["nivel"] == "amarelo":
                 deve_notificar = True
-            elif agora_ts >= existente["expira_ts"]:
-                deve_notificar = True
+            # (sem renotificar por vencimento: o alerta só termina quando o meteorologista encerra)
 
             if deve_notificar:
                 st.session_state.alertas_unidade[chave_estacao] = {
@@ -1556,7 +1521,8 @@ def _renderizar_mapa_ao_vivo():
         st.session_state.dialog_raio_so_verde = not notificacoes_desta_rodada   # só alerta(s) verde(s) nesta rodada
         st.session_state.dialog_raio_pendente = True
 
-    st.session_state.alertas_raio_ativos = [a for a in st.session_state.alertas_raio_ativos if a["expira"] > time.time()]
+    st.session_state.alertas_raio_ativos = [a for a in st.session_state.alertas_raio_ativos
+                                            if a.get("nivel") != "verde" or a["expira"] > time.time()]
 
     ultima_att = st.session_state.get("ultima_atualizacao_raios")
     if ultima_att is not None:
@@ -1690,8 +1656,9 @@ def _painel_alertas_ativos():
                 f"<div style='font-weight:700'>{emoji} {nome}</div>"
                 f"<div style='color:{cor};font-size:13px'>Alerta {'vermelho' if verm else 'amarelo'}</div>"
                 f"<div style='font-size:13px;margin-top:2px'>Emitido por <b>{quem}</b> às {_fmt_hm(it['emitido_ts'])}" + (f" ({vias})" if vias else "") + "</div>"
-                f"<div style='font-size:13px'>Válido até <b>{_fmt_hm(it['expira_ts'])}</b> · faltam "
-                f"<b style='color:{corcont}'>{resta // 60:02d}:{resta % 60:02d}</b></div></div>", unsafe_allow_html=True)
+                f"<div style='font-size:13px'>Válido até <b>{_fmt_hm(it['expira_ts'])}</b> · "
+                + (f"faltam <b style='color:{corcont}'>{resta // 60:02d}:{resta % 60:02d}</b>" if resta > 0
+                   else "<b style='color:#ff8a80'>⏰ prazo vencido: segue ativo até você encerrar</b>") + "</div></div>", unsafe_allow_html=True)
             if st.button("✖ Tirar", key=f"ativo_tirar_{it['estacao']}", help="Remove do quadro (alerta encerrado)"):
                 _quadro_remover(estacao=it["estacao"], motivo="removido do quadro")
                 _rerun_fragmento()
