@@ -785,9 +785,9 @@
     return pre.textContent;
   }
   // Avisa o servidor: o alerta passa a durar a duração escolhida a partir de agora.
-  function registrarValidade(card) {
-    if (card.getAttribute("data-nivel") === "verde") return;
-    enviarEvento({ tipo: "validade", id: card.getAttribute("data-id"), minutos: duracaoDoCard(card) });
+  function registrarValidade(card, via) {
+    // "emitir": o servidor ajusta a validade e publica o alerta no quadro compartilhado (verde = tira o alerta do quadro).
+    enviarEvento({ tipo: "emitir", id: card.getAttribute("data-id"), minutos: duracaoDoCard(card), via: via || "" });
   }
   function atualizarTextoCard(input) {
     var card = input.closest(".al-card"); if (!card) return;
@@ -812,7 +812,7 @@
       if (confirmou) { botao.textContent = "✔ Enviado ao WhatsApp — confira lá e dê Enter"; }
       else { copiarFallback(texto); botao.textContent = "Script não detectado — texto copiado (Ctrl+V)"; }
       setTimeout(function () { botao.textContent = rotulo; }, 4000);
-      registrarValidade(card);
+      registrarValidade(card, "WhatsApp");
     }, 1200);
   }
   function registrarNoSite(card, botao) {
@@ -829,7 +829,7 @@
       window.removeEventListener("message", ack);
       botao.textContent = confirmou ? "✔ Enviado — confira o formulário na aba do site e salve" : "Script não detectado (atualize o Tampermonkey)";
       setTimeout(function () { botao.textContent = rotulo; }, 4000);
-      if (confirmou) registrarValidade(card);
+      if (confirmou) registrarValidade(card, "Site");
     }, 1200);
   }
   function ligarCampoQuem(container) {
@@ -885,7 +885,7 @@
       if (acao === "limpar") { enviarEvento({ tipo: "limpar" }); }
       else if (acao === "finalizar") { enviarEvento({ tipo: "finalizar", id: id }); }
       else if (acao === "excluir") { enviarEvento({ tipo: "excluir", id: id }); }
-      else if (acao === "copiar") { copiarTexto(textoAtualizado(card), alvo); registrarValidade(card); }
+      else if (acao === "copiar") { copiarTexto(textoAtualizado(card), alvo); registrarValidade(card, "Copiado"); }
       else if (acao === "preparar") { prepararNoWhatsApp(card, alvo); }
       else if (acao === "registrar") { registrarNoSite(card, alvo); }
       else if (acao === "antecipar") { enviarEvento({ tipo: "antecipar", id: id }); }
@@ -899,7 +899,7 @@
       var card = alvo.closest(".al-card"), id = card && card.getAttribute("data-id");
       if (acao === "finalizar") { enviarEvento({ tipo: "finalizar", id: id }); }
       else if (acao === "excluir") { enviarEvento({ tipo: "excluir", id: id }); }
-      else if (acao === "copiar") { copiarTexto(textoAtualizado(card), alvo); registrarValidade(card); }
+      else if (acao === "copiar") { copiarTexto(textoAtualizado(card), alvo); registrarValidade(card, "Copiado"); }
       else if (acao === "preparar") { prepararNoWhatsApp(card, alvo); }
       else if (acao === "registrar") { registrarNoSite(card, alvo); }
       else if (acao === "antecipar") { enviarEvento({ tipo: "antecipar", id: id }); }
@@ -1031,31 +1031,9 @@
       return camada;
     }
 
-    // Outros produtos GOES-East do NASA GIBS: GeoColor e Massa de ar. Mesmo serviço (WMTS) e mesmo atraso do GIBS
-    // acima; ficam desligados por padrão. Se a matriz de tiles escolhida não responder, tenta a vizinha (6 <-> 7).
-    var GIBS_EXTRAS = [
-      { id: "GOES-East_ABI_GeoColor", rotulo: "🛰️ GOES-East GeoColor · NASA GIBS", nivel: 7 },
-      { id: "GOES-East_ABI_Air_Mass", rotulo: "🛰️ GOES-East Massa de ar · NASA GIBS", nivel: 6 },
-    ];
-    function urlGibs(id, nivel) {
-      return "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/" + id + "/default/default/GoogleMapsCompatible_Level" + nivel + "/{z}/{y}/{x}.png";
-    }
-    var gibsExtras = GIBS_EXTRAS.map(function (g) {
-      var camada = robustecer(L.tileLayer(urlGibs(g.id, g.nivel), opcoesTiles({
-        opacity: 0.6, zIndex: 10, maxNativeZoom: g.nivel, maxZoom: 11, attribution: ATRIB_GIBS
-      })));
-      camada._aoFalharMuito = function () {
-        var outro = g.nivel === 7 ? 6 : 7;
-        camada.options.maxNativeZoom = outro;
-        camada.setUrl(urlGibs(g.id, outro));
-      };
-      return camada;
-    });
-
     var goesInfo = {};
     var overlaysGoes = {};
     overlaysGoes[ROTULO_GIBS] = gibsWmts;
-    GIBS_EXTRAS.forEach(function (g, i) { overlaysGoes[g.rotulo] = gibsExtras[i]; });
     fundoOSM.addTo(map);
     gibsWmts.addTo(map);                                  // GOES-East (NASA GIBS) ligado por padrão
     PRODUTOS_GOES.forEach(function (p) {
@@ -1068,7 +1046,7 @@
       var el = document.getElementById("goes-status");
       var ativo = PRODUTOS_GOES.filter(function (p) { return map.hasLayer(goesInfo[p.id].camada); })[0];
       if (!ativo) {
-        if (map.hasLayer(gibsAtiva) || gibsExtras.some(function (c) { return map.hasLayer(c); })) { el.style.display = "block"; el.textContent = "🛰️ GOES-East · NASA GIBS (imagem com ~30 min de atraso)"; }
+        if (map.hasLayer(gibsAtiva)) { el.style.display = "block"; el.textContent = "🛰️ GOES-East · NASA GIBS (imagem com ~30 min de atraso)"; }
         else el.style.display = "none";
         return;
       }
@@ -1122,10 +1100,7 @@
     PRODUTOS_GOES.forEach(function (p) { if (map.hasLayer(goesInfo[p.id].camada)) atualizarGOES(p); });
     // a cada 5 min o SSEC procura imagem nova; o GIBS atualiza a cada 10 min, então os tiles são recarregados nesse ritmo
     setInterval(function () { PRODUTOS_GOES.forEach(function (p) { if (map.hasLayer(goesInfo[p.id].camada)) atualizarGOES(p); }); }, 300000);
-    setInterval(function () {
-      if (map.hasLayer(gibsAtiva)) gibsAtiva.redraw();
-      gibsExtras.forEach(function (c) { if (map.hasLayer(c)) c.redraw(); });
-    }, 600000);
+    setInterval(function () { if (map.hasLayer(gibsAtiva)) gibsAtiva.redraw(); }, 600000);
     setInterval(atualizarPillGOES, 30000);
 
     var bb = { lat_min: -34.0, lat_max: 5.5, lon_min: -74.5, lon_max: -32.0 };

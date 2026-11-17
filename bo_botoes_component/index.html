@@ -1,0 +1,56 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+  html, body { margin:0; padding:0; background:transparent; }
+  .l { display:flex; gap:8px; flex-wrap:wrap; }
+  button { cursor:pointer; border-radius:8px; border:1px solid #25d366; background:#25d366; color:#06210f; padding:7px 14px; font:600 14px 'Segoe UI', Arial, sans-serif; }
+  button:hover { filter:brightness(1.1); }
+  button.site { border-color:#1d70b8; background:#1d70b8; color:#fff; }
+</style></head><body>
+<div class="l"><button id="w">🤖 Preparar no WhatsApp</button><button id="s" class="site">📝 Registrar no site</button></div>
+<script>
+(function () {
+  function enviar(type, data) { window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: type }, data), "*"); }
+  var A = { estacao: "", texto: "", id: "", minutos: 60, nivel: "vermelho" }, cont = 0;
+  function partes(ms) {
+    var f = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit",
+                                               hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(ms));
+    var o = {}; f.forEach(function (p) { o[p.type] = p.value; });
+    return { data: o.day + "/" + o.month + "/" + o.year, hora: o.hour + ":" + o.minute };
+  }
+  function atual(t) {
+    var a = partes(Date.now()), fim = partes(Date.now() + A.minutos * 60000);
+    return t.replace(/\d{2}\/\d{2}\/\d{4} - \d{2}:\d{2}/, a.data + " - " + a.hora).replace(/Válido até as \d{2}:\d{2}/, "Válido até as " + fim.hora);
+  }
+  function copiar(t) {
+    var x = document.createElement("textarea"); x.value = t; x.style.cssText = "position:fixed;opacity:0";
+    document.body.appendChild(x); x.select(); try { document.execCommand("copy"); } catch (e) {} document.body.removeChild(x);
+  }
+  function acao(btn, rotulo, msg, via, okTxt, falhaTxt, fallbackCopia) {
+    var confirmou = false;
+    function ack(ev) { if (ev.data && ev.data.fonte === "rio-raios-ack") confirmou = true; }
+    window.addEventListener("message", ack);
+    var texto = atual(A.texto);
+    try { (window.top || window.parent).postMessage(Object.assign({ fonte: "rio-raios", id: A.id, estacao: A.estacao }, msg(texto)), "*"); } catch (e) {}
+    setTimeout(function () {
+      window.removeEventListener("message", ack);
+      if (confirmou) { btn.textContent = okTxt; }
+      else { if (fallbackCopia) copiar(texto); btn.textContent = falhaTxt; }
+      enviar("streamlit:setComponentValue", { value: { tipo: "emitir", id: A.id, via: via, minutos: A.minutos, nonce: Date.now() + "-" + (++cont) }, dataType: "json" });
+      setTimeout(function () { btn.textContent = rotulo; }, 4000);
+    }, 1200);
+  }
+  var bw = document.getElementById("w"), bs = document.getElementById("s");
+  bw.addEventListener("click", function () {
+    acao(bw, "🤖 Preparar no WhatsApp", function (t) { return { tipo: "preparar", texto: t }; }, "WhatsApp",
+         "✔ Enviado ao WhatsApp - confira la e de Enter", "Script nao detectado - texto copiado (Ctrl+V)", true);
+  });
+  bs.addEventListener("click", function () {
+    acao(bs, "📝 Registrar no site", function () { return { tipo: "registrar", nivel: A.nivel, minutos: A.minutos }; }, "Site",
+         "✔ Enviado - confira o formulario na aba do site", "Script nao detectado (atualize o Tampermonkey)", false);
+  });
+  window.addEventListener("message", function (ev) {
+    if (ev.data && ev.data.type === "streamlit:render" && ev.data.args) { A = Object.assign(A, ev.data.args); }
+  });
+  enviar("streamlit:componentReady", { apiVersion: 1 });
+  enviar("streamlit:setFrameHeight", { height: 44 });
+})();
+</script></body></html>

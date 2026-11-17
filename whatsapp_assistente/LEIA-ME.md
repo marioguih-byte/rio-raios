@@ -42,3 +42,14 @@ Botão **📝 Registrar no site** (painel do alerta e card do mapa). Com a aba *
 
 ## Boletins no site (v1.9)
 Em cada linha dos boletins há **📝 Registrar no site**: com a aba *Histórico de Boletins* (`/newsletter`) aberta, o script preenche Unidade, Status (qualquer 🔴 = Vermelho; senão qualquer 🟡 = Amarelo; senão Verde), Data e hora (agora, Brasília), Título (`<unidade> - Boletim de previsão do tempo`) e Texto (a mensagem sem a primeira linha). O Resumo fica vazio. Você confere e clica em *Adicionar boletim*.
+
+## Quadro de operação compartilhado
+No topo do app, visível para todos os usuários conectados (atualiza a cada 5 s):
+- **De plantão agora**, pela escala (horário de Brasília; turnos que viram a noite; linhas com **Data** valem só naquele dia = troca pontual).
+- **Alertas emitidos** por qualquer meteorologista: unidade, quem emitiu, horário, via (WhatsApp / Site / Copiado), validade e contagem regressiva. Botões **➕ 30 min** (renovar) e **✖ Tirar** (remover do quadro) para qualquer usuário.
+- Entra no quadro ao clicar em *Preparar no WhatsApp*, *Registrar no site* ou *Copiar*; **some** ao finalizar (alerta verde), excluir, tirar ou vencer.
+- **Avisos com mensagem e sinal sonoro** (uma vez por alerta em cada sessão): alerta novo emitido por outra pessoa, faltando **5 min** e faltando **1 min** (sinal mais urgente). Liga/desliga em *🔔 Som do quadro*.
+- **Escala dos meteorologistas** editável por todos, com agenda da semana e trocas pontuais.
+- **Histórico de alertas** compartilhado (últimos 500 registros: emitido, renovado, finalizado, vencido, removido, escala atualizada) com download em CSV.
+
+Os dados ficam na memória do servidor e num arquivo temporário (sobrevivem a reinícios simples, não a um novo deploy). Para fixar a escala no GitHub, crie `data/escala.json`: `[{"nome":"Fulano","dia":"Todos os dias","data":"","inicio":"08:00","fim":"17:00"}]`.

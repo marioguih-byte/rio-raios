@@ -52,6 +52,9 @@ _APP_DIR_COMPONENTE = os.path.dirname(os.path.abspath(__file__))
 _mapa_raios_component = components.declare_component(
     "bo_mapa_raios", path=os.path.join(_APP_DIR_COMPONENTE, "bo_mapa_component")
 )
+_botoes_envio = components.declare_component(
+    "bo_botoes_envio", path=os.path.join(_APP_DIR_COMPONENTE, "bo_botoes_component")
+)
 
 
 # ======================================================================
@@ -652,6 +655,7 @@ def _finalizar_alerta_unidade(chave_estacao):
         "nivel": "vermelho", "dist_km": None, "notificado_ts": agora_ts, "expira_ts": agora_ts + 3600})
     reg["encerrado_ts"] = agora_ts
     reg["encerrado_km"] = 50   # finalizado à mão: raios até 50 km anteriores a agora deixam de contar
+    _quadro_remover(estacao=chave_estacao)   # some do quadro compartilhado
     _salvar_estado()
 
 def _antecipar_para_vermelho(alerta):
@@ -690,6 +694,337 @@ def _definir_validade(alerta_id, minutos):
             reg["expira_ts"] = agora_ts + minutos * 60
         _salvar_estado()
         return
+
+# ======================================================================
+# QUADRO COMPARTILHADO (todos os meteorologistas que abrirem o app veem o mesmo)
+# ======================================================================
+# Fica na memória do servidor (st.cache_resource = um só para todas as sessões) e é gravado em arquivo a cada
+# mudança, então sobrevive a um reinício simples do app. Contém:
+#   - "emitidos": alertas amarelo/vermelho já enviados (WhatsApp / site / copiados), um por unidade; somem quando o
+#     alerta é finalizado (verde), excluído, removido do quadro ou vence;
+#   - "escala": escala dos meteorologistas (dia da semana + horário, ou data específica para trocas pontuais);
+#   - "historico": registro de tudo que aconteceu (emitido, renovado, finalizado, vencido...), com exportação em CSV.
+import tempfile
+_ARQ_QUADRO = os.path.join(tempfile.gettempdir(), "rio_raios_quadro.json")
+_ARQ_ESCALA_PADRAO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "escala.json")
+DIAS_SEMANA = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
+AVISO_FIM_ALERTA_SEG = 5 * 60
+AVISO_ULTIMO_MIN_SEG = 60
+RENOVAR_QUADRO_MIN = 30
+HISTORICO_MAX = 500
+
+@st.cache_resource
+def _quadro():
+    q = {"lock": threading.RLock(), "emitidos": {}, "escala": [], "historico": []}
+    try:
+        with open(_ARQ_ESCALA_PADRAO, encoding="utf-8") as f:   # escala "de fábrica" (opcional, vinda do GitHub)
+            q["escala"] = json.load(f)
+    except Exception:
+        pass
+    try:
+        with open(_ARQ_QUADRO, encoding="utf-8") as f:
+            d = json.load(f)
+        q["emitidos"] = d.get("emitidos", {})
+        q["historico"] = d.get("historico", [])
+        if d.get("escala") is not None:
+            q["escala"] = d["escala"]
+    except Exception:
+        pass
+    return q
+
+def _quadro_gravar(q):
+    try:
+        with open(_ARQ_QUADRO, "w", encoding="utf-8") as f:
+            json.dump({"emitidos": q["emitidos"], "escala": q["escala"], "historico": q["historico"]}, f, ensure_ascii=False)
+    except Exception:
+        pass   # gravar nunca pode derrubar o app
+
+def _quadro_log(q, evento, estacao, nivel="", quem="", via=""):
+    """Acrescenta uma linha ao histórico (chamar com o lock do quadro já tomado)."""
+    q["historico"].append({"ts": time.time(), "evento": evento, "estacao": estacao, "nivel": nivel, "meteorologista": quem, "via": via})
+    if len(q["historico"]) > HISTORICO_MAX:
+        del q["historico"][:len(q["historico"]) - HISTORICO_MAX]
+
+def _nome_atual():
+    return str(st.session_state.get("meteorologista_nome", "")).strip()
+
+def _quadro_emitir(alerta, via, minutos):
+    """Publica (ou atualiza) o alerta da unidade no quadro. Alerta verde = fim do alerta: tira a unidade do quadro."""
+    q, agora, est = _quadro(), time.time(), alerta.get("estacao")
+    with q["lock"]:
+        if alerta.get("nivel") == "verde":
+            if q["emitidos"].pop(est, None) is not None:
+                _quadro_log(q, "finalizado", est, "verde", _nome_atual(), via)
+        else:
+            antigo = q["emitidos"].get(est) or {}
+            mesmo = antigo.get("id") == alerta.get("id")
+            vias = list(antigo.get("vias", [])) if mesmo else []
+            if via and via not in vias:
+                vias.append(via)
+            q["emitidos"][est] = {
+                "id": alerta.get("id"), "estacao": est, "nivel": alerta.get("nivel"), "meteorologista": _nome_atual(),
+                "emitido_ts": antigo.get("emitido_ts", agora) if mesmo else agora,
+                "expira_ts": agora + int(minutos or 60) * 60, "vias": vias,
+            }
+            _quadro_log(q, "renovado" if mesmo else "emitido", est, alerta.get("nivel"), _nome_atual(), via)
+        _quadro_gravar(q)
+
+def _quadro_remover(estacao=None, alerta_id=None, motivo="finalizado"):
+    q = _quadro()
+    with q["lock"]:
+        alvos = [k for k, v in q["emitidos"].items() if k == estacao or (alerta_id is not None and v.get("id") == alerta_id)]
+        for k in alvos:
+            v = q["emitidos"].pop(k)
+            _quadro_log(q, motivo, k, v.get("nivel", ""), _nome_atual())
+        if alvos:
+            _quadro_gravar(q)
+
+def _quadro_renovar(estacao, minutos=RENOVAR_QUADRO_MIN):
+    """Estende a validade de um alerta do quadro (qualquer meteorologista pode fazer)."""
+    q = _quadro()
+    with q["lock"]:
+        v = q["emitidos"].get(estacao)
+        if v:
+            v["expira_ts"] = max(v["expira_ts"], time.time()) + minutos * 60
+            _quadro_log(q, f"renovado +{minutos} min", estacao, v.get("nivel", ""), _nome_atual(), "Quadro")
+            _quadro_gravar(q)
+
+def _quadro_listar():
+    q, agora = _quadro(), time.time()
+    with q["lock"]:
+        vencidos = [k for k, v in q["emitidos"].items() if v.get("expira_ts", 0) <= agora]
+        for k in vencidos:
+            v = q["emitidos"].pop(k)
+            _quadro_log(q, "vencido", k, v.get("nivel", ""), v.get("meteorologista", ""))
+        if vencidos:
+            _quadro_gravar(q)
+        return sorted((dict(v) for v in q["emitidos"].values()), key=lambda v: v.get("expira_ts", 0))
+
+def _emitir_alerta_evento(alerta_id, minutos, via):
+    """Chamado quando alguém clica em copiar / preparar no WhatsApp / registrar no site."""
+    alvo = next((x for x in st.session_state.alertas_raio_ativos if x.get("id") == alerta_id), None)
+    if alvo is None:
+        return
+    try:
+        minutos = int(minutos)
+    except (TypeError, ValueError):
+        minutos = alvo.get("duracao_min", 60)
+    if alvo.get("nivel") != "verde":
+        _definir_validade(alerta_id, minutos)
+    else:
+        minutos = 60
+    _quadro_emitir(alvo, via, minutos)
+
+def _agora_brasilia():
+    return datetime.now(timezone.utc) - timedelta(hours=3)
+
+def _hm_para_min(t):
+    m = re.match(r"^\s*(\d{1,2}):(\d{2})\s*$", str(t or ""))
+    if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
+        return None
+    return int(m.group(1)) * 60 + int(m.group(2))
+
+def _data_valida(t):
+    try:
+        return datetime.strptime(str(t).strip(), "%d/%m/%Y").strftime("%d/%m/%Y")
+    except Exception:
+        return None
+
+def _plantao_agora(escala):
+    """Nomes de quem está de plantão agora (horário de Brasília). Linha com DATA vale só naquele dia (troca pontual);
+    sem data vale pelo dia da semana (ou todos os dias). Turnos que viram a noite (ex.: 22:00–06:00) valem até o fim
+    no dia seguinte."""
+    agora = _agora_brasilia()
+    dia, min_agora = DIAS_SEMANA[agora.weekday()], agora.hour * 60 + agora.minute
+    ontem = DIAS_SEMANA[(agora.weekday() - 1) % 7]
+    data_hoje, data_ontem = agora.strftime("%d/%m/%Y"), (agora - timedelta(days=1)).strftime("%d/%m/%Y")
+    nomes = []
+    for e in escala:
+        ini, fim = _hm_para_min(e.get("inicio")), _hm_para_min(e.get("fim"))
+        nome = str(e.get("nome", "")).strip()
+        if ini is None or fim is None or not nome:
+            continue
+        if e.get("data"):
+            hoje_ok, ontem_ok = e["data"] == data_hoje, e["data"] == data_ontem
+        else:
+            d = e.get("dia", "Todos os dias")
+            hoje_ok, ontem_ok = d in ("Todos os dias", dia), d in ("Todos os dias", ontem)
+        if ini < fim:
+            ativo = hoje_ok and ini <= min_agora < fim
+        elif ini > fim:   # vira a noite
+            ativo = (hoje_ok and min_agora >= ini) or (ontem_ok and min_agora < fim)
+        else:             # início == fim: dia inteiro
+            ativo = hoje_ok
+        if ativo and nome not in nomes:
+            nomes.append(nome)
+    return nomes
+
+_HTML_BIP_5MIN = """<!doctype html><html><body><script>
+  // token: __T__   modo: __M__
+  (function () {
+    try {
+      var C = window.AudioContext || window.webkitAudioContext; if (!C) return;
+      var ctx = new C(); if (ctx.state === "suspended") ctx.resume();
+      var tempos = "__M__" === "urgente" ? [0, 0.3, 0.6, 0.9, 1.2, 1.5, 1.8, 2.1] : [0, 0.45, 0.9, 1.6, 2.05, 2.5];
+      tempos.forEach(function (t, i) {
+        var o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = "sine"; o.frequency.value = ("__M__" === "urgente") ? 1320 : (i % 3 === 2 ? 1175 : 880); o.connect(g); g.connect(ctx.destination);
+        var t0 = ctx.currentTime + t; g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.4, t0 + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.25); o.start(t0); o.stop(t0 + 0.3);
+      });
+    } catch (e) {}
+  })();
+</script></body></html>"""
+
+def _rerun_fragmento():
+    try:
+        st.rerun(scope="fragment")
+    except Exception as e:
+        if type(e).__name__ in ("StreamlitInvalidLayoutContextError", "StreamlitAPIException"):
+            st.rerun()
+        else:
+            raise
+
+def _fmt_hm(ts):
+    return (datetime.fromtimestamp(ts, tz=timezone.utc) - timedelta(hours=3)).strftime("%H:%M")
+
+def _quadro_fragmento():
+    """Alertas emitidos por qualquer meteorologista + quem está de plantão. Atualiza sozinho a cada 5 s.
+    Avisos (mensagem + sinal sonoro), uma vez por alerta em cada sessão: alerta novo emitido por outra pessoa,
+    faltando 5 min e faltando 1 min para o fim."""
+    q = _quadro()
+    itens, agora = _quadro_listar(), time.time()
+    plantao = _plantao_agora(q["escala"])
+    st.markdown("**👥 De plantão agora:** " + (", ".join(f"`{n}`" for n in plantao) if plantao else "_ninguém na escala neste horário (edite a escala abaixo)_"))
+    if not itens:
+        st.caption("📡 Nenhum alerta emitido no momento.")
+    meu = _nome_atual().lower()
+    avisados = st.session_state.setdefault("_avisados_quadro", set())
+    primeira = "_quadro_iniciado" not in st.session_state
+    st.session_state["_quadro_iniciado"] = True
+    toques = []   # (modo, mensagem)
+    for it in itens:
+        resta = int(it["expira_ts"] - agora)
+        nome = str(it["estacao"]).split(" - ")[0]
+        emoji = "🔴" if it.get("nivel") == "vermelho" else "🟡"
+        cor = "#ff8a80" if it.get("nivel") == "vermelho" else "#ffd166"
+        quem = it.get("meteorologista") or "(sem nome)"
+        vias = " · ".join(it.get("vias", [])) or "—"
+        fim = "⏰ " if resta <= AVISO_FIM_ALERTA_SEG else ""
+        c1, c2, c3 = st.columns([8, 1.3, 1.3], vertical_alignment="center")
+        c1.markdown(
+            f"<div style='border:1px solid #2a303b;border-left:4px solid {cor};border-radius:8px;padding:6px 10px;margin:4px 0;background:#161a22'>"
+            f"{emoji} <b>{nome}</b> &nbsp;·&nbsp; emitido por <b>{quem}</b> às {_fmt_hm(it['emitido_ts'])} ({vias})"
+            f" &nbsp;·&nbsp; válido até <b>{_fmt_hm(it['expira_ts'])}</b> &nbsp;·&nbsp; {fim}faltam <b>{max(resta, 0) // 60:02d}:{max(resta, 0) % 60:02d}</b></div>",
+            unsafe_allow_html=True)
+        if c2.button(f"➕ {RENOVAR_QUADRO_MIN} min", key=f"qren_{it['estacao']}", help="Estende a validade deste alerta no quadro"):
+            _quadro_renovar(it["estacao"])
+            _rerun_fragmento()
+        if c3.button("✖ Tirar", key=f"qrem_{it['estacao']}", help="Remove do quadro (alerta encerrado)"):
+            _quadro_remover(estacao=it["estacao"], motivo="removido do quadro")
+            _rerun_fragmento()
+        # alerta novo emitido por OUTRA pessoa
+        chave_novo = f"novo:{it['id']}:{int(it['emitido_ts'])}"
+        if chave_novo not in avisados:
+            avisados.add(chave_novo)
+            if not primeira and str(it.get("meteorologista", "")).strip().lower() != meu:
+                toques.append(("normal", f"{emoji} {quem} emitiu alerta {'vermelho' if it.get('nivel') == 'vermelho' else 'amarelo'} para {nome}"))
+        if 0 < resta <= AVISO_FIM_ALERTA_SEG:
+            ch5 = f"5min:{it['id']}:{int(it['expira_ts'])}"
+            if ch5 not in avisados:
+                avisados.add(ch5)
+                toques.append(("normal", f"⏰ Faltam 5 minutos para encerrar o alerta de {nome}"))
+        if 0 < resta <= AVISO_ULTIMO_MIN_SEG:
+            ch1 = f"1min:{it['id']}:{int(it['expira_ts'])}"
+            if ch1 not in avisados:
+                avisados.add(ch1)
+                toques.append(("urgente", f"🚨 Falta 1 minuto para encerrar o alerta de {nome}"))
+    for modo, msg in toques:
+        st.toast(msg, icon="⏰")
+    if toques:
+        st.session_state["_bip_ate"] = agora + 30
+        st.session_state["_bip_token"] = f"{agora:.2f}"
+        st.session_state["_bip_modo"] = "urgente" if any(m == "urgente" for m, _ in toques) else "normal"
+    for it in itens:
+        resta = int(it["expira_ts"] - agora)
+        if 0 < resta <= AVISO_FIM_ALERTA_SEG:
+            st.warning(f"⏰ Faltam {resta // 60:02d}:{resta % 60:02d} para encerrar o alerta de **{str(it['estacao']).split(' - ')[0]}**. "
+                       "Finalize (alerta verde) ou renove a validade se ainda houver risco.")
+    if st.session_state.get("som_quadro", True) and agora < st.session_state.get("_bip_ate", 0):
+        components.html(_HTML_BIP_5MIN.replace("__T__", st.session_state.get("_bip_token", "")).replace("__M__", st.session_state.get("_bip_modo", "normal")), height=0)
+
+def _quadro_historico_df():
+    q = _quadro()
+    with q["lock"]:
+        h = list(q["historico"])
+    linhas = [{"Data": (datetime.fromtimestamp(x["ts"], tz=timezone.utc) - timedelta(hours=3)).strftime("%d/%m/%Y"),
+               "Hora": _fmt_hm(x["ts"]), "Evento": x.get("evento", ""), "Unidade": x.get("estacao", ""),
+               "Nível": x.get("nivel", ""), "Meteorologista": x.get("meteorologista", ""), "Via": x.get("via", "")} for x in reversed(h)]
+    return pd.DataFrame(linhas, columns=["Data", "Hora", "Evento", "Unidade", "Nível", "Meteorologista", "Via"])
+
+def _quadro_escala_editor():
+    q = _quadro()
+    with st.expander("📅 Escala dos meteorologistas (compartilhada)"):
+        st.caption("Qualquer pessoa que use o app vê e pode editar. Horários em Brasília; turnos que viram a noite "
+                   "(ex.: 22:00 → 06:00) são aceitos. “Todos os dias” vale para a semana inteira. Preencha **Data** "
+                   "(DD/MM/AAAA) para uma troca pontual: a linha vale só naquele dia e o dia da semana é ignorado.")
+        base = pd.DataFrame(q["escala"] or [], columns=["nome", "dia", "data", "inicio", "fim"]).fillna("").rename(
+            columns={"nome": "Meteorologista", "dia": "Dia", "data": "Data (opcional)", "inicio": "Início", "fim": "Fim"})
+        with st.form("form_escala", border=False):
+            ed = st.data_editor(
+                base, num_rows="dynamic", use_container_width=True, hide_index=True, key="editor_escala",
+                column_config={
+                    "Meteorologista": st.column_config.TextColumn(required=True),
+                    "Dia": st.column_config.SelectboxColumn(options=["Todos os dias"] + DIAS_SEMANA, default="Todos os dias", required=True),
+                    "Data (opcional)": st.column_config.TextColumn(help="DD/MM/AAAA — troca pontual"),
+                    "Início": st.column_config.TextColumn(help="HH:MM", default="08:00", required=True),
+                    "Fim": st.column_config.TextColumn(help="HH:MM", default="17:00", required=True),
+                })
+            salvar = st.form_submit_button("💾 Salvar escala", type="primary")
+        if salvar:
+            novas, erros = [], []
+            for _, r in ed.iterrows():
+                nome = str(r.get("Meteorologista") or "").strip()
+                if not nome:
+                    continue
+                ini, fim = str(r.get("Início") or "").strip(), str(r.get("Fim") or "").strip()
+                data_txt = str(r.get("Data (opcional)") or "").strip()
+                data = _data_valida(data_txt) if data_txt else ""
+                if _hm_para_min(ini) is None or _hm_para_min(fim) is None or (data_txt and not data):
+                    erros.append(nome)
+                    continue
+                novas.append({"nome": nome, "dia": str(r.get("Dia") or "Todos os dias"), "data": data, "inicio": ini, "fim": fim})
+            if erros:
+                st.error("Horário ou data inválidos (use HH:MM e DD/MM/AAAA) para: " + ", ".join(erros))
+            else:
+                with q["lock"]:
+                    q["escala"] = novas
+                    _quadro_log(q, "escala atualizada", "", "", _nome_atual())
+                    _quadro_gravar(q)
+                st.success("Escala salva para todos.")
+        if q["escala"]:
+            cols = {}
+            for d in DIAS_SEMANA:
+                cols[d] = [f"{e['nome']} {e['inicio']}–{e['fim']}" for e in q["escala"] if not e.get("data") and e.get("dia") in (d, "Todos os dias")]
+            alt = max((len(v) for v in cols.values()), default=0)
+            st.markdown("**Agenda da semana**")
+            st.dataframe(pd.DataFrame({d: v + [""] * (alt - len(v)) for d, v in cols.items()}), hide_index=True, use_container_width=True)
+            pontuais = sorted((e for e in q["escala"] if e.get("data")), key=lambda e: (e["data"][6:], e["data"][3:5], e["data"][:2], e["inicio"]))
+            if pontuais:
+                st.markdown("**Trocas pontuais**")
+                st.dataframe(pd.DataFrame([{"Data": e["data"], "Meteorologista": e["nome"], "Horário": f"{e['inicio']}–{e['fim']}"} for e in pontuais]),
+                             hide_index=True, use_container_width=True)
+
+def _quadro_historico_expander():
+    with st.expander("🕘 Histórico de alertas (compartilhado)"):
+        df = _quadro_historico_df()
+        if df.empty:
+            st.caption("Ainda sem registros.")
+        else:
+            st.dataframe(df.head(100), hide_index=True, use_container_width=True)
+            st.download_button("⬇️ Baixar histórico (CSV)", df.to_csv(index=False).encode("utf-8-sig"),
+                               file_name="historico_alertas.csv", mime="text/csv")
+        st.caption("Guarda os últimos 500 registros: emitido, renovado, finalizado, vencido, removido do quadro e mudanças na escala.")
 
 # ======================================================================
 # INTERFACE STREAMLIT
@@ -884,6 +1219,14 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
+with st.container(border=True):
+    _cq1, _cq2 = st.columns([5, 1.5], vertical_alignment="center")
+    _cq1.markdown("##### 📡 Quadro de operação (compartilhado)")
+    _cq2.toggle("🔔 Som do quadro", value=True, key="som_quadro", help="Sinal sonoro para alerta novo de outra pessoa e para os avisos de 5 min e 1 min do fim do alerta.")
+    st.fragment(run_every=5)(_quadro_fragmento)()
+    _quadro_escala_editor()
+    _quadro_historico_expander()
+
 # Painel de alertas retrátil: recolhido, o mapa ocupa a largura toda. As colunas continuam as mesmas
 # (só muda a proporção), então o mapa não é recarregado ao abrir/fechar o painel.
 _, _col_toggle = st.columns([3, 1])
@@ -1016,6 +1359,7 @@ def _renderizar_mapa_ao_vivo():
                 reg = st.session_state.alertas_unidade.setdefault(chave_v, {
                     "nivel": "vermelho", "dist_km": None, "notificado_ts": agora_ts_v, "expira_ts": agora_ts_v + 3600})
                 reg["encerrado_ts"] = agora_ts_v
+                _quadro_remover(estacao=chave_v)   # fim automático do alerta: some do quadro compartilhado
         if notificacoes_verde:  # o status passa a refletir o encerramento já neste ciclo
             df_status = calcular_status_estacoes(df_stations, raios_alerta, encerrados=_encerrados_verde(), km_encerrados=_km_encerrados_verde())
     st.session_state["_fragment_df_status"] = df_status
@@ -1163,7 +1507,10 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
                 _antecipar_para_vermelho(alvo)
         elif tipo == "validade":
             _definir_validade(evento.get("id"), evento.get("minutos"))
+        elif tipo == "emitir":
+            _emitir_alerta_evento(evento.get("id"), evento.get("minutos"), evento.get("via"))
         elif tipo == "excluir":
+            _quadro_remover(alerta_id=evento.get("id"), motivo="excluído")
             st.session_state.alertas_raio_ativos = [x for x in st.session_state.alertas_raio_ativos if x.get("id") != evento.get("id")]
         elif tipo == "limpar":
             st.session_state.alertas_raio_ativos = []
@@ -1253,8 +1600,13 @@ with col_lado:
                                                     horizontal=True, key=f"dur_{a['id']}")
                                     if _dur != a.get("duracao_min", 60):
                                         _definir_validade(a["id"], _dur)
-                                botao_preparar_whatsapp(a.get("estacao", ""), montar_texto_copia(a), a.get("id", ""), _dur)
-                                botao_registrar_site(a.get("estacao", ""), a.get("nivel", "vermelho"), _dur)
+                                _ev_b = _botoes_envio(estacao=a.get("estacao", ""), texto=montar_texto_copia(a), id=a.get("id", ""),
+                                                      minutos=_dur, nivel=a.get("nivel", "vermelho"), default=None, key=f"botoes_{a['id']}")
+                                if isinstance(_ev_b, dict) and _ev_b.get("nonce") and _ev_b["nonce"] != st.session_state.get(f"_nonce_botoes_{a['id']}"):
+                                    st.session_state[f"_nonce_botoes_{a['id']}"] = _ev_b["nonce"]
+                                    _emitir_alerta_evento(a["id"], _ev_b.get("minutos"), _ev_b.get("via"))
+                                    _salvar_estado()
+                                    st.rerun()
                                 if a.get("nivel") == "amarelo" and a.get("id") in _finalizaveis:
                                     if st.button("🔴 Antecipar para vermelho", key=f"antecipar_{a['id']}",
                                                  help="Gera um alerta vermelho para esta unidade, sem esperar o raio chegar a 30 km"):
