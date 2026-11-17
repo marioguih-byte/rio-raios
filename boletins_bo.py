@@ -30,7 +30,11 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 # ----------------------------------------------------------------------------
 # CONFIGURAÇÃO
 # ----------------------------------------------------------------------------
-API_URL = "https://api.open-meteo.com/v1/forecast"
+import os as _os
+# Chave da API paga do Open-Meteo (opcional): defina OPEN_METEO_API_KEY (variável de ambiente ou st.secrets). Sem chave usa o gratuito.
+API_KEY = _os.environ.get("OPEN_METEO_API_KEY", "").strip()
+API_URL = "https://customer-api.open-meteo.com/v1/forecast" if API_KEY else "https://api.open-meteo.com/v1/forecast"
+STATUS_DOWNLOAD = {"msg": ""}   # texto de progresso/erro do download, mostrado na tela pelo app
 MODELOS = ["ecmwf_ifs025", "icon_seamless", "gfs_seamless"]
 VARIAVEIS = [
     "temperature_2m", "precipitation", "relative_humidity_2m",
@@ -100,7 +104,21 @@ PONTOS = ["N", "NE", "E", "SE", "S", "SO", "O", "NO"]
 # ----------------------------------------------------------------------------
 # DOWNLOAD E CONSENSO
 # ----------------------------------------------------------------------------
+_CACHE_BAIXAR = {}          # (lat, lon, dias) -> (instante, dados): compartilhado por todos os usuários do app
+_CACHE_BAIXAR_SEG = 30 * 60  # reaproveita o download por 30 min: menos chamadas ao Open-Meteo (evita erro 429)
+
+
 def baixar(lat, lon, dias=DIAS_PREVISAO, tentativas=4):
+    chave = (round(float(lat), 4), round(float(lon), 4), int(dias))
+    guardado = _CACHE_BAIXAR.get(chave)
+    if guardado and time.time() - guardado[0] < _CACHE_BAIXAR_SEG:
+        return guardado[1]
+    dados = _baixar_sem_cache(lat, lon, dias, tentativas)
+    _CACHE_BAIXAR[chave] = (time.time(), dados)
+    return dados
+
+
+def _baixar_sem_cache(lat, lon, dias=DIAS_PREVISAO, tentativas=4):
     params = {
         "latitude": lat, "longitude": lon,
         "hourly": ",".join(VARIAVEIS),
@@ -113,19 +131,29 @@ def baixar(lat, lon, dias=DIAS_PREVISAO, tentativas=4):
         "forecast_days": dias + 1,
         "wind_speed_unit": "kmh",
     }
+    if API_KEY:
+        params["apikey"] = API_KEY
+    ultimo = ""
     for i in range(tentativas):
         try:
-            r = requests.get(API_URL, params=params, timeout=60)
+            r = requests.get(API_URL, params=params, timeout=45)
             if r.status_code == 429:
-                time.sleep(10 * (i + 1))
+                espera = 5 * (i + 1)
+                ultimo = f"Open-Meteo limitou o acesso (HTTP 429: {r.text[:120]})"
+                STATUS_DOWNLOAD["msg"] = f"⚠️ {ultimo}." + (f" Nova tentativa {i + 2}/{tentativas} em {espera}s…" if i < tentativas - 1 else "")
+                if i < tentativas - 1:
+                    time.sleep(espera)
                 continue
             r.raise_for_status()
+            STATUS_DOWNLOAD["msg"] = ""
             return r.json()["hourly"]
         except requests.RequestException as e:
+            ultimo = f"{type(e).__name__}: {e}"
+            STATUS_DOWNLOAD["msg"] = f"⚠️ Falha ao falar com o Open-Meteo ({ultimo[:120]}). Nova tentativa {i + 2}/{tentativas}…"
             if i == tentativas - 1:
-                raise
+                raise RuntimeError(ultimo)
             time.sleep(3 * (i + 1))
-    raise RuntimeError("Falha ao baixar dados do Open-Meteo")
+    raise RuntimeError(ultimo or "Falha ao baixar dados do Open-Meteo")
 
 
 def _arr(v):

@@ -26,6 +26,11 @@ import streamlit.components.v1 as components
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+try:   # chave paga do Open-Meteo (opcional): Settings > Secrets:  OPEN_METEO_API_KEY = "..."
+    if "OPEN_METEO_API_KEY" in st.secrets:
+        os.environ["OPEN_METEO_API_KEY"] = str(st.secrets["OPEN_METEO_API_KEY"])
+except Exception:
+    pass
 import boletins_bo  # script de boletins (WhatsApp), incorporado sem alterações
 
 def _carregar_icone_pagina():
@@ -1747,14 +1752,22 @@ with col_lado:
 # ======================================================================
 def _worker_boletins(estado, unidades, dias):
     total = len(unidades)
+    seguidas = 0
     for i, (nome, (lat, lon)) in enumerate(unidades.items(), 1):
         estado["atual"] = nome
         try:
             estado["resultados"][nome] = boletins_bo.boletim_unidade(nome, lat, lon, dias)
+            seguidas = 0
         except Exception as e:
             estado["erros"].append((nome, str(e)))
+            seguidas += 1
         estado["feitos"] = i
+        if seguidas >= 2 and not estado["resultados"]:
+            # Open-Meteo não está respondendo (ex.: limite 429): não adianta insistir nas outras unidades
+            estado["erros"].append(("Geração interrompida", "O Open-Meteo não respondeu para as primeiras unidades (veja o erro acima). Tente de novo em alguns minutos."))
+            break
         time.sleep(0.3)
+    boletins_bo.STATUS_DOWNLOAD["msg"] = ""
     estado["rodando"] = False
 
 
@@ -1923,6 +1936,8 @@ def _secao_boletins(unidades_base):
     if rodando:
         st.progress(min(estado["feitos"] / max(estado["total"], 1), 1.0),
                     text=f"[{estado['feitos']}/{estado['total']}] {estado['atual']}")
+        if boletins_bo.STATUS_DOWNLOAD.get("msg"):
+            st.warning(boletins_bo.STATUS_DOWNLOAD["msg"])
         return
 
     resultados, erros = estado["resultados"], estado["erros"]

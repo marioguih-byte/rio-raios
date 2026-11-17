@@ -35,7 +35,9 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 # ----------------------------------------------------------------------
 # CONFIGURAÇÃO
 # ----------------------------------------------------------------------
-URL_OPEN_METEO = "https://api.open-meteo.com/v1/forecast"
+import os as _os
+API_KEY = _os.environ.get("OPEN_METEO_API_KEY", "").strip()   # chave paga (opcional)
+URL_OPEN_METEO = "https://customer-api.open-meteo.com/v1/forecast" if API_KEY else "https://api.open-meteo.com/v1/forecast"
 TZ_OPEN_METEO = "America/Sao_Paulo"
 N_DIAS = 7                      # 7 dias a partir de hoje (forecast_days inclui o dia atual)
 EXTENSAO = [-74.5, -33.5, -34.5, 5.8]   # [lon_min, lon_max, lat_min, lat_max]
@@ -191,8 +193,9 @@ def _pontos_consulta(passo):
 # ----------------------------------------------------------------------
 def _sessao_http():
     s = requests.Session()
-    retry = Retry(total=4, backoff_factor=2, status_forcelist=(429, 500, 502, 503, 504),
-                  allowed_methods=("GET",), respect_retry_after_header=True)
+    # Não respeita o Retry-After do 429 (pode ser de minutos/horas e deixava o app "parado" em 0%): tenta pouco e avisa.
+    retry = Retry(total=3, backoff_factor=2, status_forcelist=(500, 502, 503, 504),
+                  allowed_methods=("GET",), respect_retry_after_header=False)
     s.mount("https://", HTTPAdapter(max_retries=retry))
     return s
 
@@ -208,7 +211,12 @@ def _baixar_lote(sessao, lats, lons):
         "precipitation_unit": "mm",
         "temperature_unit": "celsius",
     }
-    r = sessao.get(URL_OPEN_METEO, params=params, timeout=90)
+    if API_KEY:
+        params["apikey"] = API_KEY
+    r = sessao.get(URL_OPEN_METEO, params=params, timeout=60)
+    if r.status_code == 429:
+        raise RuntimeError("Open-Meteo limitou o acesso (HTTP 429: limite de requisições do plano gratuito para o IP do servidor). "
+                           f"Tente de novo em alguns minutos ou use uma chave da API. Resposta: {r.text[:120]}")
     if r.status_code >= 400:
         raise RuntimeError(f"Open-Meteo respondeu HTTP {r.status_code}: {r.text[:160]}")
     dados = r.json()
