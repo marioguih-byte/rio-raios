@@ -1356,7 +1356,7 @@ with st.container(border=True):
     _cq1.markdown("##### 📡 Quadro de operação")
     _cq2.toggle("🔔 Som do quadro", value=True, key="som_quadro", help="Sinal sonoro para alerta novo de outra pessoa e para os avisos de 5 min e 1 min do fim do alerta.")
     st.fragment(run_every=5)(_quadro_fragmento)()
-    _quadro_historico_expander()
+    st.fragment(run_every=5)(_quadro_historico_expander)()   # atualiza sozinho, sem precisar recarregar a página
 
 # Painel de alertas retrátil: recolhido, o mapa ocupa a largura toda. As colunas continuam as mesmas
 # (só muda a proporção), então o mapa não é recarregado ao abrir/fechar o painel.

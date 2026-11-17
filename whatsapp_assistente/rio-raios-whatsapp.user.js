@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RIO Raios → WhatsApp Web (assistente com supervisão)
 // @namespace    rio-raios
-// @version      2.1
+// @version      2.2
 // @description  Recebe o alerta do app RIO Raios, abre o grupo da unidade no WhatsApp Web e deixa a mensagem DIGITADA, e preenche o formulário do site da BlueOcean. Você confere e confirma.
 // @match        https://web.whatsapp.com/*
 // @match        https://*.streamlit.app/*
@@ -75,6 +75,22 @@
   var CHAVE_BOLETIM = "rio_boletim";
   var ehWhatsApp = location.hostname === "web.whatsapp.com";
   var ehSite = /previsoesbrblueocean\.com\.br$/.test(location.hostname);
+
+  // Selo de diagnóstico: aparece uns segundos no canto da página quando o script está rodando.
+  // Se ele NÃO aparece no app / WhatsApp / site, o navegador não está executando o userscript (veja "Allow User Scripts").
+  (function () {
+    function mostrar() {
+      if (!document.body || document.getElementById("rio-selo")) return;
+      var d = document.createElement("div");
+      d.id = "rio-selo";
+      d.textContent = "🤖 RIO Assistente v2.2 ativo (" + (ehWhatsApp ? "WhatsApp" : ehSite ? "site BlueOcean" : "app RIO") + ")";
+      d.style.cssText = "position:fixed;left:12px;bottom:12px;z-index:2147483647;padding:6px 12px;border-radius:8px;background:#075e54;color:#fff;font:600 12px sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.4);transition:opacity .6s;";
+      document.body.appendChild(d);
+      setTimeout(function () { d.style.opacity = "0"; }, 6000);
+      setTimeout(function () { d.remove(); }, 6800);
+    }
+    if (document.body) mostrar(); else document.addEventListener("DOMContentLoaded", mostrar);
+  })();
 
   function norm(t) {
     return String(t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
