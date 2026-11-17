@@ -12,7 +12,7 @@
   .raio-celula-icon { background: transparent !important; border: none !important; }
 
   /* ---------- painel "Alertas e riscos" dentro do mapa (funciona também em tela cheia) ---------- */
-  #painel_alertas { display: none; position: absolute; top: 52px; right: 10px; bottom: 34px; width: 410px; max-width: calc(100% - 20px);
+  #painel_alertas { display: none; position: absolute; top: 48px; right: 10px; bottom: 10px; width: 410px; max-width: calc(100% - 20px);
     z-index: 1150; flex-direction: column; background: #1a1d24; color: #e8eaed; border: 1px solid #2a303b; border-radius: 12px;
     box-shadow: 0 12px 40px rgba(0,0,0,0.6); font: 13px 'Segoe UI', Arial, sans-serif; }
   #painel_alertas.aberto { display: flex; }
@@ -22,7 +22,11 @@
   .al-tabs { display: flex; gap: 4px; padding: 8px 12px 0; border-bottom: 1px solid #2a303b; }
   .al-tab { background: none; border: none; border-bottom: 2px solid transparent; color: #9aa3b2; padding: 8px 10px; cursor: pointer; font: 600 12.5px 'Segoe UI', sans-serif; }
   .al-tab.ativa { color: #fff; border-bottom-color: #ff4b4b; }
-  .al-corpo { overflow-y: auto; padding: 12px; flex: 1; }
+  .al-corpo { overflow-y: auto; padding: 12px; flex: 1; min-height: 0; }
+  .al-ativo { border-left-width: 4px; }
+  .al-verde-btn { background: #14532d; color: #bbf7d0; border: 1px solid #22c55e; border-radius: 8px; padding: 7px 14px; cursor: pointer; font: 600 13px 'Segoe UI', sans-serif; }
+  .al-verde-btn:hover { background: #166534; }
+  .al-resta { font-weight: 700; font-variant-numeric: tabular-nums; }
   .al-card { background: #20242d; border: 1px solid #2d3340; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
   .al-tit { font-weight: 700; cursor: pointer; }
   .al-sub { font-size: 12px; margin-top: 2px; }
@@ -153,10 +157,12 @@
   <div id="painel_alertas">
     <div class="al-head"><span>🚨 Alertas e riscos</span><span class="al-fechar" id="al_fechar" title="Fechar">✕</span></div>
     <div class="al-tabs">
-      <button class="al-tab ativa" id="al_tab_risco" data-aba="risco">🚨 Risco</button>
+      <button class="al-tab ativa" id="al_tab_ativos" data-aba="ativos">📡 Ativos</button>
+      <button class="al-tab" id="al_tab_risco" data-aba="risco">🚨 Risco</button>
       <button class="al-tab" id="al_tab_alertas" data-aba="alertas">📋 Alertas</button>
     </div>
-    <div class="al-corpo" id="al_corpo_risco"></div>
+    <div class="al-corpo" id="al_corpo_ativos"></div>
+    <div class="al-corpo" id="al_corpo_risco" style="display:none;"></div>
     <div class="al-corpo" id="al_corpo_alertas" style="display:none;"></div>
   </div>
   <div id="goes-status"></div>
@@ -174,6 +180,7 @@
       <span id="painel_estacao_fechar" title="Fechar (Esc)">✕</span>
     </div>
     <div id="pe_contatos" class="pe-contatos"></div>
+    <div id="pe_verde" style="margin:10px 0 0;"><button id="pe_verde_btn" class="al-verde-btn" title="Gera o alerta verde (fim do alerta de raios) desta unidade, mesmo sem alerta ativo. Depois use copiar / WhatsApp / site no card que aparece abaixo.">🟢 Emitir alerta verde</button></div>
     <div id="pe_alertas"></div>
     <div id="pe_cards"></div>
     <div id="pe_prev"></div>
@@ -641,7 +648,8 @@
   // ser usadas em tela cheia. Excluir alerta e "quem recebeu" voltam pro Streamlit via setComponentValue.
   // ----------------------------------------------------------------
   var painelAlertasAberto = false;
-  var abaAtiva = "risco";
+  var abaAtiva = "ativos";
+  var quadroItens = [], quadroChave = "", painelAutoAberto = false, painelFechadoPeloUsuario = false;
   var contatosAbertos = {};
   var ultimaChaveAlertas = null;
   var dadosAlertas = { estacoes: [], alertas: [] };
@@ -732,25 +740,71 @@
     var risco = unidadesEmRisco(), alertas = dadosAlertas.alertas || [];
     document.getElementById("al_tab_risco").textContent = "🚨 Risco (" + risco.length + ")";
     document.getElementById("al_tab_alertas").textContent = "📋 Alertas (" + alertas.length + ")";
+    document.getElementById("al_tab_ativos").textContent = "📡 Ativos (" + quadroItens.length + ")";
     atualizarBadgeAlertas(risco);
     renderAlertasUnidade();
     if (!painelAlertasAberto) return;
     renderAbaRisco(risco);
     renderAbaAlertas(alertas);
+    renderAbaAtivos(true);
   }
+
+  // ---- Alertas ATIVOS de todos os meteorologistas (quadro compartilhado) ----
+  function nomeCurtoUnidade(est) {
+    var e = (dadosAlertas.estacoes || []).filter(function (x) { return x.estacao === est; })[0];
+    return e ? e.nome : String(est || "").split(" - ")[0];
+  }
+  function fmtResta(seg) { seg = Math.max(0, Math.round(seg)); return ("0" + Math.floor(seg / 60)).slice(-2) + ":" + ("0" + (seg % 60)).slice(-2); }
+  function renderAbaAtivos(forcar) {
+    var el = document.getElementById("al_corpo_ativos");
+    var chave = JSON.stringify(quadroItens.map(function (i) { return [i.estacao, i.nivel, i.quem, i.emitido_hm, i.expira_hm, i.vias]; }));
+    if (!forcar && chave === quadroChave) return;
+    quadroChave = chave;
+    if (!quadroItens.length) { el.innerHTML = '<div class="al-vazio">📡 Nenhum alerta ativo no momento.</div>'; return; }
+    el.innerHTML = quadroItens.map(function (i, k) {
+      var verm = i.nivel === "vermelho", cor = verm ? "#ff8a80" : "#ffd166";
+      return '<div class="al-card al-ativo" data-est="' + esc(i.estacao) + '" style="border-left-color:' + cor + ';">' +
+        '<div class="al-tit" data-acao="ver">' + (verm ? "🔴" : "🟡") + " " + esc(nomeCurtoUnidade(i.estacao)) + '</div>' +
+        '<div class="al-sub" style="color:' + cor + ';">Alerta ' + (verm ? "vermelho" : "amarelo") + '</div>' +
+        '<div class="al-sub">Emitido por <b>' + esc(i.quem || "(sem nome)") + '</b> às ' + esc(i.emitido_hm) + (i.vias ? " (" + esc(i.vias) + ")" : "") + '</div>' +
+        '<div class="al-sub">Válido até <b>' + esc(i.expira_hm) + '</b> · faltam <span class="al-resta" data-k="' + k + '"></span></div>' +
+        '<div class="al-acoes"><button data-acao="ver">📍 Ver no mapa</button><button data-acao="tirar_quadro" title="Remove do quadro (alerta encerrado)">✖ Tirar</button></div></div>';
+    }).join("");
+    tickAtivos();
+  }
+  function tickAtivos() {
+    var agora = Date.now();
+    Array.prototype.forEach.call(document.querySelectorAll("#al_corpo_ativos .al-resta"), function (sp) {
+      var i = quadroItens[parseInt(sp.getAttribute("data-k"), 10)]; if (!i) return;
+      var resta = (i.fimLocal - agora) / 1000;
+      sp.textContent = fmtResta(resta);
+      sp.style.color = resta <= 300 ? "#ff8a80" : "";
+    });
+  }
+  setInterval(tickAtivos, 1000);
+  // Os alertas do quadro chegam de um quadro invisível do app (atualiza a cada 5 s), por postMessage.
+  window.addEventListener("message", function (ev) {
+    var d = ev.data; if (!d || d.fonte !== "rio-quadro" || !Array.isArray(d.itens)) return;
+    var agora = Date.now();
+    quadroItens = d.itens.map(function (i) { i.fimLocal = agora + (+i.resta || 0) * 1000; return i; });
+    document.getElementById("al_tab_ativos").textContent = "📡 Ativos (" + quadroItens.length + ")";
+    if (quadroItens.length && !painelAutoAberto && !painelFechadoPeloUsuario) { painelAutoAberto = true; abrirPainelAlertas(true); mostrarAba("ativos"); }
+    if (painelAlertasAberto) renderAbaAtivos(false);
+  });
 
   function mostrarAba(aba) {
     abaAtiva = aba;
-    document.getElementById("al_tab_risco").classList.toggle("ativa", aba === "risco");
-    document.getElementById("al_tab_alertas").classList.toggle("ativa", aba === "alertas");
-    document.getElementById("al_corpo_risco").style.display = aba === "risco" ? "block" : "none";
-    document.getElementById("al_corpo_alertas").style.display = aba === "alertas" ? "block" : "none";
+    ["ativos", "risco", "alertas"].forEach(function (n) {
+      document.getElementById("al_tab_" + n).classList.toggle("ativa", aba === n);
+      document.getElementById("al_corpo_" + n).style.display = aba === n ? "block" : "none";
+    });
   }
 
   function abrirPainelAlertas(abrir) {
     painelAlertasAberto = abrir;
     document.getElementById("painel_alertas").classList.toggle("aberto", abrir);
-    if (abrir) { ultimaChaveAlertas = null; mostrarAba(abaAtiva); renderPainelAlertas(); }
+    if (!abrir) painelFechadoPeloUsuario = true;
+    if (abrir) { ultimaChaveAlertas = null; quadroChave = ""; mostrarAba(abaAtiva); renderPainelAlertas(); }
   }
 
   // Texto do alerta com a linha "Quem recebeu o alerta" (igual ao montar_texto_copia do Python), montado ao vivo.
@@ -867,7 +921,15 @@
     L.DomEvent.disableClickPropagation(painel);
     L.DomEvent.disableScrollPropagation(painel);
     document.getElementById("al_fechar").addEventListener("click", function () { abrirPainelAlertas(false); });
+    document.getElementById("al_tab_ativos").addEventListener("click", function () { mostrarAba("ativos"); });
     document.getElementById("al_tab_risco").addEventListener("click", function () { mostrarAba("risco"); });
+    document.getElementById("al_corpo_ativos").addEventListener("click", function (ev) {
+      var alvo = ev.target.closest("[data-acao]"); if (!alvo) return;
+      var card = alvo.closest(".al-card"); if (!card) return;
+      var est = card.getAttribute("data-est"), acao = alvo.getAttribute("data-acao");
+      if (acao === "ver") irParaUnidade(nomeCurtoUnidade(est));
+      else if (acao === "tirar_quadro") { enviarEvento({ tipo: "tirar_quadro", estacao: est }); }
+    });
     document.getElementById("al_tab_alertas").addEventListener("click", function () { mostrarAba("alertas"); });
 
     document.getElementById("al_corpo_risco").addEventListener("click", function (ev) {
@@ -891,6 +953,12 @@
       else if (acao === "antecipar") { enviarEvento({ tipo: "antecipar", id: id }); }
     });
     ligarCampoQuem(corpoAl);
+    document.getElementById("pe_verde_btn").addEventListener("click", function () {
+      if (!painelUnidadeChave) return;
+      var b = this; b.textContent = "⏳ Gerando alerta verde…";
+      enviarEvento({ tipo: "emitir_verde", estacao: painelUnidadeChave });
+      setTimeout(function () { b.textContent = "🟢 Emitir alerta verde"; }, 2500);
+    });
     // Painel da unidade: mesmas ações do card (copiar, finalizar, excluir, quem recebeu).
     var corpoUn = document.getElementById("pe_alertas");
     corpoUn.addEventListener("click", function (ev) {

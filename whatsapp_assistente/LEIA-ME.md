@@ -70,3 +70,7 @@ Sem chave de API, ao clicar em *Gerar boletins* ou *Gerar mapas de previsão* o 
 ## Satélites do mapa
 
 Todos NASA GIBS · GOES-East: Infravermelho, GeoColor e Massa de ar; um por vez.
+
+## Alertas ativos no painel lateral
+
+Os alertas emitidos por qualquer meteorologista aparecem na aba **📡 Ativos** do painel "Alertas e riscos" (lateral do mapa), com quem emitiu, a via, o horário, a validade e a contagem regressiva. O painel ocupa a altura do mapa e rola para cima e para baixo. **✖ Tirar** remove o alerta do quadro. O "Quadro de operação" mantém quem está online, o histórico e os avisos (mensagem + som) de 5 min e 1 min.

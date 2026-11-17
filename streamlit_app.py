@@ -666,6 +666,25 @@ def _finalizar_alerta_unidade(chave_estacao):
     _quadro_remover(estacao=chave_estacao)   # some do quadro compartilhado
     _salvar_estado()
 
+def _emitir_verde_manual(chave_estacao):
+    """Botão 'Emitir alerta verde' do painel da unidade: gera o card verde (fim do alerta) para QUALQUER unidade, mesmo sem alerta ativo."""
+    chave = str(chave_estacao or "").strip()
+    if not chave:
+        return
+    st.session_state.alertas_raio_ativos = [x for x in st.session_state.alertas_raio_ativos
+                                            if not (x.get("estacao") == chave and x.get("nivel") == "verde")]   # sem cards verdes repetidos
+    if chave in st.session_state.alertas_unidade:
+        _finalizar_alerta_unidade(chave)      # havia alerta nesta unidade: encerra como sempre
+        return
+    agora_ts = time.time()
+    nome = chave.split(" - ")[0]
+    st.session_state.alertas_raio_ativos.insert(0, {
+        "id": f"{chave}_verde_{agora_ts}", "texto": montar_mensagem_alerta_verde(nome, st.session_state.get("meteorologista_nome", "")),
+        "estacao": chave, "nivel": "verde", "dist_km": None, "expira": agora_ts + 3600, "quem_recebeu": "",
+    })
+    _quadro_remover(estacao=chave, motivo="alerta verde emitido")
+    _salvar_estado()
+
 def _antecipar_para_vermelho(alerta):
     """Gera um alerta VERMELHO para a unidade de um alerta amarelo (antecipação manual, sem esperar o raio chegar a 30 km)."""
     chave = alerta["estacao"]
@@ -967,6 +986,16 @@ def _quadro_ponto_expander():
             st.download_button("⬇️ Baixar turnos (CSV)", df.to_csv(index=False).encode("utf-8-sig"), file_name="turnos_meteorologistas.csv", mime="text/csv")
         st.caption("A entrada é registrada sozinha ao abrir o site com seu nome; a saída, no botão “Saindo do Turno”. Turnos esquecidos são fechados sozinhos após 16 h.")
 
+_HTML_PONTE_QUADRO = """<!doctype html><html><body><script>
+  var D = __DADOS__, t0 = Date.now();
+  function enviar() {
+    var itens = D.map(function (i) { return Object.assign({}, i, { resta: Math.max(0, i.resta - (Date.now() - t0) / 1000) }); });
+    var msg = { fonte: "rio-quadro", itens: itens };
+    try { var p = window.parent; for (var k = 0; k < p.frames.length; k++) { try { p.frames[k].postMessage(msg, "*"); } catch (e) {} } } catch (e) {}
+  }
+  enviar(); setInterval(enviar, 2000);
+</script></body></html>"""
+
 _HTML_BIP_5MIN = """<!doctype html><html><body><script>
   // token: __T__   modo: __M__
   (function () {
@@ -1018,8 +1047,6 @@ def _quadro_fragmento():
         for n in vistos_on - atuais_on:
             st.toast(f"👋 {n.title()} saiu do site", icon="⚪")
     st.session_state["_online_vistos"] = atuais_on
-    if not itens:
-        st.caption("📡 Nenhum alerta emitido no momento.")
     avisados = st.session_state.setdefault("_avisados_quadro", set())
     primeira = "_quadro_iniciado" not in st.session_state
     st.session_state["_quadro_iniciado"] = True
@@ -1031,19 +1058,6 @@ def _quadro_fragmento():
         cor = "#ff8a80" if it.get("nivel") == "vermelho" else "#ffd166"
         quem = it.get("meteorologista") or "(sem nome)"
         vias = " · ".join(it.get("vias", [])) or "—"
-        fim = "⏰ " if resta <= AVISO_FIM_ALERTA_SEG else ""
-        c1, c2, c3 = st.columns([8, 1.3, 1.3], vertical_alignment="center")
-        c1.markdown(
-            f"<div style='border:1px solid #2a303b;border-left:4px solid {cor};border-radius:8px;padding:6px 10px;margin:4px 0;background:#161a22'>"
-            f"{emoji} <b>{nome}</b> &nbsp;·&nbsp; emitido por <b>{quem}</b> às {_fmt_hm(it['emitido_ts'])} ({vias})"
-            f" &nbsp;·&nbsp; válido até <b>{_fmt_hm(it['expira_ts'])}</b> &nbsp;·&nbsp; {fim}faltam <b>{max(resta, 0) // 60:02d}:{max(resta, 0) % 60:02d}</b></div>",
-            unsafe_allow_html=True)
-        if c2.button(f"➕ {RENOVAR_QUADRO_MIN} min", key=f"qren_{it['estacao']}", help="Estende a validade deste alerta no quadro"):
-            _quadro_renovar(it["estacao"])
-            _rerun_fragmento()
-        if c3.button("✖ Tirar", key=f"qrem_{it['estacao']}", help="Remove do quadro (alerta encerrado)"):
-            _quadro_remover(estacao=it["estacao"], motivo="removido do quadro")
-            _rerun_fragmento()
         # alerta novo emitido por OUTRA pessoa
         chave_novo = f"novo:{it['id']}:{int(it['emitido_ts'])}"
         if chave_novo not in avisados:
@@ -1071,6 +1085,11 @@ def _quadro_fragmento():
         if 0 < resta <= AVISO_FIM_ALERTA_SEG:
             st.warning(f"⏰ Faltam {resta // 60:02d}:{resta % 60:02d} para encerrar o alerta de **{str(it['estacao']).split(' - ')[0]}**. "
                        "Finalize (alerta verde) ou renove a validade se ainda houver risco.")
+    # Os alertas ativos aparecem no painel lateral do mapa (aba "Ativos"): este quadro invisível os entrega ao mapa.
+    dados_ponte = [{"estacao": it["estacao"], "nivel": it.get("nivel", "amarelo"), "quem": it.get("meteorologista", ""),
+                    "emitido_hm": _fmt_hm(it["emitido_ts"]), "expira_hm": _fmt_hm(it["expira_ts"]),
+                    "vias": " · ".join(it.get("vias", [])), "resta": max(int(it["expira_ts"] - agora), 0)} for it in itens]
+    components.html(_HTML_PONTE_QUADRO.replace("__DADOS__", json.dumps(dados_ponte, ensure_ascii=False).replace("</", "<\\/")), height=0)
     if st.session_state.get("som_quadro", True) and agora < st.session_state.get("_bip_ate", 0):
         components.html(_HTML_BIP_5MIN.replace("__T__", st.session_state.get("_bip_token", "")).replace("__M__", st.session_state.get("_bip_modo", "normal")), height=0)
 
@@ -1632,6 +1651,10 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
         elif tipo == "excluir":
             _quadro_remover(alerta_id=evento.get("id"), motivo="excluído")
             st.session_state.alertas_raio_ativos = [x for x in st.session_state.alertas_raio_ativos if x.get("id") != evento.get("id")]
+        elif tipo == "emitir_verde":
+            _emitir_verde_manual(evento.get("estacao"))
+        elif tipo == "tirar_quadro":
+            _quadro_remover(estacao=evento.get("estacao"), motivo="removido do quadro")
         elif tipo == "limpar":
             st.session_state.alertas_raio_ativos = []
         _salvar_estado()
