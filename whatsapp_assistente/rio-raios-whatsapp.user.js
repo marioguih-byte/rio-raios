@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RIO Raios → WhatsApp Web (assistente com supervisão)
 // @namespace    rio-raios
-// @version      2.2
+// @version      2.3
 // @description  Recebe o alerta do app RIO Raios, abre o grupo da unidade no WhatsApp Web e deixa a mensagem DIGITADA, e preenche o formulário do site da BlueOcean. Você confere e confirma.
 // @match        https://web.whatsapp.com/*
 // @match        https://*.streamlit.app/*
@@ -73,6 +73,8 @@
   var CHAVE_FILA = "rio_fila";
   var CHAVE_REGISTRO = "rio_registro";
   var CHAVE_BOLETIM = "rio_boletim";
+  var CHAVE_FILA_SITE = "rio_fila_site";        // fila de boletins a registrar no site (um por vez)
+  var CHAVE_PROG_SITE = "rio_fila_site_prog";   // ids já salvos no site (o app marca o check "Site")
   var ehWhatsApp = location.hostname === "web.whatsapp.com";
   var ehSite = /previsoesbrblueocean\.com\.br$/.test(location.hostname);
 
@@ -83,7 +85,7 @@
       if (!document.body || document.getElementById("rio-selo")) return;
       var d = document.createElement("div");
       d.id = "rio-selo";
-      d.textContent = "🤖 RIO Assistente v2.2 ativo (" + (ehWhatsApp ? "WhatsApp" : ehSite ? "site BlueOcean" : "app RIO") + ")";
+      d.textContent = "🤖 RIO Assistente v2.3 ativo (" + (ehWhatsApp ? "WhatsApp" : ehSite ? "site BlueOcean" : "app RIO") + ")";
       d.style.cssText = "position:fixed;left:12px;bottom:12px;z-index:2147483647;padding:6px 12px;border-radius:8px;background:#075e54;color:#fff;font:600 12px sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.4);transition:opacity .6s;";
       document.body.appendChild(d);
       setTimeout(function () { d.style.opacity = "0"; }, 6000);
@@ -119,6 +121,14 @@
         try { ev.source && ev.source.postMessage({ fonte: "rio-raios-ack" }, "*"); } catch (e) {}
         return;
       }
+      if (d.tipo === "fila_site" && Array.isArray(d.itens)) {
+        GM_setValue(CHAVE_PROG_SITE, { feitos: [], ts: Date.now() });
+        GM_setValue(CHAVE_FILA_SITE, { id: String(Date.now()), indice: 0, ativa: true, pulados: [], salvos: [], ts: Date.now(),
+          itens: d.itens.map(function (i) { return { id: String(i.id || ""), estacao: String(i.estacao || ""), status: String(i.status || "verde"),
+                                                  titulo: String(i.titulo || ""), resumo: String(i.resumo || ""), texto: String(i.texto || "") }; }) });
+        try { ev.source && ev.source.postMessage({ fonte: "rio-raios-ack" }, "*"); } catch (e) {}
+        return;
+      }
       if (d.tipo === "boletim") {
         GM_setValue(CHAVE_BOLETIM, { estacao: String(d.estacao || ""), status: String(d.status || "verde"), titulo: String(d.titulo || ""),
                                      resumo: String(d.resumo || ""), texto: String(d.texto || ""), ts: Date.now() });
@@ -128,6 +138,16 @@
       if (d.tipo !== "preparar") return;
       GM_setValue(CHAVE, { estacao: String(d.estacao || ""), texto: String(d.texto || ""), id: String(d.id || ""), ts: Date.now() });
       try { ev.source && ev.source.postMessage({ fonte: "rio-raios-ack" }, "*"); } catch (e) {}
+    });
+    // O site avisa quais boletins foram salvos: repassa a todos os quadros (iframes) do app para marcar o check "Site".
+    function espalhar(win, msg, nivel) {
+      try { win.postMessage(msg, "*"); } catch (e) {}
+      if (nivel > 3) return;
+      var n = 0; try { n = win.length; } catch (e) {}
+      for (var i = 0; i < n; i++) { try { espalhar(win.frames[i], msg, nivel + 1); } catch (e) {} }
+    }
+    GM_addValueChangeListener(CHAVE_PROG_SITE, function (nome, antigo, novo, remoto) {
+      if (novo) espalhar(window, { fonte: "rio-raios-prog-site", feitos: novo.feitos || [] }, 0);
     });
     return;
   }
@@ -296,7 +316,115 @@
       await esperar(300);
       if (falhas.length) avisoSite("⚠️ Preenchi o que deu, mas não achei: " + falhas.join("; ") + ". Complete à mão e salve.", "#b45309");
       else avisoSite("✅ Boletim preenchido (" + d.estacao.split(" - ")[0] + ", status " + d.status + "). Confira e clique em 'Adicionar boletim'.", "#075e54");
+      return falhas;
     };
+
+    // ---------------- FILA DE BOLETINS NO SITE ----------------
+    // Preenche um boletim por vez. Você confere e clica em "Adicionar boletim"; ao detectar que salvou
+    // (o formulário limpou ou o título apareceu na lista) o script preenche o próximo. NUNCA clica em salvar.
+    var painelFila = null, filaOcupada = false, esperandoSalvar = false;
+    var lerFila = function () { try { return GM_getValue(CHAVE_FILA_SITE, null); } catch (e) { return null; } };
+    var gravarFila = function (f) { f.ts = Date.now(); GM_setValue(CHAVE_FILA_SITE, f); };
+    var marcarSalvo = function (id) {
+      var pr = GM_getValue(CHAVE_PROG_SITE, { feitos: [] }); pr.feitos = (pr.feitos || []).filter(function (x) { return x !== id; }).concat([id]); pr.ts = Date.now();
+      GM_setValue(CHAVE_PROG_SITE, pr);
+    };
+    var desenharPainel = function (msg, corMsg) {
+      var f = lerFila();
+      if (!f || !f.ativa) { if (painelFila) painelFila.style.display = "none"; return; }
+      if (!painelFila) {
+        painelFila = document.createElement("div");
+        painelFila.style.cssText = "position:fixed;right:14px;bottom:14px;z-index:2147483646;width:320px;background:#10151d;color:#eaeaea;border:1px solid #1d70b8;border-radius:12px;padding:12px 14px;font:13px sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.5)";
+        document.body.appendChild(painelFila);
+      }
+      painelFila.style.display = "block";
+      var total = f.itens.length, i = f.indice, it = f.itens[i];
+      painelFila.textContent = "";
+      var h = document.createElement("div"); h.style.cssText = "font-weight:700;font-size:14px;margin-bottom:4px";
+      h.textContent = i >= total ? "📋 Fila concluída" : "📋 Fila de boletins — " + (i + 1) + " de " + total; painelFila.appendChild(h);
+      var info = document.createElement("div"); info.style.cssText = "color:#b8c0cc;margin-bottom:6px";
+      info.textContent = i >= total ? ("Salvos: " + f.salvos.length + " · Pulados: " + f.pulados.length) : ((it.estacao.split(" - ")[0]) + " · status " + it.status + " · salvos " + f.salvos.length);
+      painelFila.appendChild(info);
+      var barra = document.createElement("div"); barra.style.cssText = "height:6px;background:#232a36;border-radius:4px;margin-bottom:8px;overflow:hidden";
+      var ml = document.createElement("div"); ml.style.cssText = "height:100%;background:#25d366;width:" + Math.round(100 * Math.min(i, total) / Math.max(total, 1)) + "%"; barra.appendChild(ml); painelFila.appendChild(barra);
+      if (msg) { var m = document.createElement("div"); m.style.cssText = "margin-bottom:8px;color:" + (corMsg || "#ffd78a"); m.textContent = msg; painelFila.appendChild(m); }
+      var linhaB = document.createElement("div"); linhaB.style.cssText = "display:flex;flex-wrap:wrap;gap:6px";
+      function bt(txt, fn, cor) {
+        var b = document.createElement("button"); b.textContent = txt;
+        b.style.cssText = "cursor:pointer;border-radius:7px;border:1px solid #3a4150;background:" + (cor || "#232834") + ";color:#fff;padding:6px 10px;font:12.5px sans-serif";
+        b.addEventListener("click", fn); linhaB.appendChild(b);
+      }
+      if (i < total) {
+        bt("✔ Salvei → próximo", function () { avancarFila("salvo"); }, "#1d70b8");
+        bt("↻ Preencher de novo", function () { preencherAtualFila(true); });
+        bt("⏭ Pular", function () { avancarFila("pulado"); });
+      }
+      bt(i >= total ? "Fechar" : "⏹ Parar fila", function () { var g = lerFila(); if (g) { g.ativa = false; gravarFila(g); } desenharPainel(); });
+      painelFila.appendChild(linhaB);
+    };
+    var avancarFila = function (como) {
+      var f = lerFila(); if (!f || !f.ativa || f.indice >= f.itens.length) return;
+      var it = f.itens[f.indice];
+      if (como === "salvo") { f.salvos.push(it.id); marcarSalvo(it.id); } else f.pulados.push(it.id);
+      f.indice++; f.clicou = -1; gravarFila(f); esperandoSalvar = false;
+      desenharPainel();
+      if (f.indice < f.itens.length) setTimeout(preencherAtualFila, 900);
+      else avisoSite("✅ Fila concluída: " + f.salvos.length + " boletim(ns) salvo(s), " + f.pulados.length + " pulado(s).", "#075e54");
+    };
+    var preenchidoChave = "";
+    var preencherAtualFila = async function (forcar) {
+      var f = lerFila(); if (!f || !f.ativa || f.indice >= f.itens.length || filaOcupada) return;
+      if (forcar !== true && preenchidoChave === f.id + ":" + f.indice) return;   // já preenchido nesta página: não sobrescreve o que você editou
+      preenchidoChave = f.id + ":" + f.indice;
+      if (!/\/newsletter/.test(location.pathname)) { desenharPainel("Abra a página 'Histórico de Boletins' (/newsletter) para continuar a fila."); return; }
+      filaOcupada = true;
+      try {
+        var it = f.itens[f.indice];
+        desenharPainel("Preenchendo…", "#9fd4ff");
+        var falhas = await preencherBoletim(it);
+        esperandoSalvar = true;
+        desenharPainel(falhas && falhas.length ? ("Não achei: " + falhas.join("; ") + ". Complete à mão e salve.") : "Preenchido. Confira e clique em 'Adicionar boletim': a fila segue sozinha.", falhas && falhas.length ? "#ffd78a" : "#8de9b0");
+      } finally { filaOcupada = false; }
+    };
+    // Detecta o clique em "Adicionar boletim" e confirma o salvamento (formulário limpou ou título apareceu na lista).
+    document.addEventListener("click", function (ev) {
+      var f = lerFila(); if (!f || !f.ativa || f.indice >= f.itens.length || !esperandoSalvar) return;
+      var b = ev.target && ev.target.closest && ev.target.closest("button,input[type=submit],[role=button]");
+      if (!b || b.closest && painelFila && painelFila.contains(b)) return;
+      if (!/adicionar boletim/.test(norm(b.textContent || b.value || ""))) return;
+      var it = f.itens[f.indice], id0 = f.id, idx0 = f.indice;
+      f.clicou = idx0; f.clicouTs = Date.now(); gravarFila(f);   // se o site recarregar depois de salvar, a próxima carga sabe
+      (async function () {
+        var ok = await aguardar(function () {
+          var g = lerFila(); if (!g || g.id !== id0 || g.indice !== idx0) return "x";
+          var tx = document.querySelector("textarea");
+          var limpou = !tx || String(tx.value || "").trim() === "";
+          var naLista = Array.from(document.querySelectorAll("tr,li,article,[class*=card],[class*=item]")).some(function (e) {
+            return !e.querySelector("textarea") && e.children.length < 40 && norm(e.textContent).indexOf(norm(it.titulo)) >= 0;
+          });
+          return limpou || naLista;
+        }, 10000, 400);
+        if (ok === true) avancarFila("salvo");
+        else if (!ok) desenharPainel("Não confirmei que salvou (o site pode ter recusado). Corrija e salve de novo, ou use '✔ Salvei → próximo'.");
+      })();
+    }, true);
+    GM_addValueChangeListener(CHAVE_FILA_SITE, function (nome, antigo, novo, remoto) {
+      if (!remoto) return;
+      esperandoSalvar = false; desenharPainel();
+      if (novo && novo.ativa && novo.indice === 0) setTimeout(preencherAtualFila, 600);
+    });
+    setTimeout(async function () {   // ao abrir/recarregar o site com fila em andamento
+      var f = lerFila();
+      if (f && f.ativa && f.indice < f.itens.length && f.clicou === f.indice && Date.now() - (f.clicouTs || 0) < 30000) {
+        // o site recarregou logo depois de "Adicionar boletim": confirma pelo título na lista e segue para o próximo
+        var it0 = f.itens[f.indice];
+        var visto = await aguardar(function () { return norm(document.body.textContent).indexOf(norm(it0.titulo)) >= 0; }, 8000, 500);
+        if (visto) { avancarFila("salvo"); return; }
+        desenharPainel("Não confirmei que o último boletim foi salvo. Use '✔ Salvei → próximo' se salvou, ou '↻ Preencher de novo'."); return;
+      }
+      if (f && f.ativa && f.indice < f.itens.length && Date.now() - (f.ts || 0) < 6 * 3600 * 1000) { desenharPainel(); preencherAtualFila(); }
+      else if (f && f.ativa) desenharPainel();
+    }, 1800);
     GM_addValueChangeListener(CHAVE_BOLETIM, function (nome, antigo, novo, remoto) {
       if (remoto && novo && novo.estacao) preencherBoletim(novo);
     });

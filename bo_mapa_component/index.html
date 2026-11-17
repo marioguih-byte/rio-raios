@@ -69,6 +69,8 @@
     #painel_alertas { top: 88px; left: 8px; right: 8px; bottom: 30px; width: auto; max-width: none; }
     #legenda-mapa { max-width: 200px; }
     #goes-status { font-size: 10.5px; bottom: 22px; }
+    #extra-status { font-size: 10.5px; bottom: 44px; max-width: 70vw; }
+    #legenda-rajadas { bottom: 88px; }
   }
   /* telas de toque: alvos de toque maiores e campos de texto sem o zoom automático do iOS (fonte >= 16px) */
   @media (pointer: coarse) {
@@ -86,6 +88,14 @@
   .leaflet-bar a.bo-tela-cheia { display: flex; align-items: center; justify-content: center; }
   #goes-status { display: none; position: absolute; z-index: 1000; bottom: 26px; right: 8px; background: rgba(15,15,20,0.8);
     color: #e5e7eb; padding: 3px 9px; border-radius: 6px; font: 11px 'Segoe UI', sans-serif; }
+  #extra-status { display: none; position: absolute; z-index: 1000; bottom: 50px; right: 8px; background: rgba(15,15,20,0.85);
+    color: #e5e7eb; padding: 4px 9px; border-radius: 6px; font: 11px 'Segoe UI', sans-serif; max-width: 340px; line-height: 1.45; }
+  .rajada-ico { display: flex; align-items: center; justify-content: center; gap: 2px; border-radius: 11px; padding: 1px 5px; font: 700 11px 'Segoe UI', sans-serif;
+    color: #fff; border: 1px solid rgba(0,0,0,.45); text-shadow: 0 0 2px #000; white-space: nowrap; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+  .rajada-ico span.seta { display: inline-block; font-size: 12px; line-height: 1; }
+  #legenda-rajadas { display: none; position: absolute; z-index: 1000; bottom: 96px; right: 8px; background: rgba(15,15,20,0.85); color: #e5e7eb;
+    padding: 5px 9px; border-radius: 6px; font: 11px 'Segoe UI', sans-serif; }
+  #legenda-rajadas i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 4px 0 8px; vertical-align: -1px; }
   /* barra de rolagem mais grossa (Chrome/Edge/Safari; no Firefox vale a espessura "auto") */
   @supports selector(::-webkit-scrollbar) {
     #painel_estacao::-webkit-scrollbar { width: 16px; }
@@ -160,6 +170,8 @@
     <div class="al-corpo" id="al_corpo_alertas" style="display:none;"></div>
   </div>
   <div id="goes-status"></div>
+  <div id="extra-status"></div>
+  <div id="legenda-rajadas"><b>Rajada (km/h)</b><i style="background:#2fa84f"></i>&lt;30<i style="background:#f2c200"></i>30–50<i style="background:#f77f00"></i>50–70<i style="background:#e5383b"></i>≥70</div>
   <div id="toast-mapa"></div>
   <div id="busca-unidade-bar">
     <input id="busca-unidade-input" list="busca-unidade-lista" placeholder="🔎 Buscar unidade…" autocomplete="off" />
@@ -1016,7 +1028,7 @@
     // entregar nenhum tile, o mapa troca sozinho pro GIBS.
     var RE = "https://realearth.ssec.wisc.edu";
     var PRODUTOS_GOES = [
-      { id: "G19-ABI-FD-BAND13-GRAD", rotulo: "🛰️ GOES-East IR realçado · SSEC (quase tempo real)", nativo: 6 },
+      { id: "G19-ABI-FD-BAND13-GRAD", rotulo: "🌡️ Temperatura de brilho do topo das nuvens (IR B13 realçado) · SSEC", nativo: 6 },
       { id: "G19-ABI-FD-BAND13", rotulo: "🛰️ GOES-East IR banda 13 · SSEC", nativo: 6 },
       { id: "G19-ABI-FD-ir-sandwich", rotulo: "🛰️ GOES-East IR Sandwich (topos convectivos) · SSEC", nativo: 6 },
       { id: "G19-ABI-FD-geo-color", rotulo: "🛰️ GOES-East GeoColor · SSEC", nativo: 7 },
@@ -1111,6 +1123,97 @@
     setInterval(function () { PRODUTOS_GOES.forEach(function (p) { if (map.hasLayer(goesInfo[p.id].camada)) atualizarGOES(p); }); }, 300000);
     setInterval(function () { if (map.hasLayer(gibsAtiva)) gibsAtiva.redraw(); }, 600000);
     setInterval(atualizarPillGOES, 30000);
+
+    // ------------------------------------------------------------------
+    // CAMADAS EXTRAS: radar de chuva (RainViewer) e rajadas de vento (grade Open-Meteo, baixada pelo navegador)
+    // ------------------------------------------------------------------
+    var extraMsg = { radar: "", rajadas: "" };
+    function atualizarExtra() {
+      var el = document.getElementById("extra-status"), leg = document.getElementById("legenda-rajadas");
+      var linhas = [];
+      if (map.hasLayer(radarCamada) && extraMsg.radar) linhas.push(extraMsg.radar);
+      if (map.hasLayer(rajadasGrupo) && extraMsg.rajadas) linhas.push(extraMsg.rajadas);
+      el.innerHTML = linhas.join("<br>"); el.style.display = linhas.length ? "block" : "none";
+      leg.style.display = map.hasLayer(rajadasGrupo) ? "block" : "none";
+    }
+
+    // Radar (RainViewer, camada gratuita: zoom nativo até 7, cobertura depende das redes de radar de cada país)
+    var radarCamada = robustecer(L.tileLayer(PIXEL_TRANSPARENTE, opcoesTiles({
+      opacity: 0.75, zIndex: 12, maxNativeZoom: 7, maxZoom: 11,
+      attribution: 'Weather data by <a href="https://www.rainviewer.com" target="_blank" rel="noopener">RainViewer</a>'
+    })));
+    var radarInfo = { url: null, t: null };
+    radarCamada._aoFalharMuito = function () { extraMsg.radar = "🌧️ Radar: o RainViewer não respondeu neste navegador/rede."; atualizarExtra(); };
+    function atualizarRadar() {
+      return fetch("https://api.rainviewer.com/public/weather-maps.json", { cache: "no-store" })
+        .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+        .then(function (j) {
+          var past = j && j.radar && j.radar.past; if (!past || !past.length) throw new Error("sem quadros");
+          var q = past[past.length - 1];
+          var url = (j.host || "https://tilecache.rainviewer.com") + q.path + "/256/{z}/{x}/{y}/2/1_1.png";
+          if (url !== radarInfo.url) { radarInfo.url = url; radarCamada.setUrl(url); }
+          radarInfo.t = new Date(q.time * 1000);
+          var min = Math.max(0, Math.round((Date.now() - radarInfo.t.getTime()) / 60000));
+          extraMsg.radar = "🌧️ Radar de chuva · RainViewer · quadro de há ~" + min + " min (onde há radar; cobertura limitada no Brasil)";
+        })
+        .catch(function (e) { extraMsg.radar = "🌧️ Radar indisponível agora (" + e.message + ")."; })
+        .then(atualizarExtra);
+    }
+
+    // Rajadas de vento: uma grade de até 100 pontos sobre a área visível, vento ATUAL do Open-Meteo, 1 requisição.
+    var rajadasGrupo = L.layerGroup();
+    var rajEstado = { t: 0, chave: "", ocupado: false, timer: null };
+    function corRajada(v) { return v >= 70 ? "#e5383b" : v >= 50 ? "#f77f00" : v >= 30 ? "#f2c200" : "#2fa84f"; }
+    function carregarRajadas(forcar) {
+      if (rajEstado.ocupado || !map.hasLayer(rajadasGrupo)) return;
+      var b = map.getBounds().pad(-0.03), n = 10, lats = [], lons = [];
+      var s = Math.max(b.getSouth(), -60), nn = Math.min(b.getNorth(), 15), w = Math.max(b.getWest(), -120), e = Math.min(b.getEast(), -10);
+      var chave = [s, nn, w, e].map(function (v) { return Math.round(v * 2) / 2; }).join(",");
+      if (!forcar && chave === rajEstado.chave && Date.now() - rajEstado.t < 15 * 60000) return;
+      if (!forcar && Date.now() - rajEstado.t < 20000) return;
+      for (var i = 0; i < n; i++) for (var k = 0; k < n; k++) {
+        lats.push((s + (nn - s) * (i + 0.5) / n).toFixed(2)); lons.push((w + (e - w) * (k + 0.5) / n).toFixed(2));
+      }
+      rajEstado.ocupado = true; extraMsg.rajadas = "💨 Rajadas: baixando a grade do Open-Meteo…"; atualizarExtra();
+      var url = "https://api.open-meteo.com/v1/forecast?latitude=" + lats.join(",") + "&longitude=" + lons.join(",") +
+        "&current=wind_gusts_10m,wind_speed_10m,wind_direction_10m&wind_speed_unit=kmh&timezone=America%2FSao_Paulo";
+      fetch(url, { cache: "no-store" })
+        .then(function (r) {
+          if (r.status === 429) throw new Error("limite do Open-Meteo atingido para o seu navegador/rede (tente mais tarde)");
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.json();
+        })
+        .then(function (j) {
+          var lista = Array.isArray(j) ? j : [j];
+          rajadasGrupo.clearLayers();
+          lista.forEach(function (d) {
+            var c = d && d.current; if (!c || c.wind_gusts_10m == null) return;
+            var g = Math.round(c.wind_gusts_10m), dir = c.wind_direction_10m || 0;
+            var html = '<div class="rajada-ico" style="background:' + corRajada(g) + 'D9"><span class="seta" style="transform:rotate(' + Math.round(dir + 180) + 'deg)">↑</span>' + g + '</div>';
+            L.marker([d.latitude, d.longitude], { interactive: false, keyboard: false,
+              icon: L.divIcon({ className: "", html: html, iconSize: [46, 22], iconAnchor: [23, 11] }) }).addTo(rajadasGrupo);
+          });
+          rajEstado.t = Date.now(); rajEstado.chave = chave;
+          var hora = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+          extraMsg.rajadas = "💨 Rajadas (km/h) · grade Open-Meteo · atualizado às " + hora + " (seta = para onde o vento sopra; a grade acompanha a área visível)";
+        })
+        .catch(function (e) { rajEstado.t = Date.now(); extraMsg.rajadas = "💨 Rajadas indisponíveis: " + e.message; })
+        .then(function () { rajEstado.ocupado = false; atualizarExtra(); });
+    }
+    map.on("moveend", function () {
+      if (!map.hasLayer(rajadasGrupo)) return;
+      clearTimeout(rajEstado.timer); rajEstado.timer = setTimeout(function () { carregarRajadas(false); }, 1500);
+    });
+
+    layersControl.addOverlay(radarCamada, "🌧️ Radar de chuva · RainViewer");
+    layersControl.addOverlay(rajadasGrupo, "💨 Rajadas de vento (grade Open-Meteo)");
+    map.on("overlayadd overlayremove", function (ev) {
+      if (ev.layer === radarCamada && ev.type === "overlayadd") atualizarRadar();
+      if (ev.layer === rajadasGrupo && ev.type === "overlayadd") carregarRajadas(true);
+      atualizarExtra();
+    });
+    setInterval(function () { if (map.hasLayer(radarCamada)) atualizarRadar(); }, 300000);
+    setInterval(function () { if (map.hasLayer(rajadasGrupo)) carregarRajadas(true); }, 15 * 60000);
 
     var bb = { lat_min: -34.0, lat_max: 5.5, lon_min: -74.5, lon_max: -32.0 };
     map.fitBounds([[bb.lat_min, bb.lon_min], [bb.lat_max, bb.lon_max]]);

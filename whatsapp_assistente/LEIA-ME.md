@@ -58,3 +58,15 @@ Os dados ficam na memória do servidor e num arquivo temporário (sobrevivem a r
 
 ## Boletins e mapas baixados pelo navegador
 Sem chave de API, ao clicar em *Gerar boletins* ou *Gerar mapas de previsão* o **navegador de quem clicou** baixa os dados do Open-Meteo (o limite diário conta no IP dessa pessoa, não no do servidor). Os dados voltam ao app e ficam em cache para todos (boletins 30 min, mapas 3 h). Com `OPEN_METEO_API_KEY` configurada, o servidor baixa como antes.
+
+## Fila de boletins no site (v2.3)
+
+1. No app, em **Enviar pelo WhatsApp Web (assistido)**, clique em **📝 Registrar todos no site (fila)**.
+2. Deixe aberta a aba **Histórico de Boletins** (`/newsletter`) do site. Aparece um painel no canto inferior direito.
+3. O painel preenche um boletim por vez. Você confere e clica em **Adicionar boletim**; quando o formulário limpa (ou o título aparece na lista), o próximo é preenchido sozinho e o check **Site** da unidade é marcado no app.
+4. Botões do painel: **✔ Salvei → próximo** (se a detecção automática não confirmar), **↻ Preencher de novo**, **⏭ Pular**, **⏹ Parar fila**.
+5. O script nunca clica em salvar. Atualize o script do Tampermonkey para a **v2.3**.
+
+## Camadas extras do mapa
+
+No botão de camadas do mapa: **🌧️ Radar de chuva (RainViewer)**, **🌡️ Temperatura de brilho do topo das nuvens (IR B13 realçado, SSEC)** e **💨 Rajadas de vento (grade Open-Meteo, baixada pelo seu navegador)**.

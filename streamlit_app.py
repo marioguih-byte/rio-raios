@@ -1797,6 +1797,7 @@ _HTML_WHATSAPP = """<!doctype html><html><head><meta charset="utf-8"><style>
 </style></head><body>
 <div class="topo">
   <button class="principal" id="fila" title="Prepara os boletins um grupo por vez; quando voce envia um, o script abre o proximo. Precisa do script do Tampermonkey.">🤖 Preparar todos (fila)</button>
+  <button id="filaSite" style="background:#1d70b8;border-color:#1d70b8;color:#fff;font-weight:600" title="Manda todos os boletins para uma fila no site: o painel na aba /newsletter preenche um por vez; voce confere, clica em Adicionar boletim e o proximo e preenchido sozinho.">📝 Registrar todos no site (fila)</button>
   <span class="nota" id="nota"></span>
 </div>
 <div id="aviso"></div>
@@ -1825,6 +1826,26 @@ _HTML_WHATSAPP = """<!doctype html><html><head><meta charset="utf-8"><style>
       setTimeout(function () { btn.textContent = rot; }, 5000);
     }, 1200);
   });
+  document.getElementById("filaSite").addEventListener("click", function () {
+    var btn = this, rot = "📝 Registrar todos no site (fila)", confirmou = false;
+    if (!confirm("Criar a fila de " + ITENS.length + " boletins no site? Abra a aba 'Histórico de Boletins' (/newsletter). Um painel preenche um boletim por vez; voce confere e clica em 'Adicionar boletim'.")) return;
+    function ack(ev) { if (ev.data && ev.data.fonte === "rio-raios-ack") confirmou = true; }
+    window.addEventListener("message", ack);
+    try {
+      (window.top || window.parent).postMessage({ fonte: "rio-raios", tipo: "fila_site",
+        itens: ITENS.map(function (i) { return { id: i.id, estacao: i.estacao, status: i.status, titulo: i.titulo, resumo: i.resumo, texto: i.texto_site }; }) }, "*");
+    } catch (e) {}
+    setTimeout(function () {
+      window.removeEventListener("message", ack);
+      btn.textContent = confirmou ? "✔ Fila criada - va para a aba /newsletter do site" : "Script nao detectado (atualize o Tampermonkey para v2.3)";
+      setTimeout(function () { btn.textContent = rot; }, 6000);
+    }, 1200);
+  });
+  var PORID = {};
+  window.addEventListener("message", function (ev) {     // o site avisa os boletins ja salvos: marca o check "Site"
+    var d = ev.data; if (!d || d.fonte !== "rio-raios-prog-site" || !Array.isArray(d.feitos)) return;
+    d.feitos.forEach(function (id) { var r = PORID[id]; if (r) { r.cb.checked = true; gravarFlag(r.k, true); } });
+  });
   var lista = document.getElementById("lista");
   ITENS.forEach(function (it) {
     var kAberto = "rio_wa_aberto_" + GERACAO + "_" + it.id, kWa = "rio_wa_check_" + GERACAO + "_" + it.id, kSite = "rio_site_check_" + GERACAO + "_" + it.id;
@@ -1837,6 +1858,7 @@ _HTML_WHATSAPP = """<!doctype html><html><head><meta charset="utf-8"><style>
     }
     var mWa = marcador(kWa, "WhatsApp"), mSite = marcador(kSite, "Site");
     var cbWa = mWa.cb, cbSite = mSite.cb, labWa = mWa.lab, labSite = mSite.lab;
+    PORID[it.id] = { cb: cbSite, k: kSite };
     var b2 = document.createElement("button"); b2.className = "principal"; b2.textContent = "🤖 Preparar no WhatsApp";
     b2.title = "Precisa do script do Tampermonkey (pasta whatsapp_assistente): abre o grupo da unidade no WhatsApp Web e deixa o boletim digitado para voce conferir e apertar Enter.";
     b2.addEventListener("click", function () {
