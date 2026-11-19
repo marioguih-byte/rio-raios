@@ -26,6 +26,10 @@
   .al-ativo { border-left-width: 4px; }
   .al-verde-btn { background: #14532d; color: #bbf7d0; border: 1px solid #22c55e; border-radius: 8px; padding: 7px 14px; cursor: pointer; font: 600 13px 'Segoe UI', sans-serif; }
   .al-verde-btn:hover { background: #166534; }
+  .al-amarelo-btn { background: #854d0e; color: #fef9c3; border: 1px solid #facc15; border-radius: 8px; padding: 7px 14px; cursor: pointer; font: 600 13px 'Segoe UI', sans-serif; }
+  .al-amarelo-btn:hover { background: #a16207; }
+  .al-vermelho-btn { background: #7f1d1d; color: #fecaca; border: 1px solid #ef4444; border-radius: 8px; padding: 7px 14px; cursor: pointer; font: 600 13px 'Segoe UI', sans-serif; }
+  .al-vermelho-btn:hover { background: #991b1b; }
   .al-resta { font-weight: 700; font-variant-numeric: tabular-nums; }
   .al-card { background: #20242d; border: 1px solid #2d3340; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
   .al-tit { font-weight: 700; cursor: pointer; }
@@ -39,6 +43,8 @@
   .al-acoes button.al-finalizar:hover { background: #166534; }
   .al-acoes button.al-antecipar { background: #7f1d1d; border-color: #ef4444; color: #fecaca; }
   .al-acoes button.al-antecipar:hover { background: #991b1b; }
+  .al-acoes button.al-rebaixar { background: #854d0e; border-color: #facc15; color: #fef9c3; }
+  .al-acoes button.al-rebaixar:hover { background: #a16207; }
   .al-dur-linha { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
   select.al-dur { width: auto; }
   .al-acoes button.al-whats { background: #075e54; border-color: #25d366; color: #d1fae5; }
@@ -180,7 +186,11 @@
       <span id="painel_estacao_fechar" title="Fechar (Esc)">✕</span>
     </div>
     <div id="pe_contatos" class="pe-contatos"></div>
-    <div id="pe_verde" style="margin:10px 0 0;"><button id="pe_verde_btn" class="al-verde-btn" title="Gera o alerta verde (fim do alerta de raios) desta unidade, mesmo sem alerta ativo. Depois use copiar / WhatsApp / site no card que aparece abaixo.">🟢 Emitir alerta verde</button></div>
+    <div id="pe_verde" style="margin:10px 0 0; display:flex; flex-wrap:wrap; gap:8px;">
+      <button class="al-emitir-btn al-verde-btn" data-nivel="verde" title="Gera o alerta verde (fim do alerta de raios) desta unidade, mesmo sem alerta ativo. Depois use copiar / WhatsApp / site no card que aparece abaixo.">🟢 Emitir alerta verde</button>
+      <button class="al-emitir-btn al-amarelo-btn" data-nivel="amarelo" title="Gera o alerta amarelo (raio a menos de 50 km) desta unidade, mesmo sem raio por perto.">🟡 Emitir alerta amarelo</button>
+      <button class="al-emitir-btn al-vermelho-btn" data-nivel="vermelho" title="Gera o alerta vermelho (raio a menos de 30 km) desta unidade, mesmo sem raio por perto.">🔴 Emitir alerta vermelho</button>
+    </div>
     <div id="pe_alertas"></div>
     <div id="pe_cards"></div>
     <div id="pe_prev"></div>
@@ -709,6 +719,7 @@
       '<button data-acao="preparar" class="al-whats" title="Precisa do script do Tampermonkey (pasta whatsapp_assistente). Abre o grupo no WhatsApp Web e deixa a mensagem digitada para você conferir e apertar Enter.">🤖 Preparar no WhatsApp</button>' +
       '<button data-acao="registrar" class="al-whats" style="background:#1d70b8;border-color:#1d70b8;color:#fff" title="Precisa do script do Tampermonkey e da aba Registro de eventos críticos aberta. Preenche o formulário Novo evento; você confere e clica em Salvar.">📝 Registrar no site</button>' +
       (a.anteciparvel ? '<button data-acao="antecipar" class="al-antecipar">🔴 Antecipar para vermelho</button>' : '') +
+      (a.rebaixavel ? '<button data-acao="rebaixar" class="al-rebaixar">🟡 Alterar para amarelo</button>' : '') +
       (a.finalizavel ? '<button data-acao="finalizar" class="al-finalizar">🟢 Finalizar alerta</button>' : '') +
       '<button data-acao="excluir">✕ Excluir</button></div></div>';
   }
@@ -951,13 +962,17 @@
       else if (acao === "preparar") { prepararNoWhatsApp(card, alvo); }
       else if (acao === "registrar") { registrarNoSite(card, alvo); }
       else if (acao === "antecipar") { enviarEvento({ tipo: "antecipar", id: id }); }
+      else if (acao === "rebaixar") { enviarEvento({ tipo: "rebaixar", id: id }); }
     });
     ligarCampoQuem(corpoAl);
-    document.getElementById("pe_verde_btn").addEventListener("click", function () {
-      if (!painelUnidadeChave) return;
-      var b = this; b.textContent = "⏳ Gerando alerta verde…";
-      enviarEvento({ tipo: "emitir_verde", estacao: painelUnidadeChave });
-      setTimeout(function () { b.textContent = "🟢 Emitir alerta verde"; }, 2500);
+    Array.prototype.forEach.call(document.querySelectorAll("#pe_verde .al-emitir-btn"), function (btn) {
+      var rotulo = btn.textContent;
+      btn.addEventListener("click", function () {
+        if (!painelUnidadeChave) return;
+        btn.textContent = "⏳ Gerando…";
+        enviarEvento({ tipo: "emitir_nivel", estacao: painelUnidadeChave, nivel: btn.getAttribute("data-nivel") });
+        setTimeout(function () { btn.textContent = rotulo; }, 2500);
+      });
     });
     // Painel da unidade: mesmas ações do card (copiar, finalizar, excluir, quem recebeu).
     var corpoUn = document.getElementById("pe_alertas");
@@ -971,6 +986,7 @@
       else if (acao === "preparar") { prepararNoWhatsApp(card, alvo); }
       else if (acao === "registrar") { registrarNoSite(card, alvo); }
       else if (acao === "antecipar") { enviarEvento({ tipo: "antecipar", id: id }); }
+      else if (acao === "rebaixar") { enviarEvento({ tipo: "rebaixar", id: id }); }
     });
     ligarCampoQuem(corpoUn);
     corpoUn.addEventListener("change", function (ev) {
@@ -1314,7 +1330,7 @@
     inputBusca.addEventListener("keydown", function (ev) { if (ev.key === "Enter") irParaUnidade(inputBusca.value); });
   }
 
-  function redesenharEstacoes(estacoes, aneis) {
+  function redesenharEstacoes(estacoes, aneis, espessura) {
     stationsLayer.clearLayers();
     aneisLayer.clearLayers();
     marcadoresPorNome = {};
@@ -1355,12 +1371,14 @@
       chavePorNome[e.nome] = e.estacao;
       opcoes += '<option value="' + String(e.nome).replace(/"/g, "&quot;") + '">';
 
+      var esp = Math.min(5, Math.max(1, parseInt(espessura, 10) || 3));      // 1 (fino) … 5 (grosso); 3 = médio (padrão)
+      var pesoCor = [2, 3.2, 4.5, 6, 8][esp - 1], pesoContorno = pesoCor + 3.5, tracejado = ["8, 6", "10, 7", "12, 9", "14, 10", "16, 12"][esp - 1];
       (aneis || []).forEach(function (a) {
         // contorno escuro por baixo + traço colorido por cima: o anel aparece no mapa claro,
         // no satélite e por cima das cores do GOES-East
-        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: "#0b1220", weight: 8, fill: false, opacity: 0.6, interactive: false, renderer: canvasAneis })
+        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: "#0b1220", weight: pesoContorno, fill: false, opacity: 0.6, interactive: false, renderer: canvasAneis })
           .addTo(aneisLayer);
-        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: a.cor, weight: 4.5, fill: false, dashArray: "12, 9", opacity: 1, interactive: false, renderer: canvasAneis })
+        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: a.cor, weight: pesoCor, fill: false, dashArray: tracejado, opacity: 1, interactive: false, renderer: canvasAneis })
           .addTo(aneisLayer);
       });
     });
@@ -1492,7 +1510,7 @@
     if (!map) iniciarMapa();
 
     atualizarStatus(args.status_texto);
-    redesenharEstacoes(args.estacoes, args.aneis);
+    redesenharEstacoes(args.estacoes, args.aneis, args.espessura_aneis);
     var assinRaios = JSON.stringify([args.raios, args.celulas, args.janela_min, args.mostrar_deslocamento, args.tamanho_raio]);
     if (assinRaios !== ultimaAssinRaios) {   // mesmo conteúdo reenviado (ex.: menu/largura mudou) → não refaz tudo
       ultimaAssinRaios = assinRaios;

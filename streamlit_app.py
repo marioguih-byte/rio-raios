@@ -685,6 +685,28 @@ def _emitir_verde_manual(chave_estacao):
     _quadro_remover(estacao=chave, motivo="alerta verde emitido")
     _salvar_estado()
 
+def _emitir_nivel_manual(chave_estacao, nivel):
+    """Botões 'Emitir alerta amarelo/vermelho/verde' do painel da unidade: gera o card do nível escolhido, mesmo sem raio por perto."""
+    chave = str(chave_estacao or "").strip()
+    if not chave:
+        return
+    if nivel == "verde":
+        _emitir_verde_manual(chave)
+        return
+    if nivel not in ("amarelo", "vermelho"):
+        return
+    agora_ts = time.time()
+    nome = chave.split(" - ")[0]
+    km = 30 if nivel == "vermelho" else 50
+    st.session_state.alertas_raio_ativos = [x for x in st.session_state.alertas_raio_ativos
+                                            if not (x.get("estacao") == chave and x.get("nivel") == nivel)]   # sem cards repetidos do mesmo nível
+    st.session_state.alertas_raio_ativos.insert(0, {
+        "id": f"{chave}_{nivel}_manual_{agora_ts}", "texto": montar_mensagem_proximidade_raio(km, nome, st.session_state.get("meteorologista_nome", "")),
+        "estacao": chave, "nivel": nivel, "dist_km": None, "expira": agora_ts + 3600, "quem_recebeu": "",
+    })
+    st.session_state.alertas_unidade[chave] = {"nivel": nivel, "dist_km": None, "notificado_ts": agora_ts, "expira_ts": agora_ts + 3600}
+    _salvar_estado()
+
 def _antecipar_para_vermelho(alerta):
     """Gera um alerta VERMELHO para a unidade de um alerta amarelo (antecipação manual, sem esperar o raio chegar a 30 km)."""
     chave = alerta["estacao"]
@@ -697,6 +719,21 @@ def _antecipar_para_vermelho(alerta):
     })
     st.session_state.alertas_unidade[chave] = {
         "nivel": "vermelho", "dist_km": alerta.get("dist_km"), "notificado_ts": agora_ts, "expira_ts": agora_ts + 3600,
+    }
+    _salvar_estado()
+
+def _rebaixar_para_amarelo(alerta):
+    """Gera um alerta AMARELO para a unidade de um alerta vermelho (o risco diminuiu, mas o alerta segue ativo até você encerrar)."""
+    chave = alerta["estacao"]
+    agora_ts = time.time()
+    nome = str(chave).split(" - ")[0]
+    texto = montar_mensagem_proximidade_raio(50, nome, st.session_state.get("meteorologista_nome", ""))
+    st.session_state.alertas_raio_ativos.insert(0, {
+        "id": f"{chave}_rebaixado_{agora_ts}", "texto": texto, "estacao": chave, "nivel": "amarelo",
+        "dist_km": alerta.get("dist_km"), "expira": agora_ts + 3600, "quem_recebeu": "",
+    })
+    st.session_state.alertas_unidade[chave] = {
+        "nivel": "amarelo", "dist_km": alerta.get("dist_km"), "notificado_ts": agora_ts, "expira_ts": agora_ts + 3600,
     }
     _salvar_estado()
 
@@ -1218,7 +1255,7 @@ div[data-testid="stVerticalBlockBorderWrapper"] { border-radius: 12px !important
 #  - o estado dos alertas fica guardado no servidor, identificado por um código na URL (?sid=...),
 #    e é restaurado quando a mesma URL reabre.
 # ----------------------------------------------------------------------------------------------
-_CHAVES_PERSISTENTES = ("meteorologista_nome", "alertas_raio_ativos", "alertas_unidade", "verde_estado", "som_token", "altura_mapa_pct")
+_CHAVES_PERSISTENTES = ("meteorologista_nome", "alertas_raio_ativos", "alertas_unidade", "verde_estado", "som_token", "altura_mapa_pct", "espessura_aneis")
 
 @st.cache_resource
 def _armazem_sessoes():
@@ -1308,6 +1345,16 @@ with st.sidebar:
     mostrar_aneis = st.checkbox("Mostrar anéis de distância ao redor das unidades", value=True)
     paleta_escolhida = st.selectbox("Cores dos anéis", list(PALETAS_ANEIS), disabled=not mostrar_aneis)
     cores_aneis = PALETAS_ANEIS[paleta_escolhida]
+    st.caption("Anéis visíveis (desmarque para tirar do mapa):")
+    _cols_an = st.columns(len(DISTANCIAS_ANEIS_KM))
+    aneis_visiveis = set()
+    for _c, _km in zip(_cols_an, DISTANCIAS_ANEIS_KM):
+        if _c.checkbox(f"{_km} km", value=True, key=f"anel_visivel_{_km}", disabled=not mostrar_aneis):
+            aneis_visiveis.add(_km)
+    if "espessura_aneis" not in st.session_state:
+        st.session_state["espessura_aneis"] = 3       # médio
+    espessura_aneis = st.slider("Espessura das linhas dos anéis", min_value=1, max_value=5, step=1, key="espessura_aneis",
+                                disabled=not mostrar_aneis, help="1 = mais fino · 3 = médio (padrão) · 5 = mais grosso")
 
     st.subheader("🗺️ Mapa")
     if "altura_mapa_pct" not in st.session_state:
@@ -1554,7 +1601,7 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
         }
         for _, e in df_status.iterrows()
     ]
-    aneis_payload = [{"km": km, "cor": cor} for km, cor in zip(DISTANCIAS_ANEIS_KM, cores_aneis) if mostrar_aneis]
+    aneis_payload = [{"km": km, "cor": cor} for km, cor in zip(DISTANCIAS_ANEIS_KM, cores_aneis) if mostrar_aneis and km in aneis_visiveis]
     raios_payload = _preparar_payload_raios(raios_df, celulas_com_trajetoria)
 
     # Alertas ativos, pra aba "Alertas" do painel que fica dentro do mapa (usável em tela cheia).
@@ -1562,7 +1609,8 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
     alertas_payload = [
         {"id": a["id"], "estacao": a.get("estacao"), "quem_recebeu": a.get("quem_recebeu", ""),
          "copia": montar_texto_copia(a), "base": a["texto"], "nivel": a.get("nivel"), "finalizavel": a["id"] in _finalizaveis,
-         "anteciparvel": a.get("nivel") == "amarelo" and a["id"] in _finalizaveis, "duracao_min": a.get("duracao_min", 60)}
+         "anteciparvel": a.get("nivel") == "amarelo" and a["id"] in _finalizaveis,
+         "rebaixavel": a.get("nivel") == "vermelho" and a["id"] in _finalizaveis, "duracao_min": a.get("duracao_min", 60)}
         for a in st.session_state.alertas_raio_ativos
     ]
 
@@ -1576,6 +1624,7 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
         raios=raios_payload["raios"],
         celulas=raios_payload["celulas"],
         aneis=aneis_payload,
+        espessura_aneis=int(espessura_aneis),
         janela_min=raios_minutos,
         tamanho_raio=TAMANHO_BOLINHA_RAIO,
         altura_pct=int(st.session_state.get("altura_mapa_pct", 86)),
@@ -1610,6 +1659,10 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
             alvo = next((x for x in st.session_state.alertas_raio_ativos if x.get("id") == evento.get("id")), None)
             if alvo is not None and alvo.get("nivel") == "amarelo" and alvo["id"] in _alertas_finalizaveis():
                 _antecipar_para_vermelho(alvo)
+        elif tipo == "rebaixar":
+            alvo = next((x for x in st.session_state.alertas_raio_ativos if x.get("id") == evento.get("id")), None)
+            if alvo is not None and alvo.get("nivel") == "vermelho" and alvo["id"] in _alertas_finalizaveis():
+                _rebaixar_para_amarelo(alvo)
         elif tipo == "validade":
             _definir_validade(evento.get("id"), evento.get("minutos"))
         elif tipo == "emitir":
@@ -1619,6 +1672,8 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
             st.session_state.alertas_raio_ativos = [x for x in st.session_state.alertas_raio_ativos if x.get("id") != evento.get("id")]
         elif tipo == "emitir_verde":
             _emitir_verde_manual(evento.get("estacao"))
+        elif tipo == "emitir_nivel":
+            _emitir_nivel_manual(evento.get("estacao"), evento.get("nivel"))
         elif tipo == "tirar_quadro":
             _quadro_remover(estacao=evento.get("estacao"), motivo="removido do quadro")
         elif tipo == "limpar":
@@ -1750,6 +1805,11 @@ with col_lado:
                                     if st.button("🔴 Antecipar para vermelho", key=f"antecipar_{a['id']}",
                                                  help="Gera um alerta vermelho para esta unidade, sem esperar o raio chegar a 30 km"):
                                         _antecipar_para_vermelho(a)
+                                        st.rerun()
+                                if a.get("nivel") == "vermelho" and a.get("id") in _finalizaveis:
+                                    if st.button("🟡 Alterar para amarelo", key=f"rebaixar_{a['id']}",
+                                                 help="Gera um alerta amarelo para esta unidade (o risco diminuiu, mas o alerta segue ativo até você encerrar)"):
+                                        _rebaixar_para_amarelo(a)
                                         st.rerun()
                                 if a.get("id") in _finalizaveis:
                                     if st.button("🟢 Finalizar alerta", key=f"finalizar_alerta_{a['id']}",

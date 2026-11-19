@@ -78,3 +78,11 @@ Os alertas emitidos por qualquer meteorologista aparecem na aba **📡 Ativos** 
 ## Quem encerra o alerta é você
 
 Os alertas amarelo/vermelho **não terminam sozinhos**: nem quando os raios se afastam, nem quando a validade acaba. Não há mais alerta verde automático nem nova notificação por vencimento. O alerta sai da lista só quando você usa **🟢 Finalizar alerta**, **🟢 Emitir alerta verde**, **✖ Tirar** (aba Ativos) ou **✕ Excluir**. A validade (1 h, 1 h 30 ou 2 h) continua valendo para o horário enviado ao WhatsApp e ao site; passado o prazo, o card mostra "prazo vencido: segue ativo até você encerrar". Os avisos de 5 min e 1 min antes do prazo continuam.
+
+## Alterar para amarelo, anéis e espessura
+
+- No card de um alerta **vermelho** (painel de alertas e painel do mapa) há o botão **🟡 Alterar para amarelo**: gera o alerta amarelo da unidade, que você copia/envia como os demais. O vermelho anterior fica na lista até você excluir. Do amarelo dá para voltar ao vermelho com **🔴 Antecipar para vermelho**.
+- Em **⚙ Configuração → Anéis de distância no mapa** há uma caixa para cada anel (30, 50, 100 e 200 km): desmarque para tirar do mapa e da legenda.
+- **Espessura das linhas dos anéis**: de 1 (mais fino) a 5 (mais grosso); o padrão é 3 (médio, igual ao que era antes).
+
+No painel de cada unidade há três botões: **🟢 Emitir alerta verde**, **🟡 Emitir alerta amarelo** e **🔴 Emitir alerta vermelho**. Cada um gera o card do nível escolhido (mensagem de 50 km no amarelo e de 30 km no vermelho), mesmo sem raio por perto; depois é só copiar, preparar no WhatsApp ou registrar no site.
