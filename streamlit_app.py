@@ -1405,6 +1405,7 @@ with st.sidebar:
             st.query_params["nome"] = meteorologista.strip()
 
     # Boletim horário: logo abaixo do nome do meteorologista
+    st.caption("Versão do app: 21/11 18h10 · lembrete horário v3")
     st.toggle("⏰ Boletim horário (3 em 3 h)", key="hor_ativo",
               help="Gera sozinho, 5 min antes de cada horário (00h, 03h, 06h … 21h), o boletim das próximas 12 h para as unidades escolhidas, "
                    "com gráficos e texto hora a hora, e avisa no canto direito da tela.")
@@ -2443,7 +2444,7 @@ def _hor_lembrete(agora, envio, gerar_em, chave, nomes_sel):
     hor = _hor_estado()
     slot = hor["slots"].get(chave)
     # O lembrete só aparece a partir de 5 min antes do envio (e até 30 min depois, ou até todos serem marcados como enviados).
-    if not nomes_sel or agora < gerar_em:
+    if not nomes_sel or agora < gerar_em or hor.get("oculto") == chave:
         return
     fundo, borda = _cores_painel()
     st.markdown(
@@ -2454,18 +2455,22 @@ def _hor_lembrete(agora, envio, gerar_em, chave, nomes_sel):
     todos_env = bool(slot) and all(slot["unidades"].get(n, {}).get("enviado") for n in nomes_sel) and bool(nomes_sel)
     with st.container(key="lembrete_horario"):
         if hor.get("dispensado") == chave or todos_env:
+            c1, c2 = st.columns([6, 1], vertical_alignment="center")
             if todos_env:
-                st.markdown(f"**⏰ Boletim das {envio:%H:%M}** ✅ enviado. Próximo em {bh.INTERVALO_H} h.")
-            elif hor.get("dispensado") == chave:
-                st.markdown(f"**⏰ Boletim das {envio:%H:%M}** · lembrete fechado")
-                if st.button("Reabrir", key="hor_reabrir"):
-                    hor["dispensado"] = ""
-                    _rerun_fragmento()
+                c1.markdown(f"**⏰ Boletim das {envio:%H:%M}** ✅ enviado. Próximo em {bh.INTERVALO_H} h.")
+            else:
+                c1.markdown(f"**⏰ Boletim das {envio:%H:%M}** · lembrete fechado")
+            if c2.button("✕", key="hor_remover", help="Tirar este aviso"):
+                hor["oculto"] = chave
+                _rerun_fragmento()
+            if not todos_env and st.button("Reabrir", key="hor_reabrir"):
+                hor["dispensado"] = ""
+                _rerun_fragmento()
             return
         c1, c2 = st.columns([5, 1], vertical_alignment="center")
         c1.markdown(f"**⏰ Hora de enviar o boletim das {envio:%H:%M}**")
-        if c2.button("✕", key="hor_fechar", help="Fechar este lembrete"):
-            hor["dispensado"] = chave
+        if c2.button("✕", key="hor_fechar", help="Tirar este lembrete (volta no próximo horário)"):
+            hor["oculto"] = chave
             _rerun_fragmento()
         if st.session_state.get("hor_aviso"):
             st.warning(st.session_state["hor_aviso"])
