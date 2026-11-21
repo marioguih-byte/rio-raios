@@ -13,6 +13,7 @@ Cada unidade usa só 2 consultas (best match + ICON/ECMWF). Tudo em horário de 
 Saídas: texto para o WhatsApp (texto_whatsapp) e imagem PNG com os gráficos (grafico_png).
 """
 import io
+import os
 import math
 import time
 from datetime import datetime, timedelta
@@ -25,6 +26,7 @@ import boletins_bo
 
 FUSO = ZoneInfo("America/Sao_Paulo")
 HORAS_A_FRENTE = 12
+PASSO_TEXTO = 3          # o texto do WhatsApp mostra uma linha a cada 3 h (os gráficos seguem hora a hora)
 INTERVALO_H = 3                 # boletins de 3 em 3 horas, a partir das 00:00
 ANTECEDENCIA_MIN = 5            # gera 5 minutos antes do horário de envio
 MODELO_VENTO = "icon_seamless"
@@ -248,31 +250,42 @@ def texto_whatsapp(d, emitido=None):
         linhas.append(f"🧊 Granizo: previsto ({_faixa_horas(hs, d['gran_prev'])})")
     elif d["gran_poss"].any():
         linhas.append(f"🧊 Granizo: possível ({_faixa_horas(hs, d['gran_poss'])})")
-    linhas += ["", "*Hora a hora*"]
-    for i in range(n):
+    linhas += ["", f"*Hora a hora (de {PASSO_TEXTO} em {PASSO_TEXTO} h)*"]
+    for i in range(0, n, PASSO_TEXTO):
         h = hs[i]
-        if i > 0 and h.hour == 0:
+        j = slice(i, min(i + PASSO_TEXTO, n))             # janela de 3 h que começa neste horário
+        ch_j, raj_j, rai_j = d["chuva"][j], d["rajada"][j], d["raios"][j]
+        if i > 0 and h.hour < hs[i - PASSO_TEXTO].hour:
             linhas.append(f"— {h:%d/%m} —")
         dir_txt = boletins_bo.pontos_cardeais(d["direc"][i]) if not math.isnan(d["direc"][i]) else ""
         partes = [f"*{_hm(h)}* {icone_tempo(d['codigo'][i], h.hour)} {_f(d['temp'][i])}°C",
                   f"💧{_f(d['umid'][i])}%",
-                  f"{_dot_chuva(d['chuva'][i])} {_f(d['chuva'][i], 1)} mm",
-                  f"{_dot_raj(d['rajada'][i])} vento {_f(d['vento'][i])} {dir_txt}, raj. {_f(d['rajada'][i])} km/h".replace("  ", " "),
-                  f"⚡{_f(d['raios'][i])}%"]
+                  f"{_dot_chuva(np.max(ch_j))} {_f(ch_j.sum(), 1)} mm",
+                  f"{_dot_raj(np.nanmax(raj_j))} vento {_f(d['vento'][i])} {dir_txt}, raj. {_f(np.nanmax(raj_j))} km/h".replace("  ", " "),
+                  f"⚡{_f(np.max(rai_j))}%"]
         if d["uv"][i] >= 1:
             partes.append(f"UV {_f(d['uv'][i])}")
-        if d["gran_prev"][i]:
+        if d["gran_prev"][j].any():
             partes.append("🧊 granizo")
-        elif d["gran_poss"][i]:
+        elif d["gran_poss"][j].any():
             partes.append("🧊 granizo possível")
         linhas.append(" · ".join(partes))
-    linhas += ["", "_Vento: ICON · Chuva: maior valor entre ICON e ECMWF · Raios: previsão heurística · Demais: best match_"]
+    linhas += ["", "_Chuva: acumulado de 3 h · Rajada, raios e granizo: máximo de cada janela de 3 h_"]
     return "\n".join(linhas) + "\n"
 
 
 # ----------------------------------------------------------------------------
 # GRÁFICO (PNG)
 # ----------------------------------------------------------------------------
+def _carregar_logo():
+    import matplotlib.image as mpimg
+    caminho = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo_blueocean.png")
+    try:
+        return mpimg.imread(caminho)
+    except Exception:
+        return None
+
+
 def grafico_png(d, emitido=None, dpi=150):
     import matplotlib
     matplotlib.use("Agg")
@@ -305,6 +318,17 @@ def grafico_png(d, emitido=None, dpi=150):
     ax.text(0.04, 0.37, d["nome"], color="white", fontsize=22, fontweight="bold", va="center")
     ax.text(0.04, 0.12, f"Próximas {HORAS_A_FRENTE} h · {hs[0]:%d/%m} {_hm(hs[0])} a {hs[-1]:%d/%m} {_hm(hs[-1])} · "
             f"emitido às {emitido:%H:%M} (horário de Brasília)", color="#d7e9fb", fontsize=10.5, va="center")
+
+    logo = _carregar_logo()
+    if logo is not None:
+        lh = 1.38
+        lw = lh * logo.shape[1] / logo.shape[0]
+        al = eixo(W - lw - 0.45, H - 1.75 + (1.75 - lh) / 2, lw, lh)
+        al.imshow(logo)
+        al.axis("off")
+        al.set_zorder(5)
+        fig.patches.append(Rectangle(((W - lw - 0.45 - 0.12) / W, (H - 1.75 + (1.75 - lh) / 2 - 0.08) / H), (lw + 0.24) / W, (lh + 0.16) / H,
+                                     transform=fig.transFigure, fc="#fdfdfd", ec="none", zorder=4))
 
     # ----- cartões-resumo -----
     i_ch, i_raj, i_rai = int(np.argmax(d["chuva"])), int(np.nanargmax(d["rajada"])), int(np.argmax(d["raios"]))
@@ -378,7 +402,7 @@ def grafico_png(d, emitido=None, dpi=150):
     a.fill_between(x, t, a.get_ylim()[0], color=cores["temp"], alpha=0.10, zorder=2)
     a.plot(x, t, color=cores["temp"], lw=2.6, marker="o", ms=5.5, mfc="white", mew=2, zorder=4)
     rotular(a, x, t, lambda v: f"{v:.0f}°", cores["temp"], dy=9)
-    titulo(a, "Temperatura", "(°C)", "best match")
+    titulo(a, "Temperatura", "(°C)")
 
     # 2) umidade + nebulosidade
     a = eixos["umid"]
@@ -399,16 +423,11 @@ def grafico_png(d, emitido=None, dpi=150):
     def cor_chuva(v):
         return "#d0ebff" if v < 0.2 else "#74c0fc" if v < 1 else "#339af0" if v < 5 else "#1864ab" if v < 20 else "#7048e8"
     a.bar(x, ch, width=0.62, color=[cor_chuva(v) for v in ch], zorder=3, edgecolor="white", lw=0.6)
-    if d["chuva_icon"] is not None:
-        a.scatter(x, d["chuva_icon"], s=22, marker="o", facecolor="white", edgecolor="#364fc7", lw=1.3, zorder=5, label="ICON")
-    if d["chuva_ecmwf"] is not None:
-        a.scatter(x, d["chuva_ecmwf"], s=24, marker="D", facecolor="white", edgecolor="#c2255c", lw=1.3, zorder=5, label="ECMWF")
     for i, v in enumerate(ch):
         if v >= 0.1:
             a.annotate(f"{v:.1f}".replace(".", ","), (i, v), textcoords="offset points", xytext=(0, 5), ha="center", fontsize=8,
                        color="#0b4a8b", fontweight="bold", zorder=6)
-    a.legend(loc="upper left", bbox_to_anchor=(0.0, 0.98), ncol=2, frameon=False, fontsize=8.3, handletextpad=0.3, columnspacing=1.0)
-    titulo(a, "Precipitação", "(mm/h)", f"barra = maior valor entre ICON e ECMWF · total {_f(ch.sum(), 1)} mm")
+    titulo(a, "Precipitação", "(mm/h)", f"total {_f(ch.sum(), 1)} mm em {HORAS_A_FRENTE} h")
 
     # 4) vento
     a = eixos["vento"]
@@ -430,7 +449,7 @@ def grafico_png(d, emitido=None, dpi=150):
                    textcoords="offset points", arrowprops=dict(arrowstyle="-|>", color=cores["vento"], lw=1.5, mutation_scale=9, shrinkA=0, shrinkB=0),
                    annotation_clip=False)
     a.text(0, 1.2, "Vento  (km/h)", transform=a.transAxes, fontsize=11.5, fontweight="bold", color=cores["tinta"], va="bottom")
-    a.text(1, 1.2, "ICON · linha verde = vento médio · tracejado laranja = rajada · setas = para onde sopra", transform=a.transAxes,
+    a.text(1, 1.2, "linha verde = vento médio · tracejado laranja = rajada · setas = para onde sopra", transform=a.transAxes,
            fontsize=8.4, color=cores["cinza"], va="bottom", ha="right")
 
     # 5) raios + granizo
@@ -467,21 +486,26 @@ def grafico_png(d, emitido=None, dpi=150):
     for i, v in enumerate(uv):
         if v >= 0.5:
             a.annotate(f"{v:.0f}", (i, v), textcoords="offset points", xytext=(0, 4), ha="center", fontsize=8, color="#4a3a00", fontweight="bold", zorder=6)
-    titulo(a, "Índice UV", "", "best match")
+    titulo(a, "Índice UV", "")
 
     # ----- rodapé -----
-    fig.text(0.5, 0.35 / H, "Vento: ICON · Chuva: maior valor entre ICON e ECMWF · Raios: previsão heurística (CAPE, Lifted Index, CIN) · "
-             "Demais variáveis: best match · Faixa azulada = noite · Fonte: Open-Meteo", ha="center", va="center", fontsize=7.6, color="#8793a1")
+    fig.text(0.5, 0.35 / H, "Raios: previsão heurística (CAPE, Lifted Index, CIN) · Faixa azulada = noite · Fonte: Open-Meteo", ha="center", va="center", fontsize=8, color="#8793a1")
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=dpi, facecolor=fig.get_facecolor())
     plt.close(fig)
     return buf.getvalue()
 
 
+LIMITE_LEGENDA = 1000   # a legenda de foto do WhatsApp tem limite (cerca de 1024 caracteres)
+
+
 def dividir_texto(texto):
-    """(legenda, resto): a legenda (cabeçalho + resumo, ~450 caracteres) vai junto da imagem; o 'Hora a hora' vai em seguida,
-    porque a legenda de foto do WhatsApp tem limite de tamanho."""
-    i = texto.find("*Hora a hora*")
-    if i <= 0:
+    """(legenda, resto). Se o texto couber na legenda da foto, vai tudo junto da imagem (um único Enter). Se não couber, a
+    legenda leva o cabeçalho + resumo e o 'Hora a hora' vai como 2ª mensagem."""
+    texto = texto.strip()
+    if len(texto) <= LIMITE_LEGENDA:
         return texto, ""
+    i = texto.find("*Hora a hora")
+    if i <= 0:
+        return texto[:LIMITE_LEGENDA], texto[LIMITE_LEGENDA:]
     return texto[:i].rstrip(), texto[i:].strip()

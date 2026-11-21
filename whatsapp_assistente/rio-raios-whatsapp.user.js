@@ -93,11 +93,11 @@
       if (!document.body || document.getElementById("rio-selo")) return;
       var d = document.createElement("div");
       d.id = "rio-selo";
-      d.textContent = "🤖 RIO Assistente v2.7 ativo (" + (ehWhatsApp ? "WhatsApp" : ehSite ? "site BlueOcean" : "app RIO") + ")";
-      d.style.cssText = "position:fixed;left:12px;bottom:12px;z-index:2147483647;padding:6px 12px;border-radius:8px;background:#075e54;color:#fff;font:600 12px sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.4);transition:opacity .6s;";
+      d.textContent = "🤖 RIO Assistente v2.8 ativo (" + (ehWhatsApp ? "WhatsApp" : ehSite ? "site BlueOcean" : "app RIO") + ")";
+      d.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:2147483647;padding:6px 12px;border-radius:8px;background:#075e54;color:#fff;font:600 12px sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.4);transition:opacity .6s;";
       document.body.appendChild(d);
-      setTimeout(function () { d.style.opacity = "0"; }, 6000);
-      setTimeout(function () { d.remove(); }, 6800);
+      setTimeout(function () { d.style.opacity = "0"; }, 6400);
+      setTimeout(function () { d.remove(); }, 7000);
     }
     if (document.body) mostrar(); else document.addEventListener("DOMContentLoaded", mostrar);
   })();
@@ -106,6 +106,30 @@
     return String(t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
   }
   function esperar(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  // Aviso no canto inferior direito: some sozinho em 7 s (o mouse em cima pausa a contagem) e fecha no ✕ ou clicando nele.
+  var toastEl = null, toastTimer = null;
+  function toast(msg, cor) {
+    if (!document.body) return;
+    if (!toastEl || !toastEl.isConnected) {
+      toastEl = document.createElement("div");
+      toastEl.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:2147483647;max-width:380px;box-sizing:border-box;padding:12px 34px 12px 14px;border-radius:10px;font:600 13px/1.4 sans-serif;color:#fff;box-shadow:0 4px 16px rgba(0,0,0,.45);cursor:pointer;word-break:break-word;";
+      toastEl.title = "Clique para fechar";
+      var x = document.createElement("span"); x.textContent = "✕";
+      x.style.cssText = "position:absolute;top:6px;right:10px;font-size:14px;opacity:.85;";
+      toastEl.appendChild(x);
+      toastEl._msg = document.createElement("span"); toastEl.insertBefore(toastEl._msg, x);
+      toastEl.addEventListener("click", function () { toastEl.style.display = "none"; clearTimeout(toastTimer); });
+      toastEl.addEventListener("mouseenter", function () { clearTimeout(toastTimer); });
+      toastEl.addEventListener("mouseleave", function () { armar(); });
+      document.body.appendChild(toastEl);
+    }
+    function armar() { clearTimeout(toastTimer); toastTimer = setTimeout(function () { if (toastEl) toastEl.style.display = "none"; }, 7000); }
+    toastEl.style.background = cor || "#075e54";
+    toastEl._msg.textContent = msg;
+    toastEl.style.display = "block";
+    armar();
+  }
   async function aguardar(fn, ms, passo) {
     var fim = Date.now() + ms;
     while (Date.now() < fim) { var v = fn(); if (v) return v; await esperar(passo || 150); }
@@ -208,18 +232,7 @@
   // ------------------------------------------------------------------
   if (ehSite) {
     var alnum = function (t) { return norm(t).replace(/[^a-z0-9]/g, ""); };
-    var faixaSite = null;
-    var avisoSite = function (msg, cor) {
-      if (!document.body) return;
-      if (!faixaSite) {
-        faixaSite = document.createElement("div");
-        faixaSite.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:2147483647;padding:10px 16px;font:600 14px sans-serif;color:#fff;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.4);cursor:pointer;";
-        faixaSite.title = "Clique para fechar";
-        faixaSite.addEventListener("click", function () { faixaSite.style.display = "none"; });
-        document.body.appendChild(faixaSite);
-      }
-      faixaSite.style.background = cor || "#075e54"; faixaSite.textContent = msg; faixaSite.style.display = "block";
-    };
+    var avisoSite = function (msg, cor) { toast(msg, cor); };
     var setarValor = function (el, v) {
       var proto = el.tagName === "SELECT" ? HTMLSelectElement.prototype : el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
       var setter = Object.getOwnPropertyDescriptor(proto, "value").set;
@@ -521,19 +534,7 @@
   // LADO DO WHATSAPP WEB
   // ------------------------------------------------------------------
   var faixa = null;
-  function aviso(msg, cor) {
-    if (!document.body) return;
-    if (!faixa) {
-      faixa = document.createElement("div");
-      faixa.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:2147483647;padding:10px 16px;font:600 14px sans-serif;color:#fff;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.4);cursor:pointer;";
-      faixa.title = "Clique para fechar";
-      faixa.addEventListener("click", function () { faixa.style.display = "none"; });
-      document.body.appendChild(faixa);
-    }
-    faixa.style.display = "block";
-    faixa.style.background = cor || "#075e54";
-    faixa.textContent = msg;
-  }
+  function aviso(msg, cor) { toast(msg, cor); }
 
   function caixaBusca() {
     // Na versão atual do WhatsApp Web a busca pode ser um <input> ou um campo editável; procura os dois.
