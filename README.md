@@ -334,3 +334,8 @@ Cada alerta tem o botão **🤖 Preparar no WhatsApp** (no painel do mapa e no p
 (`whatsapp_assistente/`) abre o grupo da unidade na aba do WhatsApp Web já aberta e deixa a mensagem digitada, com o
 horário atual e validade de 1 hora; você confere e aperta Enter. No painel do mapa há também **📋 Copiar para o WhatsApp**
 (só copia o texto). O app não abre outra aba do WhatsApp.
+
+## Aviso de alerta de raio (configurações)
+
+Na barra lateral, **🔔 Aviso de alerta de raio**: *Pop-up no meio da tela* (padrão) ou *Canto esquerdo / Canto direito (com rolagem)*. No canto, os avisos novos
+se acumulam num painel fixo com rolagem até você fechar cada um (✕) ou usar "Fechar todos".

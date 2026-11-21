@@ -792,7 +792,7 @@
     Array.prototype.forEach.call(document.querySelectorAll("#al_corpo_ativos .al-resta"), function (sp) {
       var i = quadroItens[parseInt(sp.getAttribute("data-k"), 10)]; if (!i) return;
       var resta = (i.fimLocal - agora) / 1000;
-      sp.textContent = resta > 0 ? "faltam " + fmtResta(resta) : "⏰ prazo vencido: segue ativo até você encerrar";
+      sp.textContent = resta > 0 ? "faltam " + fmtResta(resta) : "⏰ prazo vencido: sai sozinho 10 min após o fim se não renovar";
       sp.style.color = resta <= 300 ? "#ff8a80" : "";
     });
   }

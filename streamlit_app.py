@@ -704,7 +704,7 @@ def _emitir_nivel_manual(chave_estacao, nivel):
                                             if not (x.get("estacao") == chave and x.get("nivel") == nivel)]   # sem cards repetidos do mesmo nível
     st.session_state.alertas_raio_ativos.insert(0, {
         "id": f"{chave}_{nivel}_manual_{agora_ts}", "texto": montar_mensagem_proximidade_raio(km, nome, st.session_state.get("meteorologista_nome", "")),
-        "estacao": chave, "nivel": nivel, "dist_km": None, "expira": agora_ts + 3600, "quem_recebeu": "",
+        "estacao": chave, "nivel": nivel, "dist_km": None, "expira": agora_ts + 3600, "quem_recebeu": "", "acionado": True,
     })
     st.session_state.alertas_unidade[chave] = {"nivel": nivel, "dist_km": None, "notificado_ts": agora_ts, "expira_ts": agora_ts + 3600}
     _salvar_estado()
@@ -717,7 +717,7 @@ def _antecipar_para_vermelho(alerta):
     texto = montar_mensagem_proximidade_raio(30, nome, st.session_state.get("meteorologista_nome", ""))
     st.session_state.alertas_raio_ativos.insert(0, {
         "id": f"{chave}_antecipado_{agora_ts}", "texto": texto, "estacao": chave, "nivel": "vermelho",
-        "dist_km": alerta.get("dist_km"), "expira": agora_ts + 3600, "quem_recebeu": "", "antecipado": True,
+        "dist_km": alerta.get("dist_km"), "expira": agora_ts + 3600, "quem_recebeu": "", "antecipado": True, "acionado": True,
     })
     st.session_state.alertas_unidade[chave] = {
         "nivel": "vermelho", "dist_km": alerta.get("dist_km"), "notificado_ts": agora_ts, "expira_ts": agora_ts + 3600,
@@ -732,7 +732,7 @@ def _rebaixar_para_amarelo(alerta):
     texto = montar_mensagem_proximidade_raio(50, nome, st.session_state.get("meteorologista_nome", ""))
     st.session_state.alertas_raio_ativos.insert(0, {
         "id": f"{chave}_rebaixado_{agora_ts}", "texto": texto, "estacao": chave, "nivel": "amarelo",
-        "dist_km": alerta.get("dist_km"), "expira": agora_ts + 3600, "quem_recebeu": "",
+        "dist_km": alerta.get("dist_km"), "expira": agora_ts + 3600, "quem_recebeu": "", "acionado": True,
     })
     st.session_state.alertas_unidade[chave] = {
         "nivel": "amarelo", "dist_km": alerta.get("dist_km"), "notificado_ts": agora_ts, "expira_ts": agora_ts + 3600,
@@ -740,6 +740,7 @@ def _rebaixar_para_amarelo(alerta):
     _salvar_estado()
 
 DURACOES_ALERTA_MIN = (60, 90, 120)   # 1 h, 1 h 30 e 2 h
+AUTO_REMOVER_APOS_FIM_MIN = 10        # alerta que passou do fim da validade e não foi renovado nem encerrado some 10 min depois
 
 def _min_ate_hm(hm):
     """Minutos de agora (Brasília) até o próximo HH:MM informado (1 a 1440). None se o horário for inválido."""
@@ -771,6 +772,7 @@ def _definir_validade(alerta_id, minutos, fim_hm=None):
         if a.get("id") != alerta_id or a.get("nivel") == "verde":
             continue
         agora_ts = time.time()
+        a["acionado"] = True
         a["expira"] = agora_ts + minutos * 60
         if fim_hm:
             a["fim_hm"] = ("0" + fim_hm)[-5:]
@@ -919,9 +921,17 @@ def _quadro_renovar(estacao, minutos=RENOVAR_QUADRO_MIN):
             _quadro_gravar(q)
 
 def _quadro_listar():
-    """Alertas ativos do quadro. NÃO vencem sozinhos: ficam até o meteorologista encerrar (verde, "Tirar" ou excluir)."""
+    """Alertas ativos do quadro. Ficam até o meteorologista encerrar (verde, "Tirar" ou excluir) ou renovar a validade;
+    se o fim da validade passar e ninguém renovar nem encerrar, saem sozinhos AUTO_REMOVER_APOS_FIM_MIN minutos depois."""
     q = _quadro()
     with q["lock"]:
+        agora = time.time()
+        vencidos = [k for k, v in q["emitidos"].items() if agora > v.get("expira_ts", 0) + AUTO_REMOVER_APOS_FIM_MIN * 60]
+        for k in vencidos:
+            v = q["emitidos"].pop(k)
+            _quadro_log(q, "vencido (removido sozinho)", k, v.get("nivel", ""), "", "Automático")
+        if vencidos:
+            _quadro_gravar(q)
         return sorted((dict(v) for v in q["emitidos"].values()), key=lambda v: v.get("expira_ts", 0))
 
 def _emitir_alerta_evento(alerta_id, minutos, via, fim_hm=None):
@@ -929,6 +939,7 @@ def _emitir_alerta_evento(alerta_id, minutos, via, fim_hm=None):
     alvo = next((x for x in st.session_state.alertas_raio_ativos if x.get("id") == alerta_id), None)
     if alvo is None:
         return
+    alvo["acionado"] = True
     try:
         minutos = int(minutos)
     except (TypeError, ValueError):
@@ -1316,7 +1327,7 @@ div[data-testid="stVerticalBlockBorderWrapper"] { border-radius: 12px !important
 #  - o estado dos alertas fica guardado no servidor, identificado por um código na URL (?sid=...),
 #    e é restaurado quando a mesma URL reabre.
 # ----------------------------------------------------------------------------------------------
-_CHAVES_PERSISTENTES = ("meteorologista_nome", "alertas_raio_ativos", "alertas_unidade", "verde_estado", "som_token", "altura_mapa_pct", "espessura_aneis")
+_CHAVES_PERSISTENTES = ("meteorologista_nome", "alertas_raio_ativos", "alertas_unidade", "verde_estado", "som_token", "altura_mapa_pct", "espessura_aneis", "modo_aviso_alerta", "avisos_canto")
 
 @st.cache_resource
 def _armazem_sessoes():
@@ -1398,7 +1409,7 @@ with st.sidebar:
     raios_minutos = 20  # janela exibida no mapa (cores: 0–5 · 5–10 · 10–15 · 15–20 min)
     intervalo_raios_seg = 120
     st.caption("🔄 Atualização automática: a cada 2 minutos")
-    st.caption("🔊 O som e o pop-up automático de alerta ficam sempre ativos.")
+    st.caption("🔊 O som e o aviso automático de alerta (pop-up ou canto, veja 🔔 abaixo) ficam sempre ativos.")
     arquivo_som = st.file_uploader("Trocar o som de alerta (opcional)", type=["mp3", "wav", "ogg", "m4a"])
     mostrar_deslocamento = st.checkbox("Mostrar deslocamento das células de tempestade", value=True)
 
@@ -1416,6 +1427,14 @@ with st.sidebar:
         st.session_state["espessura_aneis"] = 3       # médio
     espessura_aneis = st.slider("Espessura das linhas dos anéis", min_value=1, max_value=5, step=1, key="espessura_aneis",
                                 disabled=not mostrar_aneis, help="1 = mais fino · 3 = médio (padrão) · 5 = mais grosso")
+
+    st.subheader("🔔 Aviso de alerta de raio")
+    MODOS_AVISO = ["Pop-up no meio da tela (padrão)", "Canto esquerdo (com rolagem)", "Canto direito (com rolagem)"]
+    if st.session_state.get("modo_aviso_alerta") not in MODOS_AVISO:
+        st.session_state["modo_aviso_alerta"] = MODOS_AVISO[0]
+    st.radio("Como mostrar o alerta novo", MODOS_AVISO, key="modo_aviso_alerta",
+             help="Pop-up: janela no meio da tela, como sempre foi. Canto: um painel fixo num dos lados, com rolagem, que acumula os avisos "
+                  "até você fechar (✕) e não cobre o mapa.")
 
     st.subheader("🗺️ Mapa")
     if "altura_mapa_pct" not in st.session_state:
@@ -1639,8 +1658,20 @@ def _renderizar_mapa_ao_vivo():
         st.session_state.dialog_raio_so_verde = not notificacoes_desta_rodada   # só alerta(s) verde(s) nesta rodada
         st.session_state.dialog_raio_pendente = True
 
+    # Alerta cujo fim da validade já passou há mais de 10 min e não foi renovado (nova emissão / nova validade) nem encerrado: some.
+    _agora_lim = time.time()
+    _quadro_listar()   # também limpa do quadro compartilhado os vencidos
+    def _fim_efetivo(a):
+        _qa = _quadro_ativo(a.get("estacao"))
+        return max(a["expira"], _qa["expira_ts"]) if _qa and _qa.get("nivel") == a.get("nivel") else a["expira"]
+    _vencidos = [a for a in st.session_state.alertas_raio_ativos
+                 if a.get("nivel") != "verde" and _agora_lim > _fim_efetivo(a) + AUTO_REMOVER_APOS_FIM_MIN * 60]
+    for a in _vencidos:
+        _reg = st.session_state.alertas_unidade.get(a.get("estacao"))
+        if _reg and not _reg.get("encerrado_ts"):
+            st.session_state.alertas_unidade.pop(a.get("estacao"), None)   # libera a unidade para um novo alerta se houver novos raios
     st.session_state.alertas_raio_ativos = [a for a in st.session_state.alertas_raio_ativos
-                                            if a.get("nivel") != "verde" or a["expira"] > time.time()]
+                                            if a not in _vencidos and (a.get("nivel") != "verde" or a["expira"] > time.time())]
 
     ultima_att = st.session_state.get("ultima_atualizacao_raios")
     if ultima_att is not None:
@@ -1731,6 +1762,8 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
                 if a.get("id") == evento.get("id"):
                     valor = str(evento.get("valor", ""))[:200]
                     a["quem_recebeu"] = valor
+                    if valor.strip():
+                        a["acionado"] = True
                     st.session_state[f"quem_recebeu_{a['id']}"] = valor  # mantém o campo do painel lateral igual
         elif tipo == "finalizar":
             alvo = next((x for x in st.session_state.alertas_raio_ativos if x.get("id") == evento.get("id")), None)
@@ -1765,11 +1798,51 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
 with col_mapa:
     st.fragment(run_every=intervalo_raios_seg)(_renderizar_mapa_ao_vivo)()
 
-# Pop-up do alerta: mostrado uma única vez por alerta novo.
+def _painel_avisos_canto(lado):
+    """Avisos de alerta num painel fixo no canto (esquerdo/direito), com rolagem. Cada aviso fica até ser fechado (✕)."""
+    avisos = st.session_state.get("avisos_canto") or []
+    if not avisos:
+        return
+    try:
+        escuro = getattr(st.context.theme, "type", "light") == "dark"
+    except Exception:
+        escuro = False
+    fundo, borda = ("#10151d", "#2b3444") if escuro else ("#ffffff", "#c9d1dc")
+    st.markdown(
+        "<style>.st-key-avisos_canto_box{position:fixed;bottom:16px;%s:16px;width:min(430px,92vw);max-height:72vh;overflow-y:auto;"
+        "z-index:999990;background:%s;border:1px solid %s;border-radius:12px;padding:10px 12px;box-shadow:0 8px 28px rgba(0,0,0,.35);}"
+        ".st-key-avisos_canto_box pre{white-space:pre-wrap;word-break:break-word;}</style>" % (lado, fundo, borda),
+        unsafe_allow_html=True)
+    with st.container(key="avisos_canto_box"):
+        _h1, _h2 = st.columns([4, 2], vertical_alignment="center")
+        _h1.markdown(f"**🔔 Alertas novos ({len(avisos)})**")
+        if _h2.button("Fechar todos", key="fechar_todos_avisos", use_container_width=True):
+            st.session_state["avisos_canto"] = []
+            st.rerun()
+        for av in list(avisos):
+            with st.container(border=True):
+                _c1, _c2 = st.columns([6, 1], vertical_alignment="center")
+                _c1.markdown(f"**{av['titulo']}** · {av['hm']}")
+                if _c2.button("✕", key=f"fechar_aviso_{av['id']}", help="Fechar este aviso"):
+                    st.session_state["avisos_canto"] = [x for x in st.session_state["avisos_canto"] if x["id"] != av["id"]]
+                    st.rerun()
+                st.code(av["texto"], language=None)
+
+# Aviso do alerta: mostrado uma única vez por alerta novo, como pop-up (padrão) ou no canto da tela (opção nas configurações).
+_modo_aviso = st.session_state.get("modo_aviso_alerta", "")
 if st.session_state.get("dialog_raio_pendente"):
     st.session_state["dialog_raio_pendente"] = False
     _titulo_dialog = "🟢 Alerta verde — sem raios próximos" if st.session_state.get("dialog_raio_so_verde") else "⚡ Raio próximo de unidade(s)!"
-    st.dialog(_titulo_dialog)(_corpo_dialog_alerta_raio)()
+    if _modo_aviso.startswith("Canto"):
+        _hm_av = (datetime.now(timezone.utc) - timedelta(hours=3)).strftime("%H:%M")
+        _lista = st.session_state.get("avisos_canto") or []
+        _lista.insert(0, {"id": f"{time.time():.3f}", "titulo": _titulo_dialog, "hm": _hm_av,
+                          "texto": st.session_state.get("dialog_raio_texto", "")})
+        st.session_state["avisos_canto"] = _lista[:30]
+    else:
+        st.dialog(_titulo_dialog)(_corpo_dialog_alerta_raio)()
+if _modo_aviso.startswith("Canto"):
+    _painel_avisos_canto("left" if "esquerdo" in _modo_aviso else "right")
 st.session_state["_run_completo"] = False
 
 def _painel_alertas_ativos():
@@ -1794,7 +1867,7 @@ def _painel_alertas_ativos():
                 f"<div style='font-size:13px;margin-top:2px'>Emitido por <b>{quem}</b> às {_fmt_hm(it['emitido_ts'])}" + (f" ({vias})" if vias else "") + "</div>"
                 f"<div style='font-size:13px'>Válido até <b>{_fmt_hm(it['expira_ts'])}</b> · "
                 + (f"faltam <b style='color:{corcont}'>{resta // 60:02d}:{resta % 60:02d}</b>" if resta > 0
-                   else "<b style='color:#ff8a80'>⏰ prazo vencido: segue ativo até você encerrar</b>") + "</div></div>", unsafe_allow_html=True)
+                   else "<b style='color:#ff8a80'>⏰ prazo vencido: sai sozinho 10 min após o fim se não renovar</b>") + "</div></div>", unsafe_allow_html=True)
             if st.button("✖ Tirar", key=f"ativo_tirar_{it['estacao']}", help="Remove do quadro (alerta encerrado)"):
                 _quadro_remover(estacao=it["estacao"], motivo="removido do quadro")
                 _rerun_fragmento()
@@ -1867,6 +1940,8 @@ with col_lado:
                                     key=f"quem_recebeu_{a['id']}", placeholder="nome de quem confirmou o recebimento",
                                 )
                                 a["quem_recebeu"] = quem
+                                if quem.strip():
+                                    a["acionado"] = True
                                 st.code(montar_texto_copia(a), language=None)
                                 _dur, _fim = 60, ""
                                 if a.get("nivel") != "verde":

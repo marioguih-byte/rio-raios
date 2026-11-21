@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RIO Raios → WhatsApp Web (assistente com supervisão)
 // @namespace    rio-raios
-// @version      2.6
+// @version      2.7
 // @description  Recebe o alerta do app RIO Raios, abre o grupo da unidade no WhatsApp Web e deixa a mensagem DIGITADA, e preenche o formulário do site da BlueOcean. Você confere e confirma.
 // @match        https://web.whatsapp.com/*
 // @match        https://*.streamlit.app/*
@@ -71,6 +71,12 @@
   // Se TODOS os grupos tiverem a mesma palavra no nome (ex.: "ALERTAS"), ela é preferida quando houver mais de um resultado.
   var PALAVRA_PREFERIDA = "alertas";
 
+  // Texto do campo "Texto" do site no modo Manual (o mesmo padrão do modo Automático). Se o seu for diferente, edite aqui.
+  var TEXTO_SITE = {
+    vermelho: "Raios próximos de sua região (-15 min até o momento)",
+    amarelo: "Raios próximos de sua região (-30 min até o momento)",
+    verde: "FIM DO ALERTA DE RAIOS"
+  };
   var CHAVE = "rio_envio";
   var CHAVE_FILA = "rio_fila";
   var CHAVE_REGISTRO = "rio_registro";
@@ -87,7 +93,7 @@
       if (!document.body || document.getElementById("rio-selo")) return;
       var d = document.createElement("div");
       d.id = "rio-selo";
-      d.textContent = "🤖 RIO Assistente v2.6 ativo (" + (ehWhatsApp ? "WhatsApp" : ehSite ? "site BlueOcean" : "app RIO") + ")";
+      d.textContent = "🤖 RIO Assistente v2.7 ativo (" + (ehWhatsApp ? "WhatsApp" : ehSite ? "site BlueOcean" : "app RIO") + ")";
       d.style.cssText = "position:fixed;left:12px;bottom:12px;z-index:2147483647;padding:6px 12px;border-radius:8px;background:#075e54;color:#fff;font:600 12px sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.4);transition:opacity .6s;";
       document.body.appendChild(d);
       setTimeout(function () { d.style.opacity = "0"; }, 6000);
@@ -350,7 +356,7 @@
         // 7) Texto = a mensagem do alerta (modo manual)
         if (manual) {
           var ta = raiz.querySelector("textarea");
-          if (!ta) falhas.push("campo Texto"); else if (d.texto) setarValor(ta, d.texto);
+          if (!ta) falhas.push("campo Texto"); else setarValor(ta, TEXTO_SITE[d.nivel] || TEXTO_SITE.vermelho);
         }
         var botao = manual ? "Registrar evento" : "Salvar alerta automático";
         if (falhas.length) avisoSite("⚠️ Preenchi o que deu, mas não achei: " + falhas.join("; ") + ". Complete à mão e salve.", "#b45309");

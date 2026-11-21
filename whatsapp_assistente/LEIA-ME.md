@@ -98,3 +98,9 @@ No painel de cada unidade há três botões: **🟢 Emitir alerta verde**, **�
   cadastrado no RIO)**, Tipo de alerta = Raios, Nível e Texto; no **Automático** preenche como antes. Nunca clica em salvar.
 - **Navegadores:** Chrome, Edge, Brave, Opera e Firefox (Tampermonkey ou Violentmonkey). O script tem plano B se o gerenciador não avisar mudanças
   (consulta a cada 1 s) e se a área de transferência estiver bloqueada.
+
+## Alerta que venceu
+
+O alerta continua ativo até você encerrar (🟢 verde / "Tirar") **ou** renovar a validade (emitir de novo, mudar a validade ou "+30 min" no quadro). Se o fim da validade
+passar e **10 minutos depois** nada disso foi feito, o alerta sai sozinho do quadro e dos painéis (fica registrado no histórico como "vencido"), e a unidade
+volta a poder receber um novo alerta se chegarem raios novos.
