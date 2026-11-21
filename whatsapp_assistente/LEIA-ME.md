@@ -86,3 +86,15 @@ Os alertas amarelo/vermelho **não terminam sozinhos**: nem quando os raios se a
 - **Espessura das linhas dos anéis**: de 1 (mais fino) a 5 (mais grosso); o padrão é 3 (médio, igual ao que era antes).
 
 No painel de cada unidade há três botões: **🟢 Emitir alerta verde**, **🟡 Emitir alerta amarelo** e **🔴 Emitir alerta vermelho**. Cada um gera o card do nível escolhido (mensagem de 50 km no amarelo e de 30 km no vermelho), mesmo sem raio por perto; depois é só copiar, preparar no WhatsApp ou registrar no site.
+
+## Versão 2.6 — o que mudou
+
+- **Sem mensagem duplicada no WhatsApp:** a caixa de mensagem é esvaziada antes de digitar (um rascunho antigo não é emendado), o texto é conferido
+  (nem faltando, nem repetido) e cada pedido é tratado por uma única aba, mesmo com duas abas do WhatsApp abertas. No app, se a mesma mensagem
+  (unidade + nível) já foi enviada nos últimos 30 min por qualquer meteorologista, o botão pede um **segundo clique** para confirmar.
+  Além disso, outra sessão do app não recria o alerta de uma unidade que alguém já emitiu ou já finalizou.
+- **Fim do alerta manual:** em "Validade" escolha **Fim manual** e digite o horário (HH:MM, Brasília). Vale para a mensagem e para o Vencimento no site.
+- **Site da BlueOcean:** funciona nos dois modos do formulário. No **Manual** preenche Unidade, Data e hora, Vencimento, **Meteorologista (o nome
+  cadastrado no RIO)**, Tipo de alerta = Raios, Nível e Texto; no **Automático** preenche como antes. Nunca clica em salvar.
+- **Navegadores:** Chrome, Edge, Brave, Opera e Firefox (Tampermonkey ou Violentmonkey). O script tem plano B se o gerenciador não avisar mudanças
+  (consulta a cada 1 s) e se a área de transferência estiver bloqueada.

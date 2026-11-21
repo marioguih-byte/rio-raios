@@ -664,6 +664,7 @@ def _finalizar_alerta_unidade(chave_estacao):
     reg["encerrado_ts"] = agora_ts
     reg["encerrado_km"] = 50   # finalizado à mão: raios até 50 km anteriores a agora deixam de contar
     _quadro_remover(estacao=chave_estacao)   # some do quadro compartilhado
+    _quadro_marcar_verde(chave_estacao)
     _salvar_estado()
 
 def _emitir_verde_manual(chave_estacao):
@@ -683,6 +684,7 @@ def _emitir_verde_manual(chave_estacao):
         "estacao": chave, "nivel": "verde", "dist_km": None, "expira": agora_ts + 3600, "quem_recebeu": "",
     })
     _quadro_remover(estacao=chave, motivo="alerta verde emitido")
+    _quadro_marcar_verde(chave)
     _salvar_estado()
 
 def _emitir_nivel_manual(chave_estacao, nivel):
@@ -739,20 +741,43 @@ def _rebaixar_para_amarelo(alerta):
 
 DURACOES_ALERTA_MIN = (60, 90, 120)   # 1 h, 1 h 30 e 2 h
 
-def _definir_validade(alerta_id, minutos):
-    """Alerta passa a durar `minutos` a partir de AGORA (some da lista e só renotifica depois disso)."""
+def _min_ate_hm(hm):
+    """Minutos de agora (Brasília) até o próximo HH:MM informado (1 a 1440). None se o horário for inválido."""
+    m = re.match(r"^\s*(\d{1,2}):(\d{2})\s*$", str(hm or ""))
+    if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
+        return None
+    agora = datetime.now(timezone.utc) - timedelta(hours=3)
+    delta = (int(m.group(1)) * 60 + int(m.group(2))) - (agora.hour * 60 + agora.minute)
+    if delta <= 0:
+        delta += 1440
+    return delta
+
+def _definir_validade(alerta_id, minutos, fim_hm=None):
+    """Alerta passa a durar `minutos` a partir de AGORA. Com `fim_hm` (HH:MM), o fim foi escolhido à mão.
+    O alerta continua ativo até o meteorologista encerrar; isto só muda o horário informado na mensagem/site."""
+    fim_hm = str(fim_hm or "").strip()
+    if fim_hm:
+        calc = _min_ate_hm(fim_hm)
+        if calc is None:
+            return
+        minutos = calc
     try:
         minutos = int(minutos)
     except (TypeError, ValueError):
         return
-    if minutos not in DURACOES_ALERTA_MIN:
+    if not (1 <= minutos <= 1440):
         return
     for a in st.session_state.alertas_raio_ativos:
         if a.get("id") != alerta_id or a.get("nivel") == "verde":
             continue
         agora_ts = time.time()
         a["expira"] = agora_ts + minutos * 60
-        a["duracao_min"] = minutos
+        if fim_hm:
+            a["fim_hm"] = ("0" + fim_hm)[-5:]
+        else:
+            a.pop("fim_hm", None)
+            if minutos in DURACOES_ALERTA_MIN:
+                a["duracao_min"] = minutos
         reg = st.session_state.alertas_unidade.get(a.get("estacao"))
         if reg and not reg.get("encerrado_ts") and reg.get("nivel") == a.get("nivel"):
             reg["expira_ts"] = agora_ts + minutos * 60
@@ -783,7 +808,7 @@ PRESENCA_SEG = 75   # sem sinal de vida por mais que isso = saiu do site
 
 @st.cache_resource
 def _quadro():
-    q = {"lock": threading.RLock(), "emitidos": {}, "escala": [], "historico": [], "ponto": [], "online": {}}
+    q = {"lock": threading.RLock(), "emitidos": {}, "escala": [], "historico": [], "ponto": [], "online": {}, "enviados": {}, "verdes": {}}
     try:
         with open(_ARQ_ESCALA_PADRAO, encoding="utf-8") as f:   # escala "de fábrica" (opcional, vinda do GitHub)
             q["escala"] = json.load(f)
@@ -795,6 +820,8 @@ def _quadro():
         q["emitidos"] = d.get("emitidos", {})
         q["historico"] = d.get("historico", [])
         q["ponto"] = d.get("ponto", [])
+        q["enviados"] = d.get("enviados", {})
+        q["verdes"] = d.get("verdes", {})
         if d.get("escala") is not None:
             q["escala"] = d["escala"]
     except Exception:
@@ -804,7 +831,8 @@ def _quadro():
 def _quadro_gravar(q):
     try:
         with open(_ARQ_QUADRO, "w", encoding="utf-8") as f:
-            json.dump({"emitidos": q["emitidos"], "escala": q["escala"], "historico": q["historico"], "ponto": q["ponto"]}, f, ensure_ascii=False)
+            json.dump({"emitidos": q["emitidos"], "escala": q["escala"], "historico": q["historico"], "ponto": q["ponto"],
+                       "enviados": q.get("enviados", {}), "verdes": q.get("verdes", {})}, f, ensure_ascii=False)
     except Exception:
         pass   # gravar nunca pode derrubar o app
 
@@ -817,10 +845,42 @@ def _quadro_log(q, evento, estacao, nivel="", quem="", via=""):
 def _nome_atual():
     return str(st.session_state.get("meteorologista_nome", "")).strip()
 
+JANELA_DUPLICADO_SEG = 30 * 60   # mesma mensagem (unidade + nível) enviada ao WhatsApp há menos que isso = possível duplicada
+_NIVEL_ORDEM = {"verde": 0, "amarelo": 1, "vermelho": 2}
+
+def _quadro_ativo(estacao):
+    q = _quadro()
+    with q["lock"]:
+        v = q["emitidos"].get(estacao)
+        return dict(v) if v else None
+
+def _quadro_marcar_verde(estacao):
+    """Registra no quadro (compartilhado) que a unidade foi finalizada: as outras sessões não recriam o alerta com raios antigos."""
+    q = _quadro()
+    with q["lock"]:
+        q.setdefault("verdes", {})[estacao] = time.time()
+        _quadro_gravar(q)
+
+def _quadro_verde_ts(estacao):
+    q = _quadro()
+    with q["lock"]:
+        return q.get("verdes", {}).get(estacao)
+
+def _quadro_enviado_recente(estacao, nivel):
+    """Quem já mandou (WhatsApp/cópia) esta mesma mensagem (unidade + nível) há pouco tempo, ou None."""
+    q = _quadro()
+    with q["lock"]:
+        r = q.get("enviados", {}).get(f"{estacao}|{nivel}")
+        if r and time.time() - r.get("ts", 0) < JANELA_DUPLICADO_SEG:
+            return dict(r)
+    return None
+
 def _quadro_emitir(alerta, via, minutos):
     """Publica (ou atualiza) o alerta da unidade no quadro. Alerta verde = fim do alerta: tira a unidade do quadro."""
     q, agora, est = _quadro(), time.time(), alerta.get("estacao")
     with q["lock"]:
+        if via in ("WhatsApp", "Copiado"):
+            q.setdefault("enviados", {})[f"{est}|{alerta.get('nivel')}"] = {"ts": agora, "por": _nome_atual(), "via": via, "id": alerta.get("id")}
         if alerta.get("nivel") == "verde":
             if q["emitidos"].pop(est, None) is not None:
                 _quadro_log(q, "finalizado", est, "verde", _nome_atual(), via)
@@ -864,7 +924,7 @@ def _quadro_listar():
     with q["lock"]:
         return sorted((dict(v) for v in q["emitidos"].values()), key=lambda v: v.get("expira_ts", 0))
 
-def _emitir_alerta_evento(alerta_id, minutos, via):
+def _emitir_alerta_evento(alerta_id, minutos, via, fim_hm=None):
     """Chamado quando alguém clica em copiar / preparar no WhatsApp / registrar no site."""
     alvo = next((x for x in st.session_state.alertas_raio_ativos if x.get("id") == alerta_id), None)
     if alvo is None:
@@ -874,7 +934,8 @@ def _emitir_alerta_evento(alerta_id, minutos, via):
     except (TypeError, ValueError):
         minutos = alvo.get("duracao_min", 60)
     if alvo.get("nivel") != "verde":
-        _definir_validade(alerta_id, minutos)
+        _definir_validade(alerta_id, minutos, fim_hm)
+        minutos = max(1, int((alvo.get("expira", time.time() + 3600) - time.time()) / 60))
     else:
         minutos = 60
     _quadro_emitir(alvo, via, minutos)
@@ -1546,6 +1607,16 @@ def _renderizar_mapa_ao_vivo():
             # (sem renotificar por vencimento: o alerta só termina quando o meteorologista encerra)
 
             if deve_notificar:
+                # Outro meteorologista (outra sessão) já emitiu alerta igual/maior para esta unidade, ou já finalizou e
+                # o raio é o mesmo de antes: não cria card nem toca som de novo (evita mensagem duplicada no WhatsApp).
+                _q_ativo = _quadro_ativo(chave_estacao)
+                if _q_ativo and _NIVEL_ORDEM.get(_q_ativo.get("nivel"), 0) >= _NIVEL_ORDEM.get(nivel_atual, 0):
+                    continue
+                _v_ts = _quadro_verde_ts(chave_estacao)
+                if _v_ts:
+                    _ult = ultimo_raio_ate_km(raios_df, float(est["lat"]), float(est["lon"]), 30 if nivel_atual == "vermelho" else 50)
+                    if _ult is None or _ult.timestamp() <= _v_ts:
+                        continue
                 st.session_state.alertas_unidade[chave_estacao] = {
                     "nivel": nivel_atual, "dist_km": float(dist_atual),
                     "notificado_ts": agora_ts, "expira_ts": agora_ts + 3600,
@@ -1592,6 +1663,14 @@ def _renderizar_mapa_ao_vivo():
     if st.session_state.get("dialog_raio_pendente") and not st.session_state.get("_run_completo"):
         st.rerun()
 
+def _aviso_duplicado(a):
+    """Texto de aviso se esta mesma mensagem (unidade + nível) já foi enviada recentemente por alguém; senão ''."""
+    r = _quadro_enviado_recente(a.get("estacao"), a.get("nivel"))
+    if not r:
+        return ""
+    hm = (datetime.fromtimestamp(r["ts"], tz=timezone.utc) - timedelta(hours=3)).strftime("%H:%M")
+    return f"{r.get('por') or 'alguém'} às {hm}"
+
 def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas, status_texto):
     estacoes_payload = [
         {
@@ -1610,7 +1689,8 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
         {"id": a["id"], "estacao": a.get("estacao"), "quem_recebeu": a.get("quem_recebeu", ""),
          "copia": montar_texto_copia(a), "base": a["texto"], "nivel": a.get("nivel"), "finalizavel": a["id"] in _finalizaveis,
          "anteciparvel": a.get("nivel") == "amarelo" and a["id"] in _finalizaveis,
-         "rebaixavel": a.get("nivel") == "vermelho" and a["id"] in _finalizaveis, "duracao_min": a.get("duracao_min", 60)}
+         "rebaixavel": a.get("nivel") == "vermelho" and a["id"] in _finalizaveis, "duracao_min": a.get("duracao_min", 60),
+         "fim_hm": a.get("fim_hm", ""), "ja_enviado": _aviso_duplicado(a)}
         for a in st.session_state.alertas_raio_ativos
     ]
 
@@ -1625,6 +1705,7 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
         celulas=raios_payload["celulas"],
         aneis=aneis_payload,
         espessura_aneis=int(espessura_aneis),
+        meteorologista=str(st.session_state.get("meteorologista_nome", "")).strip(),
         janela_min=raios_minutos,
         tamanho_raio=TAMANHO_BOLINHA_RAIO,
         altura_pct=int(st.session_state.get("altura_mapa_pct", 86)),
@@ -1664,9 +1745,9 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
             if alvo is not None and alvo.get("nivel") == "vermelho" and alvo["id"] in _alertas_finalizaveis():
                 _rebaixar_para_amarelo(alvo)
         elif tipo == "validade":
-            _definir_validade(evento.get("id"), evento.get("minutos"))
+            _definir_validade(evento.get("id"), evento.get("minutos"), evento.get("fim"))
         elif tipo == "emitir":
-            _emitir_alerta_evento(evento.get("id"), evento.get("minutos"), evento.get("via"))
+            _emitir_alerta_evento(evento.get("id"), evento.get("minutos"), evento.get("via"), evento.get("fim"))
         elif tipo == "excluir":
             _quadro_remover(alerta_id=evento.get("id"), motivo="excluído")
             st.session_state.alertas_raio_ativos = [x for x in st.session_state.alertas_raio_ativos if x.get("id") != evento.get("id")]
@@ -1787,18 +1868,30 @@ with col_lado:
                                 )
                                 a["quem_recebeu"] = quem
                                 st.code(montar_texto_copia(a), language=None)
-                                _dur = 60
+                                _dur, _fim = 60, ""
                                 if a.get("nivel") != "verde":
-                                    _dur = st.radio("Validade do alerta", DURACOES_ALERTA_MIN, index=DURACOES_ALERTA_MIN.index(a.get("duracao_min", 60)),
-                                                    format_func=lambda m: {60: "1 hora", 90: "1 hora e meia", 120: "2 horas"}[m],
+                                    _opc = list(DURACOES_ALERTA_MIN) + [0]
+                                    _idx = len(_opc) - 1 if a.get("fim_hm") else (_opc.index(a.get("duracao_min", 60)) if a.get("duracao_min", 60) in DURACOES_ALERTA_MIN else 0)
+                                    _dur = st.radio("Validade do alerta", _opc, index=_idx,
+                                                    format_func=lambda m: {60: "1 hora", 90: "1 hora e meia", 120: "2 horas", 0: "Fim manual"}[m],
                                                     horizontal=True, key=f"dur_{a['id']}")
-                                    if _dur != a.get("duracao_min", 60):
+                                    if _dur == 0:
+                                        _fim = st.text_input("Fim do alerta (HH:MM, Brasília)", value=a.get("fim_hm", ""), max_chars=5,
+                                                             key=f"fim_{a['id']}", placeholder="ex.: 15:30").strip()
+                                        _calc = _min_ate_hm(_fim)
+                                        if _fim and _calc is None:
+                                            st.warning("Horário inválido. Use HH:MM, por exemplo 15:30.")
+                                        if _calc is not None and _fim.zfill(5) != a.get("fim_hm"):
+                                            _definir_validade(a["id"], _calc, _fim)
+                                        _dur = _calc or 60
+                                    elif a.get("fim_hm") or _dur != a.get("duracao_min", 60):
                                         _definir_validade(a["id"], _dur)
                                 _ev_b = _botoes_envio(estacao=a.get("estacao", ""), texto=montar_texto_copia(a), id=a.get("id", ""),
-                                                      minutos=_dur, nivel=a.get("nivel", "vermelho"), default=None, key=f"botoes_{a['id']}")
+                                                      minutos=_dur, fim=_fim, nivel=a.get("nivel", "vermelho"), meteorologista=_nome_atual(),
+                                                      ja_enviado=_aviso_duplicado(a), default=None, key=f"botoes_{a['id']}")
                                 if isinstance(_ev_b, dict) and _ev_b.get("nonce") and _ev_b["nonce"] != st.session_state.get(f"_nonce_botoes_{a['id']}"):
                                     st.session_state[f"_nonce_botoes_{a['id']}"] = _ev_b["nonce"]
-                                    _emitir_alerta_evento(a["id"], _ev_b.get("minutos"), _ev_b.get("via"))
+                                    _emitir_alerta_evento(a["id"], _ev_b.get("minutos"), _ev_b.get("via"), _ev_b.get("fim"))
                                     _salvar_estado()
                                     st.rerun()
                                 if a.get("nivel") == "amarelo" and a.get("id") in _finalizaveis:

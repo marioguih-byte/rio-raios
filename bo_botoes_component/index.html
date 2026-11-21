@@ -9,7 +9,7 @@
 <script>
 (function () {
   function enviar(type, data) { window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: type }, data), "*"); }
-  var A = { estacao: "", texto: "", id: "", minutos: 60, nivel: "vermelho" }, cont = 0;
+  var A = { estacao: "", texto: "", id: "", minutos: 60, fim: "", nivel: "vermelho", meteorologista: "", ja_enviado: "" }, cont = 0, armado = false;
   function partes(ms) {
     var f = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit",
                                                hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(ms));
@@ -17,7 +17,7 @@
     return { data: o.day + "/" + o.month + "/" + o.year, hora: o.hour + ":" + o.minute };
   }
   function atual(t) {
-    var a = partes(Date.now()), fim = partes(Date.now() + A.minutos * 60000);
+    var a = partes(Date.now()), fim = A.fim ? { hora: ("0" + A.fim).slice(-5) } : partes(Date.now() + A.minutos * 60000);
     return t.replace(/\d{2}\/\d{2}\/\d{4} - \d{2}:\d{2}/, a.data + " - " + a.hora).replace(/Válido até as \d{2}:\d{2}/, "Válido até as " + fim.hora);
   }
   function copiar(t) {
@@ -34,17 +34,25 @@
       window.removeEventListener("message", ack);
       if (confirmou) { btn.textContent = okTxt; }
       else { if (fallbackCopia) copiar(texto); btn.textContent = falhaTxt; }
-      enviar("streamlit:setComponentValue", { value: { tipo: "emitir", id: A.id, via: via, minutos: A.minutos, nonce: Date.now() + "-" + (++cont) }, dataType: "json" });
+      enviar("streamlit:setComponentValue", { value: { tipo: "emitir", id: A.id, via: via, minutos: A.minutos, fim: A.fim || "", nonce: Date.now() + "-" + (++cont) }, dataType: "json" });
       setTimeout(function () { btn.textContent = rotulo; }, 4000);
     }, 1200);
   }
   var bw = document.getElementById("w"), bs = document.getElementById("s");
+  // Anti-duplicidade: se a mesma mensagem (unidade + nível) já foi enviada há pouco, pede um 2º clique para confirmar.
+  function confirmarDuplicado(btn, rotulo) {
+    if (!A.ja_enviado || armado) { armado = false; return true; }
+    armado = true; btn.textContent = "⚠️ Já enviado por " + A.ja_enviado + " - clique de novo para enviar mesmo assim";
+    setTimeout(function () { armado = false; btn.textContent = rotulo; }, 6000);
+    return false;
+  }
   bw.addEventListener("click", function () {
+    if (!confirmarDuplicado(bw, "🤖 Preparar no WhatsApp")) return;
     acao(bw, "🤖 Preparar no WhatsApp", function (t) { return { tipo: "preparar", texto: t }; }, "WhatsApp",
          "✔ Enviado ao WhatsApp - confira la e de Enter", "Script nao detectado - texto copiado (Ctrl+V)", true);
   });
   bs.addEventListener("click", function () {
-    acao(bs, "📝 Registrar no site", function () { return { tipo: "registrar", nivel: A.nivel, minutos: A.minutos }; }, "Site",
+    acao(bs, "📝 Registrar no site", function (t) { return { tipo: "registrar", nivel: A.nivel, minutos: A.minutos, texto: t, meteorologista: A.meteorologista || "" }; }, "Site",
          "✔ Enviado - confira o formulario na aba do site", "Script nao detectado (atualize o Tampermonkey)", false);
   });
   window.addEventListener("message", function (ev) {

@@ -47,6 +47,7 @@
   .al-acoes button.al-rebaixar:hover { background: #a16207; }
   .al-dur-linha { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
   select.al-dur { width: auto; }
+  input.al-fim { width: auto; }
   .al-acoes button.al-whats { background: #075e54; border-color: #25d366; color: #d1fae5; }
   .al-acoes button.al-whats:hover { background: #128c7e; }
   .al-limpar { width: 100%; margin-bottom: 10px; padding: 6px 10px; }
@@ -706,15 +707,18 @@
 
   // Mesmo card de alerta na aba Alertas e no painel da unidade (quem recebeu, mensagem, copiar, finalizar, excluir).
   function cardAlertaHtml(a) {
-    return '<div class="al-card" data-id="' + esc(a.id) + '" data-estacao="' + esc(a.estacao || "") + '" data-nivel="' + esc(a.nivel || "") + '" data-base="' + esc(a.base || "") + '">' +
+    return '<div class="al-card" data-id="' + esc(a.id) + '" data-estacao="' + esc(a.estacao || "") + '" data-nivel="' + esc(a.nivel || "") + '" data-base="' + esc(a.base || "") + '" data-enviado="' + esc(a.ja_enviado || "") + '">' +
       '<label style="font-size:12px;color:#c4cbd6;">Quem recebeu o alerta:</label>' +
       '<input class="al-input" data-acao="quem" value="' + esc(a.quem_recebeu || "") + '" placeholder="nome de quem confirmou o recebimento" />' +
       '<pre class="al-pre">' + esc(a.copia) + '</pre>' +
       (a.nivel !== "verde" ? '<div class="al-dur-linha"><label style="font-size:12px;color:#c4cbd6;">Validade:</label>' +
         '<select class="al-input al-dur" data-acao="duracao">' +
-        [[60, "1 hora"], [90, "1 hora e meia"], [120, "2 horas"]].map(function (o) {
-          return '<option value="' + o[0] + '"' + ((duracoes[a.id] || a.duracao_min || 60) === o[0] ? " selected" : "") + '>' + o[1] + '</option>';
-        }).join("") + '</select></div>' : '') +
+        [[60, "1 hora"], [90, "1 hora e meia"], [120, "2 horas"], ["manual", "Fim manual"]].map(function (o) {
+          var atual = duracoes[a.id] || (a.fim_hm ? "manual" : (a.duracao_min || 60));
+          return '<option value="' + o[0] + '"' + (String(atual) === String(o[0]) ? " selected" : "") + '>' + o[1] + '</option>';
+        }).join("") + '</select>' +
+        '<input class="al-input al-fim" data-acao="fim" type="time" value="' + esc(fimsManuais[a.id] || a.fim_hm || "") + '" title="Horário do fim do alerta (Brasília)"' +
+        ((duracoes[a.id] || (a.fim_hm ? "manual" : "")) === "manual" ? "" : ' style="display:none"') + ' /></div>' : '') +
       '<div class="al-acoes"><button data-acao="copiar" class="al-whats">📋 Copiar para o WhatsApp</button>' +
       '<button data-acao="preparar" class="al-whats" title="Precisa do script do Tampermonkey (pasta whatsapp_assistente). Abre o grupo no WhatsApp Web e deixa a mensagem digitada para você conferir e apertar Enter.">🤖 Preparar no WhatsApp</button>' +
       '<button data-acao="registrar" class="al-whats" style="background:#1d70b8;border-color:#1d70b8;color:#fff" title="Precisa do script do Tampermonkey e da aba Registro de eventos críticos aberta. Preenche o formulário Novo evento; você confere e clica em Salvar.">📝 Registrar no site</button>' +
@@ -833,31 +837,48 @@
     var o = {}; f.forEach(function (p) { o[p.type] = p.value; });
     return { data: o.day + "/" + o.month + "/" + o.year, hora: o.hour + ":" + o.minute };
   }
-  function comHorarioAtual(texto, minutos) {
-    var agora = partesBrasilia(Date.now()), fim = partesBrasilia(Date.now() + (minutos || 60) * 60000);
+  function comHorarioAtual(texto, minutos, hm) {
+    var agora = partesBrasilia(Date.now()), fim = hm ? { hora: ("0" + hm).slice(-5) } : partesBrasilia(Date.now() + (minutos || 60) * 60000);
     return String(texto)
       .replace(/\d{2}\/\d{2}\/\d{4} - \d{2}:\d{2}/, agora.data + " - " + agora.hora)
       .replace(/Válido até as \d{2}:\d{2}/, "Válido até as " + fim.hora);
   }
-  var duracoes = {};   // duração escolhida por alerta (minutos); padrão 60
-  function duracaoDoCard(card) {
-    var sel = card.querySelector('select[data-acao="duracao"]');
-    return sel ? parseInt(sel.value, 10) || 60 : 60;
+  var duracoes = {};       // duração escolhida por alerta (minutos ou "manual"); padrão 60
+  var fimsManuais = {};    // horário HH:MM do fim manual, por alerta
+  var meteorologistaApp = "";   // nome cadastrado no RIO (vai para o campo Meteorologista do site)
+  var enviadoAviso = {};   // alerta -> texto do aviso de duplicidade já confirmado (2º clique)
+  function minutosAteHM(hm) {
+    var m = /^(\d{1,2}):(\d{2})$/.exec(hm); if (!m) return 60;
+    var b = partesBrasilia(Date.now()).hora.split(":"), d = (parseInt(m[1], 10) * 60 + parseInt(m[2], 10)) - (parseInt(b[0], 10) * 60 + parseInt(b[1], 10));
+    if (d <= 0) d += 1440;
+    return d;
   }
+  // { minutos, hm }: hm só existe quando o fim foi digitado à mão.
+  function duracaoInfo(card) {
+    var sel = card.querySelector('select[data-acao="duracao"]');
+    if (sel && sel.value === "manual") {
+      var inp = card.querySelector('input[data-acao="fim"]'), v = inp ? String(inp.value || "").trim() : "";
+      if (/^\d{1,2}:\d{2}$/.test(v)) return { minutos: minutosAteHM(v), hm: v };
+      return { minutos: 60, hm: "" };
+    }
+    return { minutos: sel ? parseInt(sel.value, 10) || 60 : 60, hm: "" };
+  }
+  function duracaoDoCard(card) { return duracaoInfo(card).minutos; }
   function textoAtualizado(card) {
-    var pre = card.querySelector(".al-pre");
-    pre.textContent = comHorarioAtual(pre.textContent, duracaoDoCard(card));
+    var pre = card.querySelector(".al-pre"), d = duracaoInfo(card);
+    pre.textContent = comHorarioAtual(pre.textContent, d.minutos, d.hm);
     return pre.textContent;
   }
   // Avisa o servidor: o alerta passa a durar a duração escolhida a partir de agora.
   function registrarValidade(card, via) {
     // "emitir": o servidor ajusta a validade e publica o alerta no quadro compartilhado (verde = tira o alerta do quadro).
-    enviarEvento({ tipo: "emitir", id: card.getAttribute("data-id"), minutos: duracaoDoCard(card), via: via || "" });
+    var d = duracaoInfo(card);
+    enviarEvento({ tipo: "emitir", id: card.getAttribute("data-id"), minutos: d.minutos, fim: d.hm, via: via || "" });
   }
   function atualizarTextoCard(input) {
     var card = input.closest(".al-card"); if (!card) return;
     var pre = card.querySelector(".al-pre");
-    if (pre && card.hasAttribute("data-base")) pre.textContent = comHorarioAtual(textoComQuem(card.getAttribute("data-base"), card.getAttribute("data-nivel"), input.value), duracaoDoCard(card));
+    if (pre && card.hasAttribute("data-base")) { var d = duracaoInfo(card); pre.textContent = comHorarioAtual(textoComQuem(card.getAttribute("data-base"), card.getAttribute("data-nivel"), input.value), d.minutos, d.hm); }
   }
   // Manda o alerta para o script do Tampermonkey (que roda na página do app) e ele prepara a mensagem no WhatsApp Web.
   // Sem o script instalado não chega confirmação: aí o texto é só copiado (plano B).
@@ -888,7 +909,8 @@
     window.addEventListener("message", ack);
     try {
       (window.top || window.parent).postMessage({ fonte: "rio-raios", tipo: "registrar", estacao: card.getAttribute("data-estacao") || "",
-                                  nivel: card.getAttribute("data-nivel") || "vermelho", minutos: duracaoDoCard(card) }, "*");
+                                  nivel: card.getAttribute("data-nivel") || "vermelho", minutos: duracaoDoCard(card),
+                                  texto: textoAtualizado(card), meteorologista: meteorologistaApp }, "*");
     } catch (e) {}
     setTimeout(function () {
       window.removeEventListener("message", ack);
@@ -897,13 +919,30 @@
       if (confirmou) registrarValidade(card, "Site");
     }, 1200);
   }
+  // Anti-duplicidade: se a mesma mensagem (unidade + nível) já foi enviada há pouco por alguém, pede um 2º clique.
+  var armadoDup = {};
+  function confirmarDuplicado(card, botao) {
+    var quem = card.getAttribute("data-enviado") || "", id = card.getAttribute("data-id");
+    if (!quem || armadoDup[id]) { armadoDup[id] = false; return true; }
+    armadoDup[id] = true;
+    var rot = botao.getAttribute("data-rotulo") || botao.textContent; botao.setAttribute("data-rotulo", rot);
+    botao.textContent = "⚠️ Já enviado por " + quem + " - clique de novo para enviar mesmo assim";
+    setTimeout(function () { armadoDup[id] = false; botao.textContent = rot; }, 6000);
+    return false;
+  }
   function ligarCampoQuem(container) {
     container.addEventListener("change", function (ev) {
       var alvo = ev.target;
       if (alvo.getAttribute && alvo.getAttribute("data-acao") === "duracao") {
         var card = alvo.closest(".al-card");
-        duracoes[card.getAttribute("data-id")] = parseInt(alvo.value, 10) || 60;
+        duracoes[card.getAttribute("data-id")] = alvo.value === "manual" ? "manual" : (parseInt(alvo.value, 10) || 60);
+        var inpFim = card.querySelector('input[data-acao="fim"]');
+        if (inpFim) inpFim.style.display = alvo.value === "manual" ? "" : "none";
         textoAtualizado(card);
+      } else if (alvo.getAttribute && alvo.getAttribute("data-acao") === "fim") {
+        var card2 = alvo.closest(".al-card");
+        fimsManuais[card2.getAttribute("data-id")] = alvo.value;
+        textoAtualizado(card2);
       }
     });
     container.addEventListener("input", function (ev) {
@@ -958,8 +997,8 @@
       if (acao === "limpar") { enviarEvento({ tipo: "limpar" }); }
       else if (acao === "finalizar") { enviarEvento({ tipo: "finalizar", id: id }); }
       else if (acao === "excluir") { enviarEvento({ tipo: "excluir", id: id }); }
-      else if (acao === "copiar") { copiarTexto(textoAtualizado(card), alvo); registrarValidade(card, "Copiado"); }
-      else if (acao === "preparar") { prepararNoWhatsApp(card, alvo); }
+      else if (acao === "copiar") { if (confirmarDuplicado(card, alvo)) { copiarTexto(textoAtualizado(card), alvo); registrarValidade(card, "Copiado"); } }
+      else if (acao === "preparar") { if (confirmarDuplicado(card, alvo)) prepararNoWhatsApp(card, alvo); }
       else if (acao === "registrar") { registrarNoSite(card, alvo); }
       else if (acao === "antecipar") { enviarEvento({ tipo: "antecipar", id: id }); }
       else if (acao === "rebaixar") { enviarEvento({ tipo: "rebaixar", id: id }); }
@@ -982,8 +1021,8 @@
       var card = alvo.closest(".al-card"), id = card && card.getAttribute("data-id");
       if (acao === "finalizar") { enviarEvento({ tipo: "finalizar", id: id }); }
       else if (acao === "excluir") { enviarEvento({ tipo: "excluir", id: id }); }
-      else if (acao === "copiar") { copiarTexto(textoAtualizado(card), alvo); registrarValidade(card, "Copiado"); }
-      else if (acao === "preparar") { prepararNoWhatsApp(card, alvo); }
+      else if (acao === "copiar") { if (confirmarDuplicado(card, alvo)) { copiarTexto(textoAtualizado(card), alvo); registrarValidade(card, "Copiado"); } }
+      else if (acao === "preparar") { if (confirmarDuplicado(card, alvo)) prepararNoWhatsApp(card, alvo); }
       else if (acao === "registrar") { registrarNoSite(card, alvo); }
       else if (acao === "antecipar") { enviarEvento({ tipo: "antecipar", id: id }); }
       else if (acao === "rebaixar") { enviarEvento({ tipo: "rebaixar", id: id }); }
@@ -1510,6 +1549,7 @@
     if (!map) iniciarMapa();
 
     atualizarStatus(args.status_texto);
+    meteorologistaApp = String(args.meteorologista || "");
     redesenharEstacoes(args.estacoes, args.aneis, args.espessura_aneis);
     var assinRaios = JSON.stringify([args.raios, args.celulas, args.janela_min, args.mostrar_deslocamento, args.tamanho_raio]);
     if (assinRaios !== ultimaAssinRaios) {   // mesmo conteúdo reenviado (ex.: menu/largura mudou) → não refaz tudo
