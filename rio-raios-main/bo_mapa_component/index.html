@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"
+      onerror="this.onerror=null;this.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';" />
 <style>
   html, body { margin: 0; padding: 0; height: 100%; background: #0b0f16; }
   #map { position: relative; width: 100%; height: 650px; background: #0b0f16; }
@@ -11,7 +12,7 @@
   .raio-celula-icon { background: transparent !important; border: none !important; }
 
   /* ---------- painel "Alertas e riscos" dentro do mapa (funciona também em tela cheia) ---------- */
-  #painel_alertas { display: none; position: absolute; top: 52px; right: 10px; bottom: 34px; width: 410px; max-width: calc(100% - 20px);
+  #painel_alertas { display: none; position: absolute; top: 48px; right: 10px; bottom: 10px; width: 410px; max-width: calc(100% - 20px);
     z-index: 1150; flex-direction: column; background: #1a1d24; color: #e8eaed; border: 1px solid #2a303b; border-radius: 12px;
     box-shadow: 0 12px 40px rgba(0,0,0,0.6); font: 13px 'Segoe UI', Arial, sans-serif; }
   #painel_alertas.aberto { display: flex; }
@@ -21,7 +22,15 @@
   .al-tabs { display: flex; gap: 4px; padding: 8px 12px 0; border-bottom: 1px solid #2a303b; }
   .al-tab { background: none; border: none; border-bottom: 2px solid transparent; color: #9aa3b2; padding: 8px 10px; cursor: pointer; font: 600 12.5px 'Segoe UI', sans-serif; }
   .al-tab.ativa { color: #fff; border-bottom-color: #ff4b4b; }
-  .al-corpo { overflow-y: auto; padding: 12px; flex: 1; }
+  .al-corpo { overflow-y: auto; padding: 12px; flex: 1; min-height: 0; }
+  .al-ativo { border-left-width: 4px; }
+  .al-verde-btn { background: #14532d; color: #bbf7d0; border: 1px solid #22c55e; border-radius: 8px; padding: 7px 14px; cursor: pointer; font: 600 13px 'Segoe UI', sans-serif; }
+  .al-verde-btn:hover { background: #166534; }
+  .al-amarelo-btn { background: #854d0e; color: #fef9c3; border: 1px solid #facc15; border-radius: 8px; padding: 7px 14px; cursor: pointer; font: 600 13px 'Segoe UI', sans-serif; }
+  .al-amarelo-btn:hover { background: #a16207; }
+  .al-vermelho-btn { background: #7f1d1d; color: #fecaca; border: 1px solid #ef4444; border-radius: 8px; padding: 7px 14px; cursor: pointer; font: 600 13px 'Segoe UI', sans-serif; }
+  .al-vermelho-btn:hover { background: #991b1b; }
+  .al-resta { font-weight: 700; font-variant-numeric: tabular-nums; }
   .al-card { background: #20242d; border: 1px solid #2d3340; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
   .al-tit { font-weight: 700; cursor: pointer; }
   .al-sub { font-size: 12px; margin-top: 2px; }
@@ -30,6 +39,17 @@
   .al-acoes button, .al-limpar { background: #2a303b; color: #e5e7eb; border: 1px solid #374151; border-radius: 6px; padding: 4px 10px;
     font: 12px 'Segoe UI', sans-serif; cursor: pointer; }
   .al-acoes button:hover, .al-limpar:hover { background: #374151; }
+  .al-acoes button.al-finalizar { background: #14532d; border-color: #22c55e; color: #bbf7d0; }
+  .al-acoes button.al-finalizar:hover { background: #166534; }
+  .al-acoes button.al-antecipar { background: #7f1d1d; border-color: #ef4444; color: #fecaca; }
+  .al-acoes button.al-antecipar:hover { background: #991b1b; }
+  .al-acoes button.al-rebaixar { background: #854d0e; border-color: #facc15; color: #fef9c3; }
+  .al-acoes button.al-rebaixar:hover { background: #a16207; }
+  .al-dur-linha { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+  select.al-dur { width: auto; }
+  input.al-fim { width: auto; }
+  .al-acoes button.al-whats { background: #075e54; border-color: #25d366; color: #d1fae5; }
+  .al-acoes button.al-whats:hover { background: #128c7e; }
   .al-limpar { width: 100%; margin-bottom: 10px; padding: 6px 10px; }
   .al-input { width: 100%; box-sizing: border-box; background: #11151c; color: #fff; border: 1px solid #374151; border-radius: 6px; padding: 6px 8px; margin: 4px 0 8px; font: 12.5px 'Segoe UI', sans-serif; }
   .al-pre { white-space: pre-wrap; word-break: break-word; background: #11151c; border: 1px solid #2a303b; border-radius: 6px; padding: 8px 10px;
@@ -118,6 +138,8 @@
   .pe-chart { position: relative; height: 250px; }
   .pe-contatos { margin-top: 16px; padding: 11px 14px; background: #20242d; border: 1px solid #2d3340; border-radius: 8px; font-size: 12.5px; color: #c4cbd6; line-height: 1.65; }
   .pe-carregando { color: #9aa3b2; font-size: 12.5px; margin-top: 20px; }
+  .pe-alertas-tit { font-size: 14.5px; font-weight: 700; color: #fff; margin: 20px 0 8px; }
+  #pe_alertas .al-card { max-width: 560px; }
 
   /* ---------- legenda retrátil (começa recolhida) ---------- */
   #legenda-mapa { position: absolute; z-index: 1000; bottom: 22px; left: 8px; background: rgba(15,15,20,0.88);
@@ -142,10 +164,12 @@
   <div id="painel_alertas">
     <div class="al-head"><span>🚨 Alertas e riscos</span><span class="al-fechar" id="al_fechar" title="Fechar">✕</span></div>
     <div class="al-tabs">
-      <button class="al-tab ativa" id="al_tab_risco" data-aba="risco">🚨 Risco</button>
+      <button class="al-tab ativa" id="al_tab_ativos" data-aba="ativos">📡 Ativos</button>
+      <button class="al-tab" id="al_tab_risco" data-aba="risco">🚨 Risco</button>
       <button class="al-tab" id="al_tab_alertas" data-aba="alertas">📋 Alertas</button>
     </div>
-    <div class="al-corpo" id="al_corpo_risco"></div>
+    <div class="al-corpo" id="al_corpo_ativos"></div>
+    <div class="al-corpo" id="al_corpo_risco" style="display:none;"></div>
     <div class="al-corpo" id="al_corpo_alertas" style="display:none;"></div>
   </div>
   <div id="goes-status"></div>
@@ -163,6 +187,12 @@
       <span id="painel_estacao_fechar" title="Fechar (Esc)">✕</span>
     </div>
     <div id="pe_contatos" class="pe-contatos"></div>
+    <div id="pe_verde" style="margin:10px 0 0; display:flex; flex-wrap:wrap; gap:8px;">
+      <button class="al-emitir-btn al-verde-btn" data-nivel="verde" title="Gera o alerta verde (fim do alerta de raios) desta unidade, mesmo sem alerta ativo. Depois use copiar / WhatsApp / site no card que aparece abaixo.">🟢 Emitir alerta verde</button>
+      <button class="al-emitir-btn al-amarelo-btn" data-nivel="amarelo" title="Gera o alerta amarelo (raio a menos de 50 km) desta unidade, mesmo sem raio por perto.">🟡 Emitir alerta amarelo</button>
+      <button class="al-emitir-btn al-vermelho-btn" data-nivel="vermelho" title="Gera o alerta vermelho (raio a menos de 30 km) desta unidade, mesmo sem raio por perto.">🔴 Emitir alerta vermelho</button>
+    </div>
+    <div id="pe_alertas"></div>
     <div id="pe_cards"></div>
     <div id="pe_prev"></div>
   </div>
@@ -172,8 +202,14 @@
   </div>
 </div>
 
+<!-- Se o jsDelivr estiver lento/bloqueado (VPN, rede, instabilidade), tenta outros CDNs antes de desistir.
+     Sem o Leaflet o componente nunca avisa "pronto" e o Streamlit mostra "trouble loading the component". -->
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>window.L || document.write('<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>');</script>
+<script>window.L || document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"><\/script>');</script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>window.Chart || document.write('<script src="https://unpkg.com/chart.js@4.4.1/dist/chart.umd.min.js"><\/script>');</script>
+<script>window.Chart || document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"><\/script>');</script>
 <script>
 (function () {
   "use strict";
@@ -205,9 +241,58 @@
   };
 
   var map = null;
-  var alturaBase = (window.innerWidth < 640) ? 560 : 650;   // celular em pé: mapa um pouco mais baixo
+  // Altura do mapa: ~86% da altura da janela do navegador (entre 700 e 1100 px); no celular em pé, 560 px.
+  // Altura do mapa = alturaPct % da altura da JANELA do navegador, entre 700 e 1400 px (560 px no celular em pé).
+  // alturaPct vem da barra lateral do app (padrão 86).
+  // A largura usada pra decidir "celular" é a da janela do navegador (página-mãe), e não a do próprio quadro do
+  // mapa: logo que a página abre, o quadro pode estar com largura 0/300 px por alguns instantes, e isso fazia o
+  // mapa nascer com 560 px (altura de celular) e só "corrigir" quando a janela mudava de tamanho (ex.: tela cheia).
+  var alturaPct = 86;
+  function larguraJanela() {
+    try { return window.parent.innerWidth || window.innerWidth; } catch (e) { return window.innerWidth; }
+  }
+  var mapaExpandidoFlag = false;
+  // Recalcula a altura e aplica no mapa e no quadro do Streamlit (a menos que o mapa esteja ampliado).
+  function reajustarAltura() {
+    var nova = calcularAlturaBase();
+    if (mapaExpandidoAgora()) { alturaBase = nova; return; }
+    if (nova === alturaBase && nova === alturaQuadro) return;
+    alturaBase = alturaQuadro = nova;
+    var el = document.getElementById("map");
+    if (el) el.style.height = alturaQuadro + "px";
+    Streamlit.setFrameHeight(alturaQuadro);
+    if (map) map.invalidateSize();
+  }                       // espelha o estado do botão "mapa maior" (usado fora do iniciarMapa)
+  function mapaExpandidoAgora() { return mapaExpandidoFlag; }
+  function calcularAlturaBase() {
+    if (larguraJanela() < 640) return 560;
+    var h = 0;
+    try { h = window.parent.innerHeight; } catch (e) {}      // o app e o mapa são da mesma origem
+    if (!h) h = window.screen.height ? window.screen.height * 0.9 : 0;
+    if (!h) return 820;
+    return Math.max(700, Math.min(1400, Math.round(h * alturaPct / 100)));
+  }
+  var alturaBase = calcularAlturaBase();
   var alturaQuadro = alturaBase;
   var ultimoSomToken = null;
+  var somPendente = false;
+  // Toca o som do alerta. Se o navegador bloquear (ele só deixa tocar depois que a pessoa interage com a
+  // página), avisa e toca assim que houver um toque/clique no mapa.
+  function tocarSomAlerta() {
+    audio.currentTime = 0;
+    var p = audio.play();
+    if (p && p.catch) {
+      p.catch(function (err) {
+        if (err && err.name === "NotAllowedError") {
+          somPendente = true;
+          if (window.__avisoMapa) window.__avisoMapa("🔔 O navegador bloqueou o som do alerta. Toque no mapa para ativar.");
+        }
+      });
+    }
+  }
+  document.addEventListener("pointerdown", function () {
+    if (somPendente && audio) { somPendente = false; tocarSomAlerta(); }
+  }, true);
   try { ultimoSomToken = sessionStorage.getItem("rio_som_token"); } catch (e) {}
   var stationsLayer, aneisLayer, raiosLayer, celulasLayer, ufLayer, layersControl;
 
@@ -256,9 +341,33 @@
   }
   function visivel(lat, lon) { return noBrasil(lat, lon) || pertoDeUnidade(lat, lon); }
   var canvasRenderer = L.canvas({ padding: 0.1 });
+  // Células de tempestade têm canvas próprio: mexer nelas não obriga a redesenhar os milhares de raios (e vice-versa).
+  var canvasCelulas = L.canvas({ padding: 0.1 });
+  // Marcador "✕" desenhado direto no canvas. Antes cada ✕ era um L.marker com ícone SVG (um elemento DOM por posição),
+  // o que pesava bastante ao arrastar/dar zoom no celular.
+  L.Canvas.include({
+    _updateXMarker: function (layer) {
+      if (!this._drawing || layer._empty()) return;
+      var p = layer._point, ctx = this._ctx, r = layer._radius, o = layer.options;
+      ctx.save();
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(p.x - r, p.y - r); ctx.lineTo(p.x + r, p.y + r);
+      ctx.moveTo(p.x + r, p.y - r); ctx.lineTo(p.x - r, p.y + r);
+      ctx.strokeStyle = "rgba(15,23,42,0.6)"; ctx.lineWidth = o.haloWeight; ctx.stroke();
+      ctx.strokeStyle = o.color; ctx.lineWidth = o.weight; ctx.stroke();
+      ctx.restore();
+    }
+  });
+  L.XMarker = L.CircleMarker.extend({
+    _updatePath: function () { this._renderer._updateXMarker(this); }
+  });
   // Pontos das unidades ficam numa camada própria, acima dos anéis, dos raios e das células,
   // pra a borda preta nunca ser coberta.
   var canvasEstacoes = L.canvas({ pane: "estacoesPane", padding: 0.1 });
+  // Anéis ficam numa camada própria ABAIXO dos raios (overlayPane = 400). Antes dividiam o mesmo canvas dos raios e
+  // a ordem dependia de quem foi redesenhado por último, então às vezes o anel passava por cima do ponto de raio.
+  var canvasAneis = L.canvas({ pane: "aneisPane", padding: 0.1 });
 
   function destravarSom() {
     if (!audio) return;
@@ -512,6 +621,7 @@
 
   function fecharPainel() {
     document.getElementById("painel_estacao").style.display = "none";
+    painelUnidadeChave = null; renderAlertasUnidade();
     prevAtual.token++;  // ignora respostas que ainda estavam a caminho
     limparGraficos();
   }
@@ -526,6 +636,7 @@
     document.getElementById("pe_sub").textContent =
       "Modelos: ECMWF · ICON · GFS (Open-Meteo) · Raios: GLM/GOES-19 · Horário de Brasília";
     document.getElementById("pe_cards").innerHTML = cardsStatus(d);
+    painelUnidadeChave = chave; ultimaChaveAlertasUnidade = null; renderAlertasUnidade();
 
     var corpo = document.getElementById("pe_contatos");
     var contatos = d.contatos;
@@ -548,7 +659,8 @@
   // ser usadas em tela cheia. Excluir alerta e "quem recebeu" voltam pro Streamlit via setComponentValue.
   // ----------------------------------------------------------------
   var painelAlertasAberto = false;
-  var abaAtiva = "risco";
+  var abaAtiva = "ativos";
+  var quadroItens = [], quadroChave = "", painelAutoAberto = false, painelFechadoPeloUsuario = false;
   var contatosAbertos = {};
   var ultimaChaveAlertas = null;
   var dadosAlertas = { estacoes: [], alertas: [] };
@@ -590,13 +702,45 @@
     ultimaChaveAlertas = chave;
     var el = document.getElementById("al_corpo_alertas");
     if (!alertas.length) { el.innerHTML = '<div class="al-vazio">✅ Nenhum alerta de raio próximo ativo.</div>'; return; }
-    el.innerHTML = '<button class="al-limpar" data-acao="limpar">🗑️ Limpar todos os alertas</button>' + alertas.map(function (a) {
-      return '<div class="al-card" data-id="' + esc(a.id) + '">' +
-        '<label style="font-size:12px;color:#c4cbd6;">Quem recebeu o alerta:</label>' +
-        '<input class="al-input" data-acao="quem" value="' + esc(a.quem_recebeu || "") + '" placeholder="nome de quem confirmou o recebimento" />' +
-        '<pre class="al-pre">' + esc(a.copia) + '</pre>' +
-        '<div class="al-acoes"><button data-acao="copiar">📋 Copiar</button><button data-acao="excluir">✕ Excluir</button></div></div>';
-    }).join("");
+    el.innerHTML = '<button class="al-limpar" data-acao="limpar">🗑️ Limpar todos os alertas</button>' + alertas.map(cardAlertaHtml).join("");
+  }
+
+  // Mesmo card de alerta na aba Alertas e no painel da unidade (quem recebeu, mensagem, copiar, finalizar, excluir).
+  function cardAlertaHtml(a) {
+    return '<div class="al-card" data-id="' + esc(a.id) + '" data-estacao="' + esc(a.estacao || "") + '" data-nivel="' + esc(a.nivel || "") + '" data-base="' + esc(a.base || "") + '" data-enviado="' + esc(a.ja_enviado || "") + '">' +
+      '<label style="font-size:12px;color:#c4cbd6;">Quem recebeu o alerta:</label>' +
+      '<input class="al-input" data-acao="quem" value="' + esc(a.quem_recebeu || "") + '" placeholder="nome de quem confirmou o recebimento" />' +
+      '<pre class="al-pre">' + esc(a.copia) + '</pre>' +
+      (a.nivel !== "verde" ? '<div class="al-dur-linha"><label style="font-size:12px;color:#c4cbd6;">Validade:</label>' +
+        '<select class="al-input al-dur" data-acao="duracao">' +
+        [[60, "1 hora"], [90, "1 hora e meia"], [120, "2 horas"], ["manual", "Fim manual"]].map(function (o) {
+          var atual = duracoes[a.id] || (a.fim_hm ? "manual" : (a.duracao_min || 60));
+          return '<option value="' + o[0] + '"' + (String(atual) === String(o[0]) ? " selected" : "") + '>' + o[1] + '</option>';
+        }).join("") + '</select>' +
+        '<input class="al-input al-fim" data-acao="fim" type="time" value="' + esc(fimsManuais[a.id] || a.fim_hm || "") + '" title="Horário do fim do alerta (Brasília)"' +
+        ((duracoes[a.id] || (a.fim_hm ? "manual" : "")) === "manual" ? "" : ' style="display:none"') + ' /></div>' : '') +
+      '<div class="al-acoes"><button data-acao="copiar" class="al-whats">📋 Copiar para o WhatsApp</button>' +
+      '<button data-acao="preparar" class="al-whats" title="Precisa do script do Tampermonkey (pasta whatsapp_assistente). Abre o grupo no WhatsApp Web e deixa a mensagem digitada para você conferir e apertar Enter.">🤖 Preparar no WhatsApp</button>' +
+      '<button data-acao="registrar" class="al-whats" style="background:#1d70b8;border-color:#1d70b8;color:#fff" title="Precisa do script do Tampermonkey e da aba Registro de eventos críticos aberta. Preenche o formulário Novo evento; você confere e clica em Salvar.">📝 Registrar no site</button>' +
+      (a.anteciparvel ? '<button data-acao="antecipar" class="al-antecipar">🔴 Antecipar para vermelho</button>' : '') +
+      (a.rebaixavel ? '<button data-acao="rebaixar" class="al-rebaixar">🟡 Alterar para amarelo</button>' : '') +
+      (a.finalizavel ? '<button data-acao="finalizar" class="al-finalizar">🟢 Finalizar alerta</button>' : '') +
+      '<button data-acao="excluir">✕ Excluir</button></div></div>';
+  }
+
+  // Alertas da unidade cujo painel está aberto (aparecem logo abaixo dos contatos).
+  var painelUnidadeChave = null;
+  var ultimaChaveAlertasUnidade = null;
+  function renderAlertasUnidade() {
+    var el = document.getElementById("pe_alertas");
+    if (!painelUnidadeChave) { el.innerHTML = ""; ultimaChaveAlertasUnidade = null; return; }
+    var meus = (dadosAlertas.alertas || []).filter(function (a) { return a.estacao === painelUnidadeChave; });
+    var chave = painelUnidadeChave + "|" + JSON.stringify(meus);
+    var ativo = document.activeElement;
+    var editando = ativo && ativo.classList && ativo.classList.contains("al-input") && el.contains(ativo);
+    if (chave === ultimaChaveAlertasUnidade || editando) return;
+    ultimaChaveAlertasUnidade = chave;
+    el.innerHTML = meus.length ? '<div class="pe-alertas-tit">🚨 Alertas desta unidade</div>' + meus.map(cardAlertaHtml).join("") : "";
   }
 
   function atualizarBadgeAlertas(risco) {
@@ -611,28 +755,208 @@
     var risco = unidadesEmRisco(), alertas = dadosAlertas.alertas || [];
     document.getElementById("al_tab_risco").textContent = "🚨 Risco (" + risco.length + ")";
     document.getElementById("al_tab_alertas").textContent = "📋 Alertas (" + alertas.length + ")";
+    document.getElementById("al_tab_ativos").textContent = "📡 Ativos (" + quadroItens.length + ")";
     atualizarBadgeAlertas(risco);
+    renderAlertasUnidade();
     if (!painelAlertasAberto) return;
     renderAbaRisco(risco);
     renderAbaAlertas(alertas);
+    renderAbaAtivos(true);
   }
+
+  // ---- Alertas ATIVOS de todos os meteorologistas (quadro compartilhado) ----
+  function nomeCurtoUnidade(est) {
+    var e = (dadosAlertas.estacoes || []).filter(function (x) { return x.estacao === est; })[0];
+    return e ? e.nome : String(est || "").split(" - ")[0];
+  }
+  function fmtResta(seg) { seg = Math.max(0, Math.round(seg)); return ("0" + Math.floor(seg / 60)).slice(-2) + ":" + ("0" + (seg % 60)).slice(-2); }
+  function renderAbaAtivos(forcar) {
+    var el = document.getElementById("al_corpo_ativos");
+    var chave = JSON.stringify(quadroItens.map(function (i) { return [i.estacao, i.nivel, i.quem, i.emitido_hm, i.expira_hm, i.vias]; }));
+    if (!forcar && chave === quadroChave) return;
+    quadroChave = chave;
+    if (!quadroItens.length) { el.innerHTML = '<div class="al-vazio">📡 Nenhum alerta ativo no momento.</div>'; return; }
+    el.innerHTML = quadroItens.map(function (i, k) {
+      var verm = i.nivel === "vermelho", cor = verm ? "#ff8a80" : "#ffd166";
+      return '<div class="al-card al-ativo" data-est="' + esc(i.estacao) + '" style="border-left-color:' + cor + ';">' +
+        '<div class="al-tit" data-acao="ver">' + (verm ? "🔴" : "🟡") + " " + esc(nomeCurtoUnidade(i.estacao)) + '</div>' +
+        '<div class="al-sub" style="color:' + cor + ';">Alerta ' + (verm ? "vermelho" : "amarelo") + '</div>' +
+        '<div class="al-sub">Emitido por <b>' + esc(i.quem || "(sem nome)") + '</b> às ' + esc(i.emitido_hm) + (i.vias ? " (" + esc(i.vias) + ")" : "") + '</div>' +
+        '<div class="al-sub">Válido até <b>' + esc(i.expira_hm) + '</b> · <span class="al-resta" data-k="' + k + '"></span></div>' +
+        '<div class="al-acoes"><button data-acao="ver">📍 Ver no mapa</button><button data-acao="tirar_quadro" title="Remove do quadro (alerta encerrado)">✖ Tirar</button></div></div>';
+    }).join("");
+    tickAtivos();
+  }
+  function tickAtivos() {
+    var agora = Date.now();
+    Array.prototype.forEach.call(document.querySelectorAll("#al_corpo_ativos .al-resta"), function (sp) {
+      var i = quadroItens[parseInt(sp.getAttribute("data-k"), 10)]; if (!i) return;
+      var resta = (i.fimLocal - agora) / 1000;
+      sp.textContent = resta > 0 ? "faltam " + fmtResta(resta) : "⏰ prazo vencido: sai sozinho 10 min após o fim se não renovar";
+      sp.style.color = resta <= 300 ? "#ff8a80" : "";
+    });
+  }
+  setInterval(tickAtivos, 1000);
+  // Os alertas do quadro chegam de um quadro invisível do app (atualiza a cada 5 s), por postMessage.
+  window.addEventListener("message", function (ev) {
+    var d = ev.data; if (!d || d.fonte !== "rio-quadro" || !Array.isArray(d.itens)) return;
+    var agora = Date.now();
+    quadroItens = d.itens.map(function (i) { i.fimLocal = agora + (+i.resta || 0) * 1000; return i; });
+    document.getElementById("al_tab_ativos").textContent = "📡 Ativos (" + quadroItens.length + ")";
+    if (quadroItens.length && !painelAutoAberto && !painelFechadoPeloUsuario) { painelAutoAberto = true; abrirPainelAlertas(true); mostrarAba("ativos"); }
+    if (painelAlertasAberto) renderAbaAtivos(false);
+  });
 
   function mostrarAba(aba) {
     abaAtiva = aba;
-    document.getElementById("al_tab_risco").classList.toggle("ativa", aba === "risco");
-    document.getElementById("al_tab_alertas").classList.toggle("ativa", aba === "alertas");
-    document.getElementById("al_corpo_risco").style.display = aba === "risco" ? "block" : "none";
-    document.getElementById("al_corpo_alertas").style.display = aba === "alertas" ? "block" : "none";
+    ["ativos", "risco", "alertas"].forEach(function (n) {
+      document.getElementById("al_tab_" + n).classList.toggle("ativa", aba === n);
+      document.getElementById("al_corpo_" + n).style.display = aba === n ? "block" : "none";
+    });
   }
 
   function abrirPainelAlertas(abrir) {
     painelAlertasAberto = abrir;
     document.getElementById("painel_alertas").classList.toggle("aberto", abrir);
-    if (abrir) { ultimaChaveAlertas = null; mostrarAba(abaAtiva); renderPainelAlertas(); }
+    if (!abrir) painelFechadoPeloUsuario = true;
+    if (abrir) { ultimaChaveAlertas = null; quadroChave = ""; mostrarAba(abaAtiva); renderPainelAlertas(); }
+  }
+
+  // Texto do alerta com a linha "Quem recebeu o alerta" (igual ao montar_texto_copia do Python), montado ao vivo.
+  function textoComQuem(base, nivel, quem) {
+    var linhas = String(base || "").split("\n");
+    quem = String(quem || "").trim();
+    var linha = nivel === "verde" ? ("* Quem Recebeu o Alerta: " + quem).replace(/\s+$/, "") : ("* Quem recebeu o alerta: " + quem);
+    linhas.splice(Math.max(linhas.length - 1, 0), 0, linha);
+    return linhas.join("\n");
+  }
+  // Na hora de enviar/copiar: troca o horário do alerta pelo horário ATUAL (Brasília) e a validade por agora + 1 h.
+  function partesBrasilia(ms) {
+    var f = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit",
+                                               hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(ms));
+    var o = {}; f.forEach(function (p) { o[p.type] = p.value; });
+    return { data: o.day + "/" + o.month + "/" + o.year, hora: o.hour + ":" + o.minute };
+  }
+  function comHorarioAtual(texto, minutos, hm) {
+    var agora = partesBrasilia(Date.now()), fim = hm ? { hora: ("0" + hm).slice(-5) } : partesBrasilia(Date.now() + (minutos || 60) * 60000);
+    return String(texto)
+      .replace(/\d{2}\/\d{2}\/\d{4} - \d{2}:\d{2}/, agora.data + " - " + agora.hora)
+      .replace(/Válido até as \d{2}:\d{2}/, "Válido até as " + fim.hora);
+  }
+  var duracoes = {};       // duração escolhida por alerta (minutos ou "manual"); padrão 60
+  var fimsManuais = {};    // horário HH:MM do fim manual, por alerta
+  var meteorologistaApp = "";   // nome cadastrado no RIO (vai para o campo Meteorologista do site)
+  var enviadoAviso = {};   // alerta -> texto do aviso de duplicidade já confirmado (2º clique)
+  function minutosAteHM(hm) {
+    var m = /^(\d{1,2}):(\d{2})$/.exec(hm); if (!m) return 60;
+    var b = partesBrasilia(Date.now()).hora.split(":"), d = (parseInt(m[1], 10) * 60 + parseInt(m[2], 10)) - (parseInt(b[0], 10) * 60 + parseInt(b[1], 10));
+    if (d <= 0) d += 1440;
+    return d;
+  }
+  // { minutos, hm }: hm só existe quando o fim foi digitado à mão.
+  function duracaoInfo(card) {
+    var sel = card.querySelector('select[data-acao="duracao"]');
+    if (sel && sel.value === "manual") {
+      var inp = card.querySelector('input[data-acao="fim"]'), v = inp ? String(inp.value || "").trim() : "";
+      if (/^\d{1,2}:\d{2}$/.test(v)) return { minutos: minutosAteHM(v), hm: v };
+      return { minutos: 60, hm: "" };
+    }
+    return { minutos: sel ? parseInt(sel.value, 10) || 60 : 60, hm: "" };
+  }
+  function duracaoDoCard(card) { return duracaoInfo(card).minutos; }
+  function textoAtualizado(card) {
+    var pre = card.querySelector(".al-pre"), d = duracaoInfo(card);
+    pre.textContent = comHorarioAtual(pre.textContent, d.minutos, d.hm);
+    return pre.textContent;
+  }
+  // Avisa o servidor: o alerta passa a durar a duração escolhida a partir de agora.
+  function registrarValidade(card, via) {
+    // "emitir": o servidor ajusta a validade e publica o alerta no quadro compartilhado (verde = tira o alerta do quadro).
+    var d = duracaoInfo(card);
+    enviarEvento({ tipo: "emitir", id: card.getAttribute("data-id"), minutos: d.minutos, fim: d.hm, via: via || "" });
+  }
+  function atualizarTextoCard(input) {
+    var card = input.closest(".al-card"); if (!card) return;
+    var pre = card.querySelector(".al-pre");
+    if (pre && card.hasAttribute("data-base")) { var d = duracaoInfo(card); pre.textContent = comHorarioAtual(textoComQuem(card.getAttribute("data-base"), card.getAttribute("data-nivel"), input.value), d.minutos, d.hm); }
+  }
+  // Manda o alerta para o script do Tampermonkey (que roda na página do app) e ele prepara a mensagem no WhatsApp Web.
+  // Sem o script instalado não chega confirmação: aí o texto é só copiado (plano B).
+  function prepararNoWhatsApp(card, botao) {
+    var texto = textoAtualizado(card);
+    var rotulo = botao.getAttribute("data-rotulo") || botao.textContent;
+    botao.setAttribute("data-rotulo", rotulo);
+    var confirmou = false;
+    function ack(ev) { if (ev.data && ev.data.fonte === "rio-raios-ack") confirmou = true; }
+    window.addEventListener("message", ack);
+    try {
+      (window.top || window.parent).postMessage({ fonte: "rio-raios", tipo: "preparar", id: card.getAttribute("data-id"),
+                                  estacao: card.getAttribute("data-estacao") || "", texto: texto }, "*");
+    } catch (e) {}
+    setTimeout(function () {
+      window.removeEventListener("message", ack);
+      if (confirmou) { botao.textContent = "✔ Enviado ao WhatsApp — confira lá e dê Enter"; }
+      else { copiarFallback(texto); botao.textContent = "Script não detectado — texto copiado (Ctrl+V)"; }
+      setTimeout(function () { botao.textContent = rotulo; }, 4000);
+      registrarValidade(card, "WhatsApp");
+    }, 1200);
+  }
+  function registrarNoSite(card, botao) {
+    var rotulo = botao.getAttribute("data-rotulo") || botao.textContent;
+    botao.setAttribute("data-rotulo", rotulo);
+    var confirmou = false;
+    function ack(ev) { if (ev.data && ev.data.fonte === "rio-raios-ack") confirmou = true; }
+    window.addEventListener("message", ack);
+    try {
+      (window.top || window.parent).postMessage({ fonte: "rio-raios", tipo: "registrar", estacao: card.getAttribute("data-estacao") || "",
+                                  nivel: card.getAttribute("data-nivel") || "vermelho", minutos: duracaoDoCard(card),
+                                  texto: textoAtualizado(card), meteorologista: meteorologistaApp }, "*");
+    } catch (e) {}
+    setTimeout(function () {
+      window.removeEventListener("message", ack);
+      botao.textContent = confirmou ? "✔ Enviado — confira o formulário na aba do site e salve" : "Script não detectado (atualize o Tampermonkey)";
+      setTimeout(function () { botao.textContent = rotulo; }, 4000);
+      if (confirmou) registrarValidade(card, "Site");
+    }, 1200);
+  }
+  // Anti-duplicidade: se a mesma mensagem (unidade + nível) já foi enviada há pouco por alguém, pede um 2º clique.
+  var armadoDup = {};
+  function confirmarDuplicado(card, botao) {
+    var quem = card.getAttribute("data-enviado") || "", id = card.getAttribute("data-id");
+    if (!quem || armadoDup[id]) { armadoDup[id] = false; return true; }
+    armadoDup[id] = true;
+    var rot = botao.getAttribute("data-rotulo") || botao.textContent; botao.setAttribute("data-rotulo", rot);
+    botao.textContent = "⚠️ Já enviado por " + quem + " - clique de novo para enviar mesmo assim";
+    setTimeout(function () { armadoDup[id] = false; botao.textContent = rot; }, 6000);
+    return false;
+  }
+  function ligarCampoQuem(container) {
+    container.addEventListener("change", function (ev) {
+      var alvo = ev.target;
+      if (alvo.getAttribute && alvo.getAttribute("data-acao") === "duracao") {
+        var card = alvo.closest(".al-card");
+        duracoes[card.getAttribute("data-id")] = alvo.value === "manual" ? "manual" : (parseInt(alvo.value, 10) || 60);
+        var inpFim = card.querySelector('input[data-acao="fim"]');
+        if (inpFim) inpFim.style.display = alvo.value === "manual" ? "" : "none";
+        textoAtualizado(card);
+      } else if (alvo.getAttribute && alvo.getAttribute("data-acao") === "fim") {
+        var card2 = alvo.closest(".al-card");
+        fimsManuais[card2.getAttribute("data-id")] = alvo.value;
+        textoAtualizado(card2);
+      }
+    });
+    container.addEventListener("input", function (ev) {
+      var alvo = ev.target;
+      if (alvo.getAttribute && alvo.getAttribute("data-acao") === "quem") atualizarTextoCard(alvo);
+    });
+    container.addEventListener("keydown", function (ev) {
+      var alvo = ev.target;
+      if (ev.key === "Enter" && alvo.getAttribute && alvo.getAttribute("data-acao") === "quem") { ev.preventDefault(); atualizarTextoCard(alvo); alvo.blur(); }
+    });
   }
 
   function copiarTexto(txt, botao) {
-    function feito() { var o = botao.textContent; botao.textContent = "✔ Copiado"; setTimeout(function () { botao.textContent = o; }, 1500); }
+    function feito() { var o = botao.textContent; botao.textContent = "✔ Copiado! Cole no grupo (Ctrl+V)"; setTimeout(function () { botao.textContent = o; }, 1500); }
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(txt).then(feito).catch(function () { copiarFallback(txt); feito(); });
     } else { copiarFallback(txt); feito(); }
@@ -647,7 +971,15 @@
     L.DomEvent.disableClickPropagation(painel);
     L.DomEvent.disableScrollPropagation(painel);
     document.getElementById("al_fechar").addEventListener("click", function () { abrirPainelAlertas(false); });
+    document.getElementById("al_tab_ativos").addEventListener("click", function () { mostrarAba("ativos"); });
     document.getElementById("al_tab_risco").addEventListener("click", function () { mostrarAba("risco"); });
+    document.getElementById("al_corpo_ativos").addEventListener("click", function (ev) {
+      var alvo = ev.target.closest("[data-acao]"); if (!alvo) return;
+      var card = alvo.closest(".al-card"); if (!card) return;
+      var est = card.getAttribute("data-est"), acao = alvo.getAttribute("data-acao");
+      if (acao === "ver") irParaUnidade(nomeCurtoUnidade(est));
+      else if (acao === "tirar_quadro") { enviarEvento({ tipo: "tirar_quadro", estacao: est }); }
+    });
     document.getElementById("al_tab_alertas").addEventListener("click", function () { mostrarAba("alertas"); });
 
     document.getElementById("al_corpo_risco").addEventListener("click", function (ev) {
@@ -663,8 +995,45 @@
       var acao = alvo.getAttribute("data-acao");
       var card = alvo.closest(".al-card"), id = card && card.getAttribute("data-id");
       if (acao === "limpar") { enviarEvento({ tipo: "limpar" }); }
+      else if (acao === "finalizar") { enviarEvento({ tipo: "finalizar", id: id }); }
       else if (acao === "excluir") { enviarEvento({ tipo: "excluir", id: id }); }
-      else if (acao === "copiar") { copiarTexto(card.querySelector(".al-pre").textContent, alvo); }
+      else if (acao === "copiar") { if (confirmarDuplicado(card, alvo)) { copiarTexto(textoAtualizado(card), alvo); registrarValidade(card, "Copiado"); } }
+      else if (acao === "preparar") { if (confirmarDuplicado(card, alvo)) prepararNoWhatsApp(card, alvo); }
+      else if (acao === "registrar") { registrarNoSite(card, alvo); }
+      else if (acao === "antecipar") { enviarEvento({ tipo: "antecipar", id: id }); }
+      else if (acao === "rebaixar") { enviarEvento({ tipo: "rebaixar", id: id }); }
+    });
+    ligarCampoQuem(corpoAl);
+    Array.prototype.forEach.call(document.querySelectorAll("#pe_verde .al-emitir-btn"), function (btn) {
+      var rotulo = btn.textContent;
+      btn.addEventListener("click", function () {
+        if (!painelUnidadeChave) return;
+        btn.textContent = "⏳ Gerando…";
+        enviarEvento({ tipo: "emitir_nivel", estacao: painelUnidadeChave, nivel: btn.getAttribute("data-nivel") });
+        setTimeout(function () { btn.textContent = rotulo; }, 2500);
+      });
+    });
+    // Painel da unidade: mesmas ações do card (copiar, finalizar, excluir, quem recebeu).
+    var corpoUn = document.getElementById("pe_alertas");
+    corpoUn.addEventListener("click", function (ev) {
+      var alvo = ev.target.closest("[data-acao]"); if (!alvo) return;
+      var acao = alvo.getAttribute("data-acao");
+      var card = alvo.closest(".al-card"), id = card && card.getAttribute("data-id");
+      if (acao === "finalizar") { enviarEvento({ tipo: "finalizar", id: id }); }
+      else if (acao === "excluir") { enviarEvento({ tipo: "excluir", id: id }); }
+      else if (acao === "copiar") { if (confirmarDuplicado(card, alvo)) { copiarTexto(textoAtualizado(card), alvo); registrarValidade(card, "Copiado"); } }
+      else if (acao === "preparar") { if (confirmarDuplicado(card, alvo)) prepararNoWhatsApp(card, alvo); }
+      else if (acao === "registrar") { registrarNoSite(card, alvo); }
+      else if (acao === "antecipar") { enviarEvento({ tipo: "antecipar", id: id }); }
+      else if (acao === "rebaixar") { enviarEvento({ tipo: "rebaixar", id: id }); }
+    });
+    ligarCampoQuem(corpoUn);
+    corpoUn.addEventListener("change", function (ev) {
+      var alvo = ev.target;
+      if (alvo.getAttribute && alvo.getAttribute("data-acao") === "quem") {
+        var card = alvo.closest(".al-card");
+        enviarEvento({ tipo: "quem_recebeu", id: card.getAttribute("data-id"), valor: alvo.value });
+      }
     });
     corpoAl.addEventListener("change", function (ev) {
       var alvo = ev.target;
@@ -691,71 +1060,124 @@
   }
 
   function iniciarMapa() {
-    map = L.map("map", { zoomControl: true, minZoom: 4, maxZoom: 17, preferCanvas: true });
+    map = L.map("map", { zoomControl: true, minZoom: 4, maxZoom: 18, preferCanvas: true, fadeAnimation: false });
+    window.__mapaRIO = map;
 
-    // Fundos: OpenStreetMap (padrão) e Satélite (Esri World Imagery) — ambos
-    // públicos, sem chave de API. GOES-East (NASA GIBS, infravermelho limpo,
-    // banda 13) entra como camada sobreposta, ligada por padrão.
-    var fundoOSM = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "&copy; OpenStreetMap contributors", maxZoom: 19, subdomains: "abc"
-    });
-    var fundoSatelite = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
-      attribution: "Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community", maxZoom: 19
-    });
-    // GOES-East. Padrão: SSEC RealEarth (imagem do GOES-19 com poucos minutos de atraso, em vez dos ~30 min do
-    // NASA GIBS). O horário da imagem mais recente é consultado a cada 5 min e mostrado no mapa. Se essa
-    // consulta falhar, as camadas continuam funcionando com a "imagem mais recente" sem mostrar o horário.
-    var RE = "https://realearth.ssec.wisc.edu";
-    var PRODUTOS_GOES = [
-      { id: "G19-ABI-FD-BAND13-GRAD", rotulo: "🛰️ GOES-East IR realçado · SSEC (quase tempo real)", padrao: true },
-      { id: "G19-ABI-FD-BAND13", rotulo: "🛰️ GOES-East IR banda 13 · SSEC" },
-      { id: "G19-ABI-FD-ir-sandwich", rotulo: "🛰️ GOES-East IR Sandwich (topos convectivos) · SSEC" },
-      { id: "G19-ABI-FD-geo-color", rotulo: "🛰️ GOES-East GeoColor · SSEC" },
-    ];
-    var goesInfo = {};
-    var overlaysGoes = {};
-    fundoOSM.addTo(map);
-    PRODUTOS_GOES.forEach(function (p) {
-      var camada = L.tileLayer(RE + "/tiles/" + p.id + "/{z}/{x}/{y}.png", {
-        opacity: 0.6, zIndex: 10, maxNativeZoom: 8, maxZoom: 17, attribution: "Source: SSEC RealEarth, UW-Madison"
+    // ------------------------------------------------------------------------------------------
+    // Camadas de tiles. Opções comuns pra o mapa não piscar nem ficar com buracos ao arrastar ou dar zoom:
+    //  - keepBuffer maior: mantém mais tiles em volta da área visível;
+    //  - updateWhenIdle=false: carrega tiles enquanto arrasta (não só quando para);
+    //  - updateWhenZooming=false: não busca níveis intermediários durante o zoom animado;
+    //  - maxNativeZoom: acima do nível em que o provedor tem imagem, o Leaflet amplia o último nível em vez
+    //    de pedir tiles que não existem (que apareciam em branco);
+    //  - tile com erro é tentado de novo uma vez e, se falhar, fica transparente (sem ícone de imagem quebrada);
+    //  - fadeAnimation=false no mapa: sem o "fade" dos tiles, que fazia as sobreposições piscarem.
+    // ------------------------------------------------------------------------------------------
+    var PIXEL_TRANSPARENTE = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+    function opcoesTiles(extra) {
+      return Object.assign({ keepBuffer: 6, updateWhenIdle: false, updateWhenZooming: false, updateInterval: 120,
+                             errorTileUrl: PIXEL_TRANSPARENTE }, extra);
+    }
+    function robustecer(camada) {
+      var estado = { erros: 0, ok: false };
+      camada.on("tileload", function () { estado.ok = true; estado.erros = 0; });
+      camada.on("tileerror", function (ev) {
+        estado.erros++;
+        var t = ev.tile;
+        if (t && !t._tentouDeNovo) {
+          t._tentouDeNovo = true;
+          setTimeout(function () { try { t.src = camada.getTileUrl(ev.coords); } catch (e) {} }, 1200 + Math.random() * 800);
+        }
+        // nenhum tile chegou e já são muitos erros: o serviço não está respondendo -> usa a alternativa
+        if (camada._aoFalharMuito && !estado.ok && estado.erros >= 8) { var f = camada._aoFalharMuito; camada._aoFalharMuito = null; f(); }
       });
-      goesInfo[p.id] = { camada: camada, t: null, url: null };
-      overlaysGoes[p.rotulo] = camada;
-      if (p.padrao) camada.addTo(map);
-    });
-    // alternativa: NASA GIBS (atraso de ~30 min)
-    var gibsLayer = L.tileLayer.wms("https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi", {
-      layers: "GOES-East_ABI_Band13_Clean_Infrared", format: "image/png", transparent: true, version: "1.1.1",
-      opacity: 0.6, zIndex: 10, attribution: "GOES-East ABI &copy; NOAA/NASA GIBS"
-    });
-    overlaysGoes["🛰️ GOES-East IR · NASA GIBS (~30 min de atraso)"] = gibsLayer;
+      return camada;
+    }
 
+    // Fundos: OpenStreetMap (padrão) e Satélite (Esri World Imagery) — ambos públicos, sem chave de API.
+    var fundoOSM = robustecer(L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", opcoesTiles({
+      attribution: "&copy; OpenStreetMap contributors", maxNativeZoom: 19, maxZoom: 19, subdomains: "abc"
+    })));
+    var fundoSatelite = robustecer(L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", opcoesTiles({
+      attribution: "Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+      // O Esri não tem imagem em todos os níveis em todo lugar (fora das cidades devolve "Map data not yet
+      // available"): acima do nível 17 o Leaflet amplia os tiles do 17 em vez de buscar tiles inexistentes.
+      maxNativeZoom: 17, maxZoom: 19
+    })));
+
+    // GOES-East padrão: NASA GIBS, infravermelho limpo (banda 13), atraso de ~30 min. Usa os tiles prontos (WMTS,
+    // rápidos e em cache); se esse serviço não responder, cai sozinho no WMS (mais lento, mas a mesma imagem).
+    var GIBS_ID = "GOES-East_ABI_Band13_Clean_Infrared";
+    var ROTULO_GIBS = "🛰️ GOES-East IR · NASA GIBS (~30 min de atraso)";
+    var ATRIB_GIBS = "GOES-East ABI &copy; NOAA/NASA GIBS";
+    var gibsWms = robustecer(L.tileLayer.wms("https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi", opcoesTiles({
+      layers: GIBS_ID, format: "image/png", transparent: true, version: "1.1.1",
+      opacity: 0.6, zIndex: 10, maxNativeZoom: 6, maxZoom: 11, attribution: ATRIB_GIBS
+    })));
+    var gibsWmts = robustecer(L.tileLayer("https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/" + GIBS_ID + "/default/default/GoogleMapsCompatible_Level6/{z}/{y}/{x}.png", opcoesTiles({
+      opacity: 0.6, zIndex: 10, maxNativeZoom: 6, maxZoom: 11, attribution: ATRIB_GIBS
+    })));
+    var gibsAtiva = gibsWmts;
+    gibsWmts._aoFalharMuito = function () {
+      var ligada = map.hasLayer(gibsWmts);
+      layersControl.removeLayer(gibsWmts);
+      if (ligada) map.removeLayer(gibsWmts);
+      layersControl.addOverlay(gibsWms, ROTULO_GIBS);
+      if (ligada) gibsWms.addTo(map);
+      gibsAtiva = gibsWms;
+      atualizarPillGOES();
+    };
+
+    // Se nem o WMTS nem o WMS do GIBS entregarem tiles, o navegador/rede provavelmente está bloqueando o NASA GIBS
+    // (VPN, firewall da empresa, bloqueador de anúncios...): avisa na tela em vez de mostrar o mapa "sem GOES" em silêncio.
+    var goesBloqueado = false;
+    gibsWms._aoFalharMuito = function () { goesBloqueado = true; atualizarPillGOES(); avisoMapa("GOES não carregou: este navegador/rede pode estar bloqueando gibs.earthdata.nasa.gov"); };
+    gibsWms.on("tileload", function () { if (goesBloqueado) { goesBloqueado = false; atualizarPillGOES(); } });
+
+    // Satélites: só NASA GIBS · GOES-East (Infravermelho banda 13, GeoColor e Massa de ar). Cada um usa tiles prontos (WMTS)
+    // e, se o serviço não responder, cai sozinho no WMS (mesma imagem). Só um satélite fica ligado por vez.
+    var GIBS_WMS = "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi";
+    function gibsExtra(nome, id, nivel, rotulo) {
+      var r = { nome: nome, rotulo: rotulo };
+      r.wmts = robustecer(L.tileLayer("https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/" + id + "/default/default/GoogleMapsCompatible_Level" + nivel + "/{z}/{y}/{x}.png", opcoesTiles({
+        opacity: 0.6, zIndex: 10, maxNativeZoom: nivel, maxZoom: 11, attribution: ATRIB_GIBS })));
+      r.wms = robustecer(L.tileLayer.wms(GIBS_WMS, opcoesTiles({
+        layers: id, format: "image/png", transparent: true, version: "1.1.1", opacity: 0.6, zIndex: 10, maxNativeZoom: nivel, maxZoom: 11, attribution: ATRIB_GIBS })));
+      r.ativa = r.wmts;
+      r.wmts._aoFalharMuito = function () {
+        var ligada = map.hasLayer(r.wmts);
+        layersControl.removeLayer(r.wmts);
+        if (ligada) map.removeLayer(r.wmts);
+        layersControl.addOverlay(r.wms, rotulo);
+        if (ligada) r.wms.addTo(map);
+        r.ativa = r.wms; atualizarPillGOES();
+      };
+      r.wms._aoFalharMuito = function () { goesBloqueado = true; atualizarPillGOES(); avisoMapa("GOES não carregou: este navegador/rede pode estar bloqueando gibs.earthdata.nasa.gov"); };
+      r.wms.on("tileload", function () { if (goesBloqueado) { goesBloqueado = false; atualizarPillGOES(); } });
+      return r;
+    }
+    var SATS = [
+      { nome: "Infravermelho (banda 13)", rotulo: ROTULO_GIBS, wmts: gibsWmts, wms: gibsWms, get ativa() { return gibsAtiva; } },
+      gibsExtra("GeoColor", "GOES-East_ABI_GeoColor", 7, "🛰️ GOES-East GeoColor · NASA GIBS (~30 min de atraso)"),
+      gibsExtra("Massa de ar", "GOES-East_ABI_Air_Mass", 6, "🛰️ GOES-East Massa de ar · NASA GIBS (~30 min de atraso)")
+    ];
+    var overlaysGoes = {};
+    SATS.forEach(function (sat) { overlaysGoes[sat.rotulo] = sat.wmts; });
+    fundoOSM.addTo(map);
+    gibsWmts.addTo(map);                                  // GOES-East infravermelho ligado por padrão
+
+    function satDe(camada) { return SATS.filter(function (sat) { return sat.wmts === camada || sat.wms === camada; })[0]; }
     function atualizarPillGOES() {
       var el = document.getElementById("goes-status");
-      var ativo = PRODUTOS_GOES.filter(function (p) { return map.hasLayer(goesInfo[p.id].camada); })[0];
+      var ativo = SATS.filter(function (sat) { return map.hasLayer(sat.ativa); })[0];
       if (!ativo) { el.style.display = "none"; return; }
-      el.style.display = "block";
-      var info = goesInfo[ativo.id];
-      if (!info.t) { el.textContent = "🛰️ GOES-East (SSEC): imagem mais recente disponível"; return; }
-      var min = Math.max(0, Math.round((Date.now() - info.t.getTime()) / 60000));
-      var hora = info.t.toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
-      el.textContent = "🛰️ GOES-East · imagem das " + hora + " (há " + min + " min)";
-    }
-    function atualizarGOES(p) {
-      var info = goesInfo[p.id];
-      return fetch(RE + "/api/time?products=" + p.id)
-        .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
-        .then(function (txt) {
-          var achados = txt.match(/\d{8}_\d{6}/g);
-          if (!achados || !achados.length) throw new Error("sem horários");
-          achados.sort();
-          var ult = achados[achados.length - 1], d = ult.slice(0, 8), h = ult.slice(9, 15);
-          var url = RE + "/tiles/" + p.id + "/" + d + "/" + h + "/{z}/{x}/{y}.png";
-          if (url !== info.url) { info.url = url; info.camada.setUrl(url); }
-          info.t = new Date(Date.UTC(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8), +h.slice(0, 2), +h.slice(2, 4), +h.slice(4, 6)));
-        })
-        .catch(function () { info.t = null; })
-        .then(atualizarPillGOES);
+      if (goesBloqueado && ativo.ativa === ativo.wms) {
+        el.style.display = "block"; el.style.background = "rgba(150,30,30,0.9)";
+        el.textContent = "⚠️ GOES não carregou neste navegador/rede (NASA GIBS bloqueado?). Teste sem VPN/bloqueador ou em outra rede.";
+      } else {
+        el.style.display = "block"; el.style.background = "";
+        el.textContent = "🛰️ GOES-East · " + ativo.nome + " · NASA GIBS (imagem com ~30 min de atraso)";
+      }
     }
 
     layersControl = L.control.layers(
@@ -764,12 +1186,18 @@
       { position: "topright", collapsed: true }
     ).addTo(map);
     map.on("overlayadd overlayremove", function (ev) {
-      PRODUTOS_GOES.forEach(function (p) { if (goesInfo[p.id].camada === ev.layer && ev.type === "overlayadd") atualizarGOES(p); });
+      var novo = ev.type === "overlayadd" ? satDe(ev.layer) : null;
+      if (novo) SATS.forEach(function (sat) {        // um satélite por vez
+        if (sat === novo) return;
+        [sat.wmts, sat.wms].forEach(function (c) { if (map.hasLayer(c)) map.removeLayer(c); });
+      });
       atualizarPillGOES();
     });
-    PRODUTOS_GOES.forEach(atualizarGOES);
-    setInterval(function () { PRODUTOS_GOES.forEach(atualizarGOES); }, 300000);
+    atualizarPillGOES();
+    // o GIBS atualiza a cada 10 min: os tiles são recarregados nesse ritmo
+    setInterval(function () { SATS.forEach(function (sat) { if (map.hasLayer(sat.ativa)) sat.ativa.redraw(); }); }, 600000);
     setInterval(atualizarPillGOES, 30000);
+
 
     var bb = { lat_min: -34.0, lat_max: 5.5, lon_min: -74.5, lon_max: -32.0 };
     map.fitBounds([[bb.lat_min, bb.lon_min], [bb.lat_max, bb.lon_max]]);
@@ -784,6 +1212,8 @@
     L.polygon([mundo].concat(buracos), { pane: "mascaraBR", renderer: L.svg({ pane: "mascaraBR" }), stroke: false,
       fillColor: "#0b0f16", fillOpacity: 0.28, interactive: false }).addTo(map);
 
+    map.createPane("aneisPane");
+    map.getPane("aneisPane").style.zIndex = 380; map.getPane("aneisPane").style.pointerEvents = "none";
     map.createPane("estacoesPane");
     map.getPane("estacoesPane").style.zIndex = 620;
     if (!map.getPane("markerPane")) { map.createPane("markerPane"); }
@@ -843,10 +1273,12 @@
     }
     // Se a tela cheia nativa não estiver disponível (ou for negada), o botão aumenta a altura do mapa.
     var mapaExpandido = false;
+    window.__avisoMapa = avisoMapa;
     function alternarMapaMaior() {
       mapaExpandido = !mapaExpandido;
+      mapaExpandidoFlag = mapaExpandido;
       var alturaTela = window.screen.height || 1000;
-      alturaQuadro = mapaExpandido ? ((window.innerWidth < 640) ? Math.round(alturaTela * 0.8) : Math.max(900, Math.round(alturaTela * 0.88))) : alturaBase;
+      alturaQuadro = mapaExpandido ? ((larguraJanela() < 640) ? Math.round(alturaTela * 0.8) : Math.max(alturaBase + 150, Math.round(alturaTela * 0.92))) : alturaBase;
       document.getElementById("map").style.height = alturaQuadro + "px";
       Streamlit.setFrameHeight(alturaQuadro);
       setTimeout(function () { map.invalidateSize(); }, 100);
@@ -915,6 +1347,14 @@
     document.addEventListener("fullscreenchange", aoMudarTelaCheia);
     document.addEventListener("webkitfullscreenchange", aoMudarTelaCheia);
 
+    // Se a janela do navegador (ou o quadro do mapa) mudar de tamanho, a altura do mapa acompanha (a menos que esteja ampliado).
+    var tAjusteAltura = null;
+    function agendarReajuste() { clearTimeout(tAjusteAltura); tAjusteAltura = setTimeout(reajustarAltura, 250); }
+    window.addEventListener("resize", agendarReajuste);
+    try { window.parent.addEventListener("resize", agendarReajuste); } catch (e) {}
+    // Logo que a página abre o layout ainda está se acomodando: reconfere a altura algumas vezes.
+    [300, 900, 2000, 4000].forEach(function (ms) { setTimeout(reajustarAltura, ms); });
+
     // O painel de alertas do Streamlit pode ser aberto/fechado, mudando a largura do mapa.
     if (window.ResizeObserver) {
       new ResizeObserver(function () { if (map) map.invalidateSize(); }).observe(document.getElementById("map"));
@@ -929,7 +1369,7 @@
     inputBusca.addEventListener("keydown", function (ev) { if (ev.key === "Enter") irParaUnidade(inputBusca.value); });
   }
 
-  function redesenharEstacoes(estacoes, aneis) {
+  function redesenharEstacoes(estacoes, aneis, espessura) {
     stationsLayer.clearLayers();
     aneisLayer.clearLayers();
     marcadoresPorNome = {};
@@ -970,15 +1410,21 @@
       chavePorNome[e.nome] = e.estacao;
       opcoes += '<option value="' + String(e.nome).replace(/"/g, "&quot;") + '">';
 
+      var esp = Math.min(5, Math.max(1, parseInt(espessura, 10) || 3));      // 1 (fino) … 5 (grosso); 3 = médio (padrão)
+      var pesoCor = [2, 3.2, 4.5, 6, 8][esp - 1], pesoContorno = pesoCor + 3.5, tracejado = ["8, 6", "10, 7", "12, 9", "14, 10", "16, 12"][esp - 1];
       (aneis || []).forEach(function (a) {
         // contorno escuro por baixo + traço colorido por cima: o anel aparece no mapa claro,
         // no satélite e por cima das cores do GOES-East
-        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: "#0b1220", weight: 8, fill: false, opacity: 0.6, interactive: false, renderer: canvasRenderer })
+        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: "#0b1220", weight: pesoContorno, fill: false, opacity: 0.6, interactive: false, renderer: canvasAneis })
           .addTo(aneisLayer);
-        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: a.cor, weight: 4.5, fill: false, dashArray: "12, 9", opacity: 1, interactive: false, renderer: canvasRenderer })
+        L.circle([e.lat, e.lon], { radius: a.km * 1000, color: a.cor, weight: pesoCor, fill: false, dashArray: tracejado, opacity: 1, interactive: false, renderer: canvasAneis })
           .addTo(aneisLayer);
       });
     });
+    // lista da busca em ordem alfabética (pt-BR, sem diferenciar acento/maiúscula)
+    var nomesBusca = (estacoes || []).map(function (e) { return String(e.nome); })
+      .sort(function (a, b) { return a.localeCompare(b, "pt-BR", { sensitivity: "base" }); });
+    opcoes = nomesBusca.map(function (n) { return '<option value="' + n.replace(/"/g, "&quot;") + '">'; }).join("");
     document.getElementById("busca-unidade-lista").innerHTML = opcoes;
   }
 
@@ -995,10 +1441,12 @@
     });
 
     if (mostrarDeslocamento) {
+      var atuais = [];   // ✕ da posição atual de cada célula: adicionados por último, ficam por cima
       (celulas || []).forEach(function (cel) {
         var h = cel.historico || [];
-        if (h.length && visivel(h[h.length - 1].lat, h[h.length - 1].lon)) desenharCelula(cel, novasCelulas);
+        if (h.length && visivel(h[h.length - 1].lat, h[h.length - 1].lon)) desenharCelula(cel, novasCelulas, atuais);
       });
+      atuais.forEach(function (m) { m.addTo(novasCelulas); });
     }
     novoRaios.addTo(map);
     novasCelulas.addTo(map);
@@ -1027,12 +1475,12 @@
     });
   }
 
-  function desenharCelula(cel, alvo) {
+  function desenharCelula(cel, alvo, atuais) {
     var hist = cel.historico || [];
     if (!hist.length) return;
     var cps = cel.checkpoints || [];
     var pts = hist.map(function (p) { return [p.lat, p.lon]; }).concat(cps.map(function (c) { return [c.lat, c.lon]; }));
-    var opt = { renderer: canvasRenderer, interactive: false, lineCap: "round", lineJoin: "round" };
+    var opt = { renderer: canvasCelulas, interactive: false, lineCap: "round", lineJoin: "round" };
 
     if (pts.length > 1) {
       // contorno escuro suave por baixo pra a linha clara aparecer no mapa claro e no satélite
@@ -1042,7 +1490,7 @@
 
     cps.forEach(function (c, idx) {
       var op = Math.max(0.95 - idx * 0.2, 0.35);
-      L.circleMarker([c.lat, c.lon], { radius: 4, color: "#0f172a", weight: 1.5, fill: true, fillColor: "#f8fafc", fillOpacity: op, opacity: op, renderer: canvasRenderer })
+      L.circleMarker([c.lat, c.lon], { radius: 4, color: "#0f172a", weight: 1.5, fill: true, fillColor: "#f8fafc", fillOpacity: op, opacity: op, renderer: canvasCelulas })
         .bindTooltip("Célula #" + cel.id + " — alcance estimado em +" + c.min + " min")
         .addTo(alvo);
     });
@@ -1050,9 +1498,17 @@
     hist.forEach(function (p, i) {
       var atual = (i === hist.length - 1);
       var t = hist.length > 1 ? i / (hist.length - 1) : 1;
-      var marc = L.marker([p.lat, p.lon], { icon: iconeX(corCelula(t), atual ? 26 : 19), zIndexOffset: atual ? 500 : 0 });
-      if (atual) marc.bindTooltip("Célula #" + cel.id + " · ~" + Math.round(cel.vel_kmh) + " km/h para " + cel.rumo_texto);
-      marc.addTo(alvo);
+      var tam = atual ? 26 : 19;   // mesmas proporções do ícone SVG antigo (viewBox 24)
+      var marc = new L.XMarker([p.lat, p.lon], {
+        renderer: canvasCelulas, radius: tam * 7 / 24, color: corCelula(t),
+        weight: tam * 4.2 / 24, haloWeight: tam * 7 / 24, interactive: atual
+      });
+      if (atual) {
+        marc.bindTooltip("Célula #" + cel.id + " · ~" + Math.round(cel.vel_kmh) + " km/h para " + cel.rumo_texto);
+        atuais.push(marc);
+      } else {
+        marc.addTo(alvo);
+      }
     });
   }
 
@@ -1087,13 +1543,23 @@
     }, 150);
   }
 
+  var ultimaAssinRaios = null;
   function aoRenderizar(event) {
     var args = (event.detail && event.detail.args) || {};
     if (!map) iniciarMapa();
 
     atualizarStatus(args.status_texto);
-    redesenharEstacoes(args.estacoes, args.aneis);
-    redesenharRaios(args.raios, args.celulas, args.janela_min, args.mostrar_deslocamento, args.tamanho_raio);
+    meteorologistaApp = String(args.meteorologista || "");
+    redesenharEstacoes(args.estacoes, args.aneis, args.espessura_aneis);
+    var assinRaios = JSON.stringify([args.raios, args.celulas, args.janela_min, args.mostrar_deslocamento, args.tamanho_raio]);
+    if (assinRaios !== ultimaAssinRaios) {   // mesmo conteúdo reenviado (ex.: menu/largura mudou) → não refaz tudo
+      ultimaAssinRaios = assinRaios;
+      redesenharRaios(args.raios, args.celulas, args.janela_min, args.mostrar_deslocamento, args.tamanho_raio);
+    }
+    if (typeof args.altura_pct === "number" && args.altura_pct !== alturaPct) {
+      alturaPct = args.altura_pct;
+    }
+    reajustarAltura();   // 1º render: a altura certa já vale antes do primeiro setFrameHeight
     atualizarLegenda(args.aneis);
     dadosAlertas = { estacoes: args.estacoes || [], alertas: args.alertas || [] };
     renderPainelAlertas();
@@ -1108,11 +1574,10 @@
     // O Streamlit reenvia os mesmos dados ao mapa quando a largura muda (abrir/fechar o menu lateral, o
     // painel de alertas, redimensionar a janela...); sem o "token" o som tocaria de novo a cada vez.
     // O painel da unidade abre apenas quando a pessoa clica na unidade.
-    if (args.tocar_som && args.som_token && args.estacoes_novas && args.estacoes_novas.length && audio && args.som_token !== ultimoSomToken) {
+    if (args.som_token && audio && args.som_token !== ultimoSomToken) {
       ultimoSomToken = args.som_token;
       try { sessionStorage.setItem("rio_som_token", ultimoSomToken); } catch (e) {}
-      audio.currentTime = 0;
-      audio.play().catch(function () {});
+      tocarSomAlerta();
     }
 
     Streamlit.setFrameHeight(alturaQuadro);

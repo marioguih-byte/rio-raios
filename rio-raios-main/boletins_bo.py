@@ -5,7 +5,7 @@ Gera boletins de previsão do tempo (formato WhatsApp) para as unidades,
 usando Open-Meteo com ENSEMBLE (MÉDIA CONSENSO) entre ECMWF, ICON e GFS.
 
 Uso:
-    python gerar_boletins.py                       # usa as 41 unidades embutidas em UNIDADES
+    python gerar_boletins.py                       # usa as 40 unidades embutidas em UNIDADES
     python gerar_boletins.py --csv unidades.csv    # CSV com colunas: nome,lat,lon
     python gerar_boletins.py --filtro Macaé        # só unidades cujo nome contém o texto
     python gerar_boletins.py --dias 4 --saida boletins
@@ -30,12 +30,16 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 # ----------------------------------------------------------------------------
 # CONFIGURAÇÃO
 # ----------------------------------------------------------------------------
-API_URL = "https://api.open-meteo.com/v1/forecast"
+import os as _os
+# Chave da API paga do Open-Meteo (opcional): defina OPEN_METEO_API_KEY (variável de ambiente ou st.secrets). Sem chave usa o gratuito.
+API_KEY = _os.environ.get("OPEN_METEO_API_KEY", "").strip()
+API_URL = "https://customer-api.open-meteo.com/v1/forecast" if API_KEY else "https://api.open-meteo.com/v1/forecast"
+STATUS_DOWNLOAD = {"msg": ""}   # texto de progresso/erro do download, mostrado na tela pelo app
 MODELOS = ["ecmwf_ifs025", "icon_seamless", "gfs_seamless"]
 VARIAVEIS = [
     "temperature_2m", "precipitation", "relative_humidity_2m",
     "wind_speed_10m", "wind_direction_10m", "wind_gusts_10m",
-    "uv_index", "cape", "lifted_index", "convective_inhibition",
+    "uv_index", "cape", "lifted_index", "convective_inhibition", "weather_code",
 ]
 DIAS_PREVISAO = 4
 LIMITE_RAJADA_ALERTA = 40  # km/h, para o aviso de "Atenção"
@@ -48,9 +52,8 @@ LIM_RAJADA = (41, 62)     # km/h: verde 0–40 · amarelo 41–61 · vermelho >=
 LIM_UV = (6, 11)          # índice: verde 0–5 · amarelo 6–10 · vermelho >= 11
 LIM_UMID = (40, 12)       # %, INVERTIDO: verde >= 40 · amarelo 12–39 · vermelho < 12
 
-# 41 unidades (nome, (lat, lon))
+# 40 unidades (nome, (lat, lon))
 UNIDADES = {
-    "UTE Termocamaçari - UTE TCA": (-12.666868, -38.314687),
     "UTE Termobahia - UTE TBA": (-12.703235, -38.564904),
     "UTE Termoceará - UTE TCE": (-3.692456, -38.870605),
     "UTE Vale do Açu - UTE VLA": (-5.381685, -36.819754),
@@ -70,7 +73,6 @@ UNIDADES = {
     "UFN III - Unidade de Fertilizantes Nitrogenados III": (-20.985900, -51.838300),
     "Unidade de Tratamento de Gás de Caraguatatuba - UTGCA": (-23.654191, -45.501209),
     "Refinaria Presidente Bernardes - RPBC": (-23.873326, -46.427572),
-    "UTE Cubatão - UTE CBT": (-23.875735, -46.431387),
     "Refinaria Henrique Lage - REVAP": (-23.184796, -45.815806),
     "Refinaria de Capuava - RECAP": (-23.656681, -46.480883),
     "Refinaria de Paulínia - REPLAN": (-22.729589, -47.147712),
@@ -86,7 +88,7 @@ UNIDADES = {
     "Porto Açu": (-21.864737, -41.016444),
     "Porto Aratu": (-12.780132, -38.496764),
     "Porto TMIB": (-10.824129, -36.946301),
-    "Porto Belém": (-1.439901, -48.494920),
+    "Porto Belém": (-1.341476, -48.481309),
     "Porto Valença": (-13.369369, -39.071252),
     "Porto Guamaré": (-5.106692, -36.319592),
     "Porto Mucuripe": (-3.713117, -38.474037),
@@ -102,8 +104,22 @@ PONTOS = ["N", "NE", "E", "SE", "S", "SO", "O", "NO"]
 # ----------------------------------------------------------------------------
 # DOWNLOAD E CONSENSO
 # ----------------------------------------------------------------------------
+_CACHE_BAIXAR = {}          # (lat, lon, dias) -> (instante, dados): compartilhado por todos os usuários do app
+_CACHE_BAIXAR_SEG = 30 * 60  # reaproveita o download por 30 min: menos chamadas ao Open-Meteo (evita erro 429)
+
+
 def baixar(lat, lon, dias=DIAS_PREVISAO, tentativas=4):
-    params = {
+    chave = (round(float(lat), 4), round(float(lon), 4), int(dias))
+    guardado = _CACHE_BAIXAR.get(chave)
+    if guardado and time.time() - guardado[0] < _CACHE_BAIXAR_SEG:
+        return guardado[1]
+    dados = _baixar_sem_cache(lat, lon, dias, tentativas)
+    _CACHE_BAIXAR[chave] = (time.time(), dados)
+    return dados
+
+
+def parametros(lat, lon, dias=DIAS_PREVISAO):
+    return {
         "latitude": lat, "longitude": lon,
         "hourly": ",".join(VARIAVEIS),
         "models": ",".join(MODELOS),
@@ -115,19 +131,51 @@ def baixar(lat, lon, dias=DIAS_PREVISAO, tentativas=4):
         "forecast_days": dias + 1,
         "wind_speed_unit": "kmh",
     }
+
+
+def montar_url(lat, lon, dias=DIAS_PREVISAO):
+    """URL completa da consulta (sem chave de API): usada para baixar PELO NAVEGADOR de quem clicou."""
+    return requests.Request("GET", "https://api.open-meteo.com/v1/forecast", params=parametros(lat, lon, dias)).prepare().url
+
+
+def _chave_cache(lat, lon, dias):
+    return (round(float(lat), 4), round(float(lon), 4), int(dias))
+
+
+def em_cache(lat, lon, dias):
+    g = _CACHE_BAIXAR.get(_chave_cache(lat, lon, dias))
+    return bool(g and time.time() - g[0] < _CACHE_BAIXAR_SEG)
+
+
+def guardar_em_cache(lat, lon, dias, hourly):
+    _CACHE_BAIXAR[_chave_cache(lat, lon, dias)] = (time.time(), hourly)
+
+
+def _baixar_sem_cache(lat, lon, dias=DIAS_PREVISAO, tentativas=4):
+    params = parametros(lat, lon, dias)
+    if API_KEY:
+        params["apikey"] = API_KEY
+    ultimo = ""
     for i in range(tentativas):
         try:
-            r = requests.get(API_URL, params=params, timeout=60)
+            r = requests.get(API_URL, params=params, timeout=45)
             if r.status_code == 429:
-                time.sleep(10 * (i + 1))
+                espera = 5 * (i + 1)
+                ultimo = f"Open-Meteo limitou o acesso (HTTP 429: {r.text[:120]})"
+                STATUS_DOWNLOAD["msg"] = f"⚠️ {ultimo}." + (f" Nova tentativa {i + 2}/{tentativas} em {espera}s…" if i < tentativas - 1 else "")
+                if i < tentativas - 1:
+                    time.sleep(espera)
                 continue
             r.raise_for_status()
+            STATUS_DOWNLOAD["msg"] = ""
             return r.json()["hourly"]
         except requests.RequestException as e:
+            ultimo = f"{type(e).__name__}: {e}"
+            STATUS_DOWNLOAD["msg"] = f"⚠️ Falha ao falar com o Open-Meteo ({ultimo[:120]}). Nova tentativa {i + 2}/{tentativas}…"
             if i == tentativas - 1:
-                raise
+                raise RuntimeError(ultimo)
             time.sleep(3 * (i + 1))
-    raise RuntimeError("Falha ao baixar dados do Open-Meteo")
+    raise RuntimeError(ultimo or "Falha ao baixar dados do Open-Meteo")
 
 
 def _arr(v):
@@ -172,6 +220,27 @@ def prob_raios_horaria(cape, li, cin):
     base = np.where(np.isnan(li_s), cape_s, 0.6 * cape_s + 0.4 * li_s)
     pen = 1 - 0.6 * np.clip(np.abs(np.nan_to_num(cin)) / 200.0, 0, 1)
     return np.nan_to_num(100.0 * base * pen)
+
+
+# ----------------------------------------------------------------------------
+# GRANIZO
+# ----------------------------------------------------------------------------
+CODIGOS_GRANIZO = (96, 99)   # WMO: trovoada com granizo (fraco / forte)
+
+
+def granizo_horario(hourly):
+    """(previsto, possivel): arrays booleanos hora a hora.
+    previsto = algum modelo indica código WMO 96/99 (trovoada com granizo);
+    possivel = sem código de granizo, mas atmosfera muito instável (CAPE >= 2000 J/kg e Lifted Index <= -5)."""
+    n = len(hourly["time"])
+    prev = np.zeros(n, dtype=bool)
+    for m in MODELOS + [""]:
+        k = f"weather_code_{m}" if m else "weather_code"
+        if k in hourly:
+            prev |= np.isin(_arr(hourly[k]), CODIGOS_GRANIZO)
+    cape, li = consenso(hourly, "cape"), consenso(hourly, "lifted_index")
+    poss = (np.nan_to_num(cape) >= 2000) & (np.nan_to_num(li, nan=0.0) <= -5)
+    return prev, (poss & ~prev)
 
 
 # ----------------------------------------------------------------------------
@@ -226,6 +295,7 @@ def boletim_unidade(nome, lat, lon, dias=DIAS_PREVISAO):
     uv = consenso(h, "uv_index")
     raios = prob_raios_horaria(consenso(h, "cape"), consenso(h, "lifted_index"),
                                consenso(h, "convective_inhibition"))
+    gran_prev, gran_poss = granizo_horario(h)
 
     hoje_brasilia = datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%Y-%m-%d")
     dias_unicos = [d for d in dict.fromkeys(datas) if d >= hoje_brasilia][:dias]
@@ -274,11 +344,20 @@ def boletim_unidade(nome, lat, lon, dias=DIAS_PREVISAO):
         uv_max = np.nanmax(uv[m]) if not np.all(np.isnan(uv[m])) else np.nan
         um_med = np.nanmean(umid[m])
 
+        # Granizo: só aparece no boletim quando há previsão (ou possibilidade) naquele dia
+        g_prev, g_poss = gran_prev[m], gran_poss[m]
+        linha_granizo = []
+        if g_prev.any():
+            linha_granizo = [f"🧊 Granizo: previsto ({juntar(periodos_em(hh[g_prev]))})"]
+        elif g_poss.any():
+            linha_granizo = [f"🧊 Granizo: possível ({juntar(periodos_em(hh[g_poss]))})"]
+
         linhas += [
             f"*Dia {dd}*",
             f"🌡️ Máxima: {fmt(tmax)}°C Mínima: {fmt(tmin)}°C",
             f"{cor(np.round(ch), LIM_CHUVA)} Chuva: {fmt(ch)} mm/dia{per_chuva}",
             f"⚡ Probabilidade de raios: {r_max:.0f}% ({juntar(sel_r, cap=True)})",
+            *linha_granizo,
             f"{cor(v_med, LIM_VENTO)} Vento: {fmt(v_med)} km/h {txt_dir}",
             f"{cor(np.round(raj_max), LIM_RAJADA)} Rajadas: {fmt(raj_max)} km/h ({per_raj})",
             f"{cor(np.round(um_med), LIM_UMID, invertido=True)} Umidade: {fmt(um_med)}%",
@@ -302,6 +381,13 @@ def boletim_unidade(nome, lat, lon, dias=DIAS_PREVISAO):
                     "avisaremos imediatamente."
                 )
 
+    if gran_prev[np.array([x == dias_unicos[0] for x in datas])].any() if dias_unicos else False:
+        dd0 = datetime.strptime(dias_unicos[0], "%Y-%m-%d").strftime("%d/%m")
+        linhas.append(
+            "‐------‐---------------------------------\n"
+            f"🧊 *Atenção*: *Hoje ({dd0})*, há previsão de granizo associado a tempestades para a sua unidade. "
+            "Seguimos em monitoramento e, em caso de intensificação, avisaremos imediatamente.")
+        linhas.append("")
     if alerta:
         linhas.append(alerta)
     return "\n".join(linhas).rstrip() + "\n"

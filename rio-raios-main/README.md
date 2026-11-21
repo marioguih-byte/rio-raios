@@ -63,14 +63,30 @@ mapa não carrega.
   legenda e o controle de camadas vão junto. Se o navegador não permitir a tela cheia nativa dentro do
   quadro do Streamlit, o botão passa a **aumentar a altura do mapa** (e reduzir ao clicar de novo).
 
-## GOES-East com menos atraso
+## Enviar os boletins pelo WhatsApp (assistido)
 
-- **GOES-East:** o padrão é o **SSEC RealEarth** (GOES-19, banda 13 com realce de topos frios).
-  Também há banda 13 simples, IR Sandwich (topos convectivos) e GeoColor, e o NASA GIBS (~30 min de
-  atraso) continua disponível, desligado, no controle de camadas. O mapa mostra "imagem das HH:MM
-  (há X min)" para você conferir o atraso real. Crédito exigido pelo SSEC: "Source: SSEC RealEarth,
-  UW-Madison" (aparece na atribuição do mapa). Obs.: o SSEC pode exibir uma marca d'água
-  ("Size limit exceeded") quando o uso passa do limite gratuito dele.
+Na seção de boletins, depois de gerar, há **📲 Enviar pelo WhatsApp Web (assistido)**: uma lista com todas as unidades.
+Cada linha tem **🤖 Preparar no WhatsApp** (e há **🤖 Preparar todos (fila)** no topo), que usa o script do Tampermonkey
+em `whatsapp_assistente/` para abrir o grupo da unidade na aba do WhatsApp Web **que já está aberta** e deixar o boletim
+digitado; você confere e aperta Enter. Marque **enviado** para controlar. O app nunca abre outra aba do WhatsApp.
+
+## Ordem alfabética
+
+- As unidades aparecem em **ordem alfabética** (pelo nome mostrado, sem diferenciar acento nem maiúsculas) na geração dos
+  boletins, no arquivo consolidado e no `.zip`, na lista do WhatsApp e na busca do mapa. A aba **Risco** continua por
+  gravidade/distância e os alertas por horário, porque aí a ordem importa.
+
+## GOES-East e tiles do mapa
+
+- **Satélites (só NASA GIBS · GOES-East, ~30 min de atraso):** Infravermelho (banda 13, ligado por padrão),
+  GeoColor e Massa de ar. Só um fica ligado por vez no controle de camadas. Cada um usa os tiles prontos
+  (WMTS), rápidos e em cache; se esse serviço não responder, o mapa cai sozinho no WMS do GIBS (mais lento,
+  mesma imagem). Os tiles são recarregados a cada 10 min.
+- **Tiles sem problema ao arrastar/dar zoom** (todas as camadas de tiles): mais tiles guardados em volta da
+  área visível, tiles carregados enquanto arrasta, sem buscar níveis intermediários durante o zoom,
+  sem o "fade" que fazia as sobreposições piscarem, tile com erro tentado de novo e depois transparente
+  (sem ícone de imagem quebrada), e acima do nível em que o provedor tem imagem o mapa amplia o último nível
+  em vez de pedir tiles que não existem (GOES: nível 6; satélite Esri: nível 17; OSM: nível 19).
 
 ## Barra de rolagem
 
@@ -85,8 +101,45 @@ mapa não carrega.
   primeira vez). Em tela cheia ou com o mapa ampliado (botão ⛶), 1 dedo move o mapa. No computador
   nada muda.
 
+## Mapa mais alto e zoom do satélite
+
+- A altura do mapa é **86% da altura da janela do navegador**, entre 700 e 1400 px (560 px no celular em pé), já
+  na abertura da página. Dá para ajustar na barra lateral, em "🗺️ Mapa → Altura do mapa (% da altura da janela)"
+  (60% a 120%); o valor fica lembrado junto com o nome e os alertas. (Antes o mapa podia abrir menor e só
+  "crescer" depois da tela cheia: o quadro do mapa começa estreito por instantes e era tratado como celular.)
+- Zoom máximo 18. O satélite (Esri) usa imagens reais até o nível 17 e amplia o 17 acima disso, em vez de
+  pedir níveis que o Esri não tem em todo lugar (que mostravam "Map data not yet available"). As camadas
+  do GOES, de ~2 km por pixel, somem acima do zoom 11 (esticadas demais, o navegador não consegue
+  desenhar os tiles e eles somem/tremem). Os tiles ganharam buffer extra e só recarregam quando o zoom termina.
+
+## Sessão que reinicia (nome e alertas lembrados)
+
+- Quando a conexão da página cai (computador suspenso, aba em segundo plano, rede instável), o Streamlit abre uma
+  sessão nova e tudo voltava ao início. Agora:
+  - o **nome do meteorologista** fica na URL (`?nome=...`) e a sessão nova entra direto, sem pedir de novo;
+  - o **estado dos alertas** (alertas ativos, alertas já notificados, contagem do alerta verde, som) fica guardado no
+    servidor, ligado ao código `?sid=...` da URL, e é restaurado — sem repetir pop-up, som nem notificações.
+- Dica: guarde nos favoritos a URL com `?nome=SeuNome` para entrar já identificado.
+- Limite: se o próprio servidor do Streamlit reiniciar (ex.: falta de memória), o nome continua (está na URL),
+  mas o estado dos alertas é perdido. As configurações da barra lateral (paleta etc.) voltam ao padrão.
+
+## Alerta verde
+
+- Depois de um **alerta vermelho** (raio a menos de 30 km), o app espera o **último ponto de raio dentro de
+  30 km sumir do mapa** (os pontos ficam 20 min: vermelho → laranja → amarelo → verde) e **mais 5 minutos**,
+  ou seja, **25 min depois do último raio a menos de 30 km**. Aí emite o **alerta verde**
+  ("FIM DO ALERTA DE RAIOS"): entra na lista de alertas (com "Quem recebeu" e texto para copiar) e abre
+  um pop-up verde. **Não toca som.**
+- Se um raio novo a menos de 30 km aparecer durante a espera, a contagem recomeça. Depois do verde, a
+  unidade é **rearmada**: um raio novo gera um novo alerta vermelho/amarelo.
+- Só emite o verde se o GLM foi lido com sucesso naquele ciclo (sem dados não dá pra dizer que não há raios).
+- Constantes no topo do código: `VERDE_RAIO_KM = 30` e `VERDE_MINUTOS_SEM_RAIO = 5` (a espera depois que o
+  ponto some; os 20 min dos pontos vêm da janela do mapa).
+
 ## Som do alerta
 
+- O aviso de som fica nos dados do mapa até tocar (a reexecução que abre o pop-up podia substituí-lo antes).
+  Se o navegador bloquear o som, aparece um aviso e ele toca no primeiro toque/clique no mapa.
 - O som toca **uma única vez por alerta novo**. Antes, abrir/fechar o menu lateral (ou o painel de
   alertas, ou redimensionar a janela) fazia o Streamlit reenviar os mesmos dados ao mapa e o som tocava de novo.
 
@@ -176,7 +229,7 @@ mapa não carrega.
 ## Ajustes da última rodada
 
 - **Legenda retrátil**, recolhida por padrão (clique em "▸ Legenda" no canto do mapa).
-- **Sem upload de planilha:** o app usa sempre as 41 unidades cadastradas.
+- **Sem upload de planilha:** o app usa sempre as 40 unidades cadastradas.
 - **Anéis:** ficou só a caixa "Mostrar anéis de distância" (30/50/100/200 km sempre juntos).
 - **Divisão de UFs** no mapa (limites entre estados, ligável/desligável no controle de camadas).
 - **Bolinhas de raio maiores.**
@@ -252,3 +305,47 @@ O Streamlit Community Cloud gratuito tem um limite de recursos (RAM/CPU)
 compartilhado por app. Pra uso por 1-2 pessoas ao mesmo tempo funciona
 bem; pra uso mais intenso, vale considerar um plano pago ou outro provedor
 (Render, Railway).
+
+## Mapas de previsão (Brasil)
+
+Seção nova no fim da página (depois dos boletins), **sem mexer em nada do que já existia**: o
+`streamlit_app.py` só ganhou o `import previsao_mapas` e a chamada `previsao_mapas.renderizar()`.
+
+- **O que gera:** mapas de **precipitação acumulada**, **rajada máxima de vento (10 m)** e **temperatura máxima/mínima
+  (2 m)** para o Brasil, **7 dias a partir de hoje** (horário de Brasília), com dados do Open-Meteo e
+  **interpolação RBF** (`scipy`, thin-plate spline) sobre uma malha de ~235 pontos (espaçamento de 2°).
+- **Como usar:** botão **🗺️ Gerar mapas de previsão** (a coleta leva ~20 s e roda em segundo plano, como os boletins, sem
+  travar o mapa de raios). Escolha a variável e o dia; a visão pode ser **Mapa do dia** (mapa grande + evolução máx/média/mín
+  + % da área acima de um limiar), **7 dias** (os 7 mapas lado a lado) ou **Dados** (pontos do Open-Meteo, com CSV). Dá para
+  baixar os PNGs.
+- **Layout:** mesmas cores do RIO (cartões e mapas no tema escuro, destaque em turquesa) e a seção é um *fragmento*: mexer
+  nos controles não recarrega o mapa de raios.
+- **Cache:** a previsão fica em memória por 3 h, **compartilhada entre os usuários** do app (quem abrir depois já vê os
+  mapas). Ela só vale se começar em hoje (Brasília); depois da meia-noite pede nova coleta. O botão vira **🔄 Atualizar
+  previsão** quando já há dados.
+- **Arquivos novos (precisam subir pro GitHub):** `previsao_mapas.py` e `data/brasil_mapa.json` (contorno do Brasil, estados e
+  países vizinhos do Natural Earth, simplificado — por isso não precisa de cartopy nem de download de shapefiles).
+  O `requirements.txt` ganhou `scipy`, `matplotlib` e `shapely`.
+- **Memória:** `scipy` e `matplotlib` só são carregados quando os mapas são gerados, então o app de raios abre como antes.
+
+## Enviar o alerta ao WhatsApp (assistido)
+
+Cada alerta tem o botão **🤖 Preparar no WhatsApp** (no painel do mapa e no painel lateral): o script do Tampermonkey
+(`whatsapp_assistente/`) abre o grupo da unidade na aba do WhatsApp Web já aberta e deixa a mensagem digitada, com o
+horário atual e validade de 1 hora; você confere e aperta Enter. No painel do mapa há também **📋 Copiar para o WhatsApp**
+(só copia o texto). O app não abre outra aba do WhatsApp.
+
+## Aviso de alerta de raio (configurações)
+
+Na barra lateral, **🔔 Aviso de alerta de raio**: *Pop-up no meio da tela* (padrão) ou *Canto esquerdo / Canto direito (com rolagem)*. No canto, os avisos novos
+se acumulam num painel fixo com rolagem até você fechar cada um (✕) ou usar "Fechar todos".
+
+## Boletim horário (3 em 3 horas)
+
+Na barra lateral, logo abaixo do nome do meteorologista: **⏰ Boletim horário (3 em 3 h)** + escolha de uma ou mais unidades.
+- Gera sozinho **5 min antes** de 00h, 03h, 06h … 21h (2 consultas ao Open-Meteo por unidade, só das unidades escolhidas, sem fila).
+- Mostra as **próximas 12 h**: gráficos (temperatura, umidade/nebulosidade, chuva, vento, raios/granizo, UV) e texto hora a hora.
+- Texto de 3 em 3 h (os gráficos seguem hora a hora); imagem com a logo; a legenda leva o texto todo quando cabe (um só Enter).
+- Lembrete fixo no **canto direito** com "Preparar no WhatsApp" (texto digitado no grupo da unidade; você confere e dá Enter), "Copiar texto" e "Enviado".
+- "⚡ Gerar agora" cria o boletim a partir da hora atual, a qualquer momento. O gráfico pode ser baixado em PNG.
+- Os boletins diários agora incluem a linha **🧊 Granizo** quando há previsão (ou possibilidade) no dia.
