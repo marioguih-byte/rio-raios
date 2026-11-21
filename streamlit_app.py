@@ -2319,20 +2319,30 @@ _HTML_HOR_BOTOES = """<!doctype html><html><head><meta charset="utf-8"><style>
   html,body{margin:0;padding:0;background:transparent;font:13px 'Segoe UI',Arial,sans-serif}
   button{cursor:pointer;border-radius:8px;border:1px solid #3a4150;background:#232834;color:#f1f1f1;padding:7px 11px;font:inherit}
   button:hover{background:#2e3544} button.p{background:#25d366;border-color:#25d366;color:#06210f;font-weight:600} button.p:hover{background:#3be07b}
-</style></head><body><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="p" id="wa">__ROTULO__</button><button id="cp">📋 Copiar texto</button></div>
+  button.s{background:#1c7ed6;border-color:#1c7ed6;color:#fff;font-weight:600} button.s:hover{background:#3b94e6}
+</style></head><body><div style="display:flex;gap:8px;flex-wrap:wrap">
+<button class="p" id="bt" title="Abre o grupo da unidade e digita o texto do boletim">📝 Enviar texto</button>__BT_IMG__
+<button id="cp">📋 Copiar texto</button></div>
 <script>
   var IT = __ITEM__;
   function copiar(t){ var x=document.createElement("textarea"); x.value=t; x.style.cssText="position:fixed;opacity:0"; document.body.appendChild(x); x.select();
     try{document.execCommand("copy");}catch(e){} document.body.removeChild(x); }
-  document.getElementById("wa").addEventListener("click", function(){
-    var b=this, rot=IT.png?"🤖 Preparar no WhatsApp (imagem + texto)":"🤖 Preparar no WhatsApp", ok=false;
+  function enviar(b, carga, copiaSeFalhar){
+    var rot=b.textContent, ok=false;
     function ack(ev){ if(ev.data && ev.data.fonte==="rio-raios-ack") ok=true; }
     window.addEventListener("message", ack);
-    try{ (window.top||window.parent).postMessage({fonte:"rio-raios",tipo:"preparar",id:IT.id,estacao:IT.estacao,texto:IT.texto,legenda:IT.legenda||"",png:IT.png||""},"*"); }catch(e){}
+    carga.fonte="rio-raios"; carga.tipo="preparar"; carga.estacao=IT.estacao;
+    try{ (window.top||window.parent).postMessage(carga,"*"); }catch(e){}
     setTimeout(function(){ window.removeEventListener("message",ack);
-      if(!ok){ copiar(IT.completo); b.textContent="Script não detectado - texto copiado (Ctrl+V)"; } else { b.textContent="✔ Enviado ao WhatsApp - confira lá e dê Enter"; }
+      if(!ok){ if(copiaSeFalhar) copiar(IT.completo); b.textContent="Script não detectado"+(copiaSeFalhar?" - texto copiado (Ctrl+V)":""); } else { b.textContent="✔ Enviado ao WhatsApp - confira lá e dê Enter"; }
       setTimeout(function(){ b.textContent=rot; },4500); },1200);
-  });
+  }
+  document.getElementById("bt").addEventListener("click", function(){
+    enviar(this, {id:IT.id+"t", modo:"texto", texto:IT.completo, legenda:"", png:""}, true); });
+  var bi=document.getElementById("bi"); if(bi) bi.addEventListener("click", function(){
+    enviar(this, {id:IT.id+"i", modo:"imagem", texto:"", legenda:"", png:IT.png}, false); });
+  var bx=document.getElementById("bx"); if(bx) bx.addEventListener("click", function(){
+    enviar(this, {id:IT.id+"x", modo:"ambos", texto:IT.texto, legenda:IT.legenda||"", png:IT.png}, true); });
   document.getElementById("cp").addEventListener("click", function(){ var b=this; copiar(IT.completo); b.textContent="✔ Copiado"; setTimeout(function(){ b.textContent="📋 Copiar texto"; },2000); });
 </script></body></html>"""
 
@@ -2341,15 +2351,16 @@ def _hor_estado():
     return st.session_state.setdefault("hor", {"slots": {}, "pre": None, "ver": None, "dispensado": "", "avisado": {}})
 
 
-def _hor_botoes_whatsapp(chave, nome, texto, png=None, altura=46):
-    """Com PNG: o script cola a imagem no grupo com a legenda (cabeçalho + resumo) e, depois do seu envio, deixa o
-    'Hora a hora' pronto como 2ª mensagem. Sem PNG: só o texto."""
+def _hor_botoes_whatsapp(chave, nome, texto, png=None, altura=84):
+    """Botões: "Enviar texto" (só o texto), "Enviar imagem" (só o PNG) e "Imagem + texto" (PNG com o texto na legenda; se o texto
+    não couber na legenda, o 'Hora a hora' vira 2ª mensagem)."""
     item = {"id": f"hor{chave}{boletins_bo.slug(nome)}"[:80], "estacao": nome, "texto": texto, "completo": texto}
     if png:
         legenda, resto = bh.dividir_texto(texto)
         item.update(legenda=legenda, texto=resto, png=base64.b64encode(png).decode("ascii"))
     html = _HTML_HOR_BOTOES.replace("__ITEM__", json.dumps(item, ensure_ascii=False).replace("</", "<\\/")).replace(
-        "__ROTULO__", "🤖 Preparar no WhatsApp (imagem + texto)" if png else "🤖 Preparar no WhatsApp")
+        "__BT_IMG__", '<button class="s" id="bi" title="Abre o grupo e cola só a imagem">🖼 Enviar imagem</button>'
+        '<button class="s" id="bx" title="Cola a imagem com o texto na legenda">🖼📝 Imagem + texto</button>' if png else "")
     components.html(html, height=altura)
 
 
@@ -2429,6 +2440,9 @@ def _hor_lembrete(agora, envio, gerar_em, chave, nomes_sel):
     """Painel fixo no canto direito: lembra de enviar os boletins horários."""
     hor = _hor_estado()
     slot = hor["slots"].get(chave)
+    # O lembrete só aparece a partir de 5 min antes do envio (e até 30 min depois, ou até todos serem marcados como enviados).
+    if not nomes_sel or agora < gerar_em:
+        return
     fundo, borda = _cores_painel()
     st.markdown(
         "<style>.st-key-lembrete_horario{position:fixed;top:72px;right:16px;width:min(400px,92vw);max-height:78vh;overflow-y:auto;z-index:999991;"
@@ -2437,11 +2451,7 @@ def _hor_lembrete(agora, envio, gerar_em, chave, nomes_sel):
     janela = agora >= gerar_em
     todos_env = bool(slot) and all(slot["unidades"].get(n, {}).get("enviado") for n in nomes_sel) and bool(nomes_sel)
     with st.container(key="lembrete_horario"):
-        if not nomes_sel:
-            st.markdown("**⏰ Boletim horário** — escolha as unidades na barra lateral.")
-            return
-        if not janela or hor.get("dispensado") == chave or todos_env:
-            falta = int((gerar_em - agora).total_seconds() // 60)
+        if hor.get("dispensado") == chave or todos_env:
             if todos_env:
                 st.markdown(f"**⏰ Boletim das {envio:%H:%M}** ✅ enviado. Próximo em {bh.INTERVALO_H} h.")
             elif hor.get("dispensado") == chave:
@@ -2449,9 +2459,6 @@ def _hor_lembrete(agora, envio, gerar_em, chave, nomes_sel):
                 if st.button("Reabrir", key="hor_reabrir"):
                     hor["dispensado"] = ""
                     _rerun_fragmento()
-            else:
-                st.markdown(f"**⏰ Próximo boletim horário: {envio:%H:%M}**")
-                st.caption(f"Gera às {gerar_em:%H:%M} (em {falta + 1} min) para {len(nomes_sel)} unidade(s).")
             return
         c1, c2 = st.columns([5, 1], vertical_alignment="center")
         c1.markdown(f"**⏰ Hora de enviar o boletim das {envio:%H:%M}**")

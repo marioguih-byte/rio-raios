@@ -209,7 +209,7 @@
       }
       if (d.tipo !== "preparar") return;
       gSet(CHAVE, { estacao: String(d.estacao || ""), texto: String(d.texto || ""), id: String(d.id || ""),
-                    legenda: String(d.legenda || ""), png: String(d.png || ""), ts: Date.now() });
+                    legenda: String(d.legenda || ""), png: String(d.png || ""), modo: String(d.modo || ""), ts: Date.now() });
       try { ev.source && ev.source.postMessage({ fonte: "rio-raios-ack" }, "*"); } catch (e) {}
     }
     // O site avisa quais boletins foram salvos: repassa a todos os quadros (iframes) do app para marcar o check "Site".
@@ -688,16 +688,23 @@
   }
   // Prepara imagem + legenda (+ texto seguinte). Devolve true se a imagem entrou.
   async function prepararImagem(cx, dado, titulo, prefixo) {
-    var legenda = dado.legenda || dado.texto || "", resto = dado.legenda ? (dado.texto || "") : "";
-    if (!limparCaixa(cx)) return false;
+    var soImagem = dado.modo === "imagem";
+    var legenda = soImagem ? "" : (dado.legenda || dado.texto || ""), resto = (!soImagem && dado.legenda) ? (dado.texto || "") : "";
+    if (!limparCaixa(cx)) { aviso("⚠️ " + prefixo + "Não consegui esvaziar a caixa de mensagem do grupo.", "#b45309"); return false; }
     var r = await colarImagem(cx, dado.png);
     if (!r.ok) {
       var copiada = await imagemNaAreaDeTransferencia(dado.png);
       aviso("🖼 " + prefixo + "Não consegui colar a imagem sozinho." + (copiada ? " Ela está COPIADA: aperte Ctrl+V na caixa do grupo — eu escrevo a legenda." : " Baixe o PNG no app e anexe.") + " [diag: " + r.diag + "]", "#b45309");
-      if (!copiada) { copiarTexto(legenda + (resto ? "\n\n" + resto : "")); return false; }
+      if (!copiada) { if (!soImagem) copiarTexto(legenda + (resto ? "\n\n" + resto : "")); return false; }
       var cap2 = await aguardar(caixaLegenda, 90000, 300);
-      if (!cap2) { copiarTexto(legenda + (resto ? "\n\n" + resto : "")); aviso("⚠️ A imagem não foi colada. Texto COPIADO: cole com Ctrl+V.", "#b45309"); return false; }
+      if (!cap2) { if (!soImagem) copiarTexto(legenda + (resto ? "\n\n" + resto : "")); aviso("⚠️ A imagem não foi colada." + (soImagem ? "" : " Texto COPIADO: cole com Ctrl+V."), "#b45309"); return false; }
       r = { ok: true, via: "manual", cap: cap2 };
+    }
+    if (soImagem) {
+      r.cap.focus();
+      aviso("✅ " + prefixo + "Imagem pronta no grupo “" + titulo + "”. CONFIRA e aperte ENTER.", "#075e54");
+      try { GM_notification({ title: "RIO Raios", text: "Imagem pronta em " + titulo + ". Confira e aperte Enter.", timeout: 6000 }); } catch (e) {}
+      return true;
     }
     var ins = await inserirTexto(r.cap, legenda);
     if (!ins.ok) { copiarTexto(legenda); aviso("⚠️ " + prefixo + "Imagem colada, mas não consegui escrever a legenda. Legenda COPIADA: cole com Ctrl+V. [diag: " + ins.diag + "]", "#b45309"); }
@@ -798,6 +805,7 @@
       if (dado.png) {
         var okImg = await prepararImagem(cx, dado, titulo, prefixo);
         if (okImg) return titulo;
+        if (dado.modo === "imagem") return null;      // só imagem: o aviso de falha já foi mostrado
         // sem imagem: segue o fluxo normal só com texto (legenda + hora a hora)
         dado = { estacao: dado.estacao, id: dado.id, texto: (dado.legenda ? dado.legenda + (dado.texto ? "\n\n" + dado.texto : "") : dado.texto) };
       }
@@ -834,7 +842,7 @@
   async function preparar(dado) {
     if (ocupado) return;
     // Mesmo pedido (mesmo alerta e mesmo texto) repetido em poucos segundos = duplicado: ignora.
-    var chave = String(dado.id || "") + "|" + String(dado.texto || "") + "|" + String(dado.legenda || "") + "|" + (dado.png ? dado.png.length : 0);
+    var chave = String(dado.id || "") + "|" + String(dado.texto || "") + "|" + String(dado.legenda || "") + "|" + String(dado.modo || "") + "|" + (dado.png ? dado.png.length : 0);
     if (chave === ultimoPedido.chave && Date.now() - ultimoPedido.t < 20000) return;
     ultimoPedido = { chave: chave, t: Date.now() };
     ocupado = true;
@@ -892,7 +900,7 @@
 
   var tratadoWA = {};
   onMudou(CHAVE, async function (nome, antigo, novo, remoto) {
-    if (!remoto || !novo || !(novo.texto || novo.legenda) || tratadoWA["p" + novo.ts]) return;
+    if (!remoto || !novo || !(novo.texto || novo.legenda || novo.png) || tratadoWA["p" + novo.ts]) return;
     tratadoWA["p" + novo.ts] = 1;
     if (await reivindicar("preparar", novo.ts)) preparar(novo);   // só uma aba do WhatsApp trata cada pedido
   });
