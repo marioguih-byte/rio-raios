@@ -2319,31 +2319,36 @@ _HTML_HOR_BOTOES = """<!doctype html><html><head><meta charset="utf-8"><style>
   html,body{margin:0;padding:0;background:transparent;font:13px 'Segoe UI',Arial,sans-serif}
   button{cursor:pointer;border-radius:8px;border:1px solid #3a4150;background:#232834;color:#f1f1f1;padding:7px 11px;font:inherit}
   button:hover{background:#2e3544} button.p{background:#25d366;border-color:#25d366;color:#06210f;font-weight:600} button.p:hover{background:#3be07b}
-  button.s{background:#1c7ed6;border-color:#1c7ed6;color:#fff;font-weight:600} button.s:hover{background:#3b94e6}
-</style></head><body><div style="display:flex;gap:8px;flex-wrap:wrap">
-<button class="p" id="bt" title="Abre o grupo da unidade e digita o texto do boletim">📝 Enviar texto</button>__BT_IMG__
-<button id="cp">📋 Copiar texto</button></div>
+</style></head><body><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="p" id="wa">🤖 Preparar no WhatsApp</button><button id="cp">📋 Copiar texto</button>__BT_IMG__</div>
 <script>
   var IT = __ITEM__;
   function copiar(t){ var x=document.createElement("textarea"); x.value=t; x.style.cssText="position:fixed;opacity:0"; document.body.appendChild(x); x.select();
     try{document.execCommand("copy");}catch(e){} document.body.removeChild(x); }
-  function enviar(b, carga, copiaSeFalhar){
-    var rot=b.textContent, ok=false;
+  document.getElementById("wa").addEventListener("click", function(){
+    var b=this, rot="🤖 Preparar no WhatsApp", ok=false;
     function ack(ev){ if(ev.data && ev.data.fonte==="rio-raios-ack") ok=true; }
     window.addEventListener("message", ack);
-    carga.fonte="rio-raios"; carga.tipo="preparar"; carga.estacao=IT.estacao;
-    try{ (window.top||window.parent).postMessage(carga,"*"); }catch(e){}
+    try{ (window.top||window.parent).postMessage({fonte:"rio-raios",tipo:"preparar",id:IT.id,estacao:IT.estacao,texto:IT.texto},"*"); }catch(e){}
     setTimeout(function(){ window.removeEventListener("message",ack);
-      if(!ok){ if(copiaSeFalhar) copiar(IT.completo); b.textContent="Script não detectado"+(copiaSeFalhar?" - texto copiado (Ctrl+V)":""); } else { b.textContent="✔ Enviado ao WhatsApp - confira lá e dê Enter"; }
+      if(!ok){ copiar(IT.texto); b.textContent="Script não detectado - texto copiado (Ctrl+V)"; } else { b.textContent="✔ Enviado ao WhatsApp - confira lá e dê Enter"; }
       setTimeout(function(){ b.textContent=rot; },4500); },1200);
-  }
-  document.getElementById("bt").addEventListener("click", function(){
-    enviar(this, {id:IT.id+"t", modo:"texto", texto:IT.completo, legenda:"", png:""}, true); });
-  var bi=document.getElementById("bi"); if(bi) bi.addEventListener("click", function(){
-    enviar(this, {id:IT.id+"i", modo:"imagem", texto:"", legenda:"", png:IT.png}, false); });
-  var bx=document.getElementById("bx"); if(bx) bx.addEventListener("click", function(){
-    enviar(this, {id:IT.id+"x", modo:"ambos", texto:IT.texto, legenda:IT.legenda||"", png:IT.png}, true); });
-  document.getElementById("cp").addEventListener("click", function(){ var b=this; copiar(IT.completo); b.textContent="✔ Copiado"; setTimeout(function(){ b.textContent="📋 Copiar texto"; },2000); });
+  });
+  document.getElementById("cp").addEventListener("click", function(){ var b=this; copiar(IT.texto); b.textContent="✔ Copiado"; setTimeout(function(){ b.textContent="📋 Copiar texto"; },2000); });
+  var bi=document.getElementById("bi");
+  if(bi) bi.addEventListener("click", async function(){
+    var b=this, rot="🖼 Copiar imagem";
+    try{
+      var bin=atob(IT.png), u=new Uint8Array(bin.length); for(var i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i);
+      var blob=new Blob([u],{type:"image/png"});
+      await navigator.clipboard.write([new ClipboardItem({"image/png":blob})]);
+      b.textContent="✔ Imagem copiada - cole no WhatsApp (Ctrl+V)";
+    }catch(e){
+      // sem permissão para copiar imagem: baixa o arquivo para anexar manualmente
+      try{ var a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([u],{type:"image/png"})); a.download="boletim-horario.png"; document.body.appendChild(a); a.click(); a.remove(); }catch(x){}
+      b.textContent="Não consegui copiar - PNG baixado";
+    }
+    setTimeout(function(){ b.textContent=rot; },4500);
+  });
 </script></body></html>"""
 
 
@@ -2351,16 +2356,13 @@ def _hor_estado():
     return st.session_state.setdefault("hor", {"slots": {}, "pre": None, "ver": None, "dispensado": "", "avisado": {}})
 
 
-def _hor_botoes_whatsapp(chave, nome, texto, png=None, altura=84):
-    """Botões: "Enviar texto" (só o texto), "Enviar imagem" (só o PNG) e "Imagem + texto" (PNG com o texto na legenda; se o texto
-    não couber na legenda, o 'Hora a hora' vira 2ª mensagem)."""
-    item = {"id": f"hor{chave}{boletins_bo.slug(nome)}"[:80], "estacao": nome, "texto": texto, "completo": texto}
+def _hor_botoes_whatsapp(chave, nome, texto, png=None, altura=46):
+    """Botões: preparar o texto no WhatsApp, copiar o texto e copiar a imagem (PNG) para colar com Ctrl+V."""
+    item = {"id": f"hor{chave}{boletins_bo.slug(nome)}"[:80], "estacao": nome, "texto": texto}
     if png:
-        legenda, resto = bh.dividir_texto(texto)
-        item.update(legenda=legenda, texto=resto, png=base64.b64encode(png).decode("ascii"))
+        item["png"] = base64.b64encode(png).decode("ascii")
     html = _HTML_HOR_BOTOES.replace("__ITEM__", json.dumps(item, ensure_ascii=False).replace("</", "<\\/")).replace(
-        "__BT_IMG__", '<button class="s" id="bi" title="Abre o grupo e cola só a imagem">🖼 Enviar imagem</button>'
-        '<button class="s" id="bx" title="Cola a imagem com o texto na legenda">🖼📝 Imagem + texto</button>' if png else "")
+        "__BT_IMG__", '<button id="bi" title="Copia a imagem para colar (Ctrl+V) na conversa">🖼 Copiar imagem</button>' if png else "")
     components.html(html, height=altura)
 
 

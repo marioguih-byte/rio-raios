@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RIO Raios → WhatsApp Web (assistente com supervisão)
 // @namespace    rio-raios
-// @version      2.8
+// @version      2.9
 // @description  Recebe o alerta do app RIO Raios, abre o grupo da unidade no WhatsApp Web e deixa a mensagem DIGITADA, e preenche o formulário do site da BlueOcean. Você confere e confirma.
 // @match        https://web.whatsapp.com/*
 // @match        https://*.streamlit.app/*
@@ -93,7 +93,7 @@
       if (!document.body || document.getElementById("rio-selo")) return;
       var d = document.createElement("div");
       d.id = "rio-selo";
-      d.textContent = "🤖 RIO Assistente v2.8 ativo (" + (ehWhatsApp ? "WhatsApp" : ehSite ? "site BlueOcean" : "app RIO") + ")";
+      d.textContent = "🤖 RIO Assistente v2.9 ativo (" + (ehWhatsApp ? "WhatsApp" : ehSite ? "site BlueOcean" : "app RIO") + ")";
       d.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:2147483647;padding:6px 12px;border-radius:8px;background:#075e54;color:#fff;font:600 12px sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.4);transition:opacity .6s;";
       document.body.appendChild(d);
       setTimeout(function () { d.style.opacity = "0"; }, 6400);
@@ -209,7 +209,7 @@
       }
       if (d.tipo !== "preparar") return;
       gSet(CHAVE, { estacao: String(d.estacao || ""), texto: String(d.texto || ""), id: String(d.id || ""),
-                    legenda: String(d.legenda || ""), png: String(d.png || ""), modo: String(d.modo || ""), ts: Date.now() });
+                    ts: Date.now() });
       try { ev.source && ev.source.postMessage({ fonte: "rio-raios-ack" }, "*"); } catch (e) {}
     }
     // O site avisa quais boletins foram salvos: repassa a todos os quadros (iframes) do app para marcar o check "Site".
@@ -624,96 +624,6 @@
     return { ok: false, diag: diag.join(" ") };
   }
 
-  // ------------------------------------------------------------------
-  // IMAGEM (boletim horário): cola o PNG na caixa do grupo (abre a pré-visualização do WhatsApp) e escreve a legenda.
-  // ------------------------------------------------------------------
-  function criarArquivoPng(b64, W) {
-    var bin = atob(b64), n = bin.length, u8;
-    try { u8 = new W.Uint8Array(n); } catch (e) { u8 = new Uint8Array(n); }
-    for (var i = 0; i < n; i++) u8[i] = bin.charCodeAt(i);
-    try { return new W.File([u8], "boletim-horario.png", { type: "image/png" }); }
-    catch (e) { return new File([u8], "boletim-horario.png", { type: "image/png" }); }
-  }
-  function visivel(e) { var r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; }
-  // Caixa de legenda da pré-visualização: um campo editável FORA do rodapé e da lista de conversas.
-  function caixaLegenda() {
-    return Array.from(document.querySelectorAll('div[contenteditable="true"], [contenteditable="plaintext-only"]')).filter(function (e) {
-      return !e.closest("footer") && !e.closest("#side") && visivel(e);
-    })[0] || null;
-  }
-  async function colarImagem(cx, b64) {
-    var W = (typeof unsafeWindow !== "undefined" && unsafeWindow) ? unsafeWindow : window, tentativas = [], diag = [];
-    function dtCom(Win) { var dt = new Win.DataTransfer(); dt.items.add(criarArquivoPng(b64, Win)); return dt; }
-    tentativas.push(["colar-pagina", function () { cx.focus(); cx.dispatchEvent(new W.ClipboardEvent("paste", { clipboardData: dtCom(W), bubbles: true, cancelable: true })); }]);
-    tentativas.push(["colar", function () { cx.focus(); cx.dispatchEvent(new window.ClipboardEvent("paste", { clipboardData: dtCom(window), bubbles: true, cancelable: true })); }]);
-    tentativas.push(["arrastar", function () {
-      var alvo = document.querySelector("#main") || cx, dt = dtCom(W);
-      ["dragenter", "dragover", "drop"].forEach(function (t) { alvo.dispatchEvent(new W.DragEvent(t, { dataTransfer: dt, bubbles: true, cancelable: true })); });
-    }]);
-    for (var k = 0; k < tentativas.length; k++) {
-      try { tentativas[k][1](); } catch (e) { diag.push(tentativas[k][0] + ":erro " + (e && e.message)); continue; }
-      var cap = await aguardar(caixaLegenda, 3500, 200);
-      if (cap) return { ok: true, via: tentativas[k][0], cap: cap };
-      diag.push(tentativas[k][0] + ":sem pré-visualização");
-    }
-    return { ok: false, diag: diag.join(" ") };
-  }
-  // Último recurso: deixa a imagem na área de transferência (Ctrl+V manual) e espera a pré-visualização aparecer.
-  async function imagemNaAreaDeTransferencia(b64) {
-    try {
-      var bin = atob(b64), u8 = new Uint8Array(bin.length);
-      for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
-      await navigator.clipboard.write([new ClipboardItem({ "image/png": new Blob([u8], { type: "image/png" }) })]);
-      return true;
-    } catch (e) { return false; }
-  }
-  var tokenSegunda = 0;
-  // Depois que VOCÊ envia a imagem (a pré-visualização fecha), deixa o "Hora a hora" digitado como 2ª mensagem.
-  async function segundaMensagem(titulo, cap, texto, token) {
-    var t0 = Date.now();
-    while (Date.now() - t0 < 600000) {
-      if (token !== tokenSegunda) return;
-      if (!chatAbertoE(titulo)) return;
-      if (!cap.isConnected || !visivel(cap)) break;
-      await esperar(500);
-    }
-    if (token !== tokenSegunda || !chatAbertoE(titulo)) return;
-    await esperar(1200);
-    var cx = await aguardar(caixaMensagem, 4000, 200);
-    if (!cx) { copiarTexto(texto); aviso("⚠️ Imagem enviada. Não achei a caixa para o “Hora a hora” — texto COPIADO: cole com Ctrl+V.", "#b45309"); return; }
-    var ins = await inserirTexto(cx, texto);
-    if (!ins.ok) { copiarTexto(texto); aviso("⚠️ Não consegui digitar o “Hora a hora”. Texto COPIADO: cole com Ctrl+V.", "#b45309"); return; }
-    cx.focus();
-    aviso("✅ 2ª mensagem (Hora a hora) pronta em “" + titulo + "”. Aperte ENTER para enviar.", "#075e54");
-  }
-  // Prepara imagem + legenda (+ texto seguinte). Devolve true se a imagem entrou.
-  async function prepararImagem(cx, dado, titulo, prefixo) {
-    var soImagem = dado.modo === "imagem";
-    var legenda = soImagem ? "" : (dado.legenda || dado.texto || ""), resto = (!soImagem && dado.legenda) ? (dado.texto || "") : "";
-    if (!limparCaixa(cx)) { aviso("⚠️ " + prefixo + "Não consegui esvaziar a caixa de mensagem do grupo.", "#b45309"); return false; }
-    var r = await colarImagem(cx, dado.png);
-    if (!r.ok) {
-      var copiada = await imagemNaAreaDeTransferencia(dado.png);
-      aviso("🖼 " + prefixo + "Não consegui colar a imagem sozinho." + (copiada ? " Ela está COPIADA: aperte Ctrl+V na caixa do grupo — eu escrevo a legenda." : " Baixe o PNG no app e anexe.") + " [diag: " + r.diag + "]", "#b45309");
-      if (!copiada) { if (!soImagem) copiarTexto(legenda + (resto ? "\n\n" + resto : "")); return false; }
-      var cap2 = await aguardar(caixaLegenda, 90000, 300);
-      if (!cap2) { if (!soImagem) copiarTexto(legenda + (resto ? "\n\n" + resto : "")); aviso("⚠️ A imagem não foi colada." + (soImagem ? "" : " Texto COPIADO: cole com Ctrl+V."), "#b45309"); return false; }
-      r = { ok: true, via: "manual", cap: cap2 };
-    }
-    if (soImagem) {
-      r.cap.focus();
-      aviso("✅ " + prefixo + "Imagem pronta no grupo “" + titulo + "”. CONFIRA e aperte ENTER.", "#075e54");
-      try { GM_notification({ title: "RIO Raios", text: "Imagem pronta em " + titulo + ". Confira e aperte Enter.", timeout: 6000 }); } catch (e) {}
-      return true;
-    }
-    var ins = await inserirTexto(r.cap, legenda);
-    if (!ins.ok) { copiarTexto(legenda); aviso("⚠️ " + prefixo + "Imagem colada, mas não consegui escrever a legenda. Legenda COPIADA: cole com Ctrl+V. [diag: " + ins.diag + "]", "#b45309"); }
-    else r.cap.focus();
-    aviso("✅ " + prefixo + "Imagem + legenda prontas no grupo “" + titulo + "”. CONFIRA e aperte ENTER" + (resto ? " (depois deixo o Hora a hora pronto)" : "") + ".", "#075e54");
-    try { GM_notification({ title: "RIO Raios", text: "Imagem pronta em " + titulo + ". Confira e aperte Enter.", timeout: 6000 }); } catch (e) {}
-    if (resto) { var tk = ++tokenSegunda; segundaMensagem(titulo, r.cap, resto, tk); }
-    return true;
-  }
   function clicar(el) {
     ["mousedown", "mouseup", "click"].forEach(function (t) { el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true })); });
   }
@@ -802,13 +712,6 @@
       }
       var cx = await aguardar(caixaMensagem, 4000, 200);
       if (!cx) { copiarTexto(dado.texto); aviso("⚠️ " + prefixo + "Grupo aberto (" + titulo + "), mas não achei a caixa de mensagem. Texto COPIADO: cole com Ctrl+V.", "#b45309"); return null; }
-      if (dado.png) {
-        var okImg = await prepararImagem(cx, dado, titulo, prefixo);
-        if (okImg) return titulo;
-        if (dado.modo === "imagem") return null;      // só imagem: o aviso de falha já foi mostrado
-        // sem imagem: segue o fluxo normal só com texto (legenda + hora a hora)
-        dado = { estacao: dado.estacao, id: dado.id, texto: (dado.legenda ? dado.legenda + (dado.texto ? "\n\n" + dado.texto : "") : dado.texto) };
-      }
       var ins = await inserirTexto(cx, dado.texto);
       if (!ins.ok) {
         copiarTexto(dado.texto);
@@ -842,7 +745,7 @@
   async function preparar(dado) {
     if (ocupado) return;
     // Mesmo pedido (mesmo alerta e mesmo texto) repetido em poucos segundos = duplicado: ignora.
-    var chave = String(dado.id || "") + "|" + String(dado.texto || "") + "|" + String(dado.legenda || "") + "|" + String(dado.modo || "") + "|" + (dado.png ? dado.png.length : 0);
+    var chave = String(dado.id || "") + "|" + String(dado.texto || "");
     if (chave === ultimoPedido.chave && Date.now() - ultimoPedido.t < 20000) return;
     ultimoPedido = { chave: chave, t: Date.now() };
     ocupado = true;
@@ -900,7 +803,7 @@
 
   var tratadoWA = {};
   onMudou(CHAVE, async function (nome, antigo, novo, remoto) {
-    if (!remoto || !novo || !(novo.texto || novo.legenda || novo.png) || tratadoWA["p" + novo.ts]) return;
+    if (!remoto || !novo || !novo.texto || tratadoWA["p" + novo.ts]) return;
     tratadoWA["p" + novo.ts] = 1;
     if (await reivindicar("preparar", novo.ts)) preparar(novo);   // só uma aba do WhatsApp trata cada pedido
   });
