@@ -32,6 +32,7 @@ try:   # chave paga do Open-Meteo (opcional): Settings > Secrets:  OPEN_METEO_AP
 except Exception:
     pass
 import boletins_bo  # script de boletins (WhatsApp), incorporado sem alterações
+import boletim_horario as bh  # boletim horário (próximas 12 h, de 3 em 3 h)
 
 def _carregar_icone_pagina():
     try:
@@ -1327,7 +1328,7 @@ div[data-testid="stVerticalBlockBorderWrapper"] { border-radius: 12px !important
 #  - o estado dos alertas fica guardado no servidor, identificado por um código na URL (?sid=...),
 #    e é restaurado quando a mesma URL reabre.
 # ----------------------------------------------------------------------------------------------
-_CHAVES_PERSISTENTES = ("meteorologista_nome", "alertas_raio_ativos", "alertas_unidade", "verde_estado", "som_token", "altura_mapa_pct", "espessura_aneis", "modo_aviso_alerta", "avisos_canto")
+_CHAVES_PERSISTENTES = ("meteorologista_nome", "alertas_raio_ativos", "alertas_unidade", "verde_estado", "som_token", "altura_mapa_pct", "espessura_aneis", "modo_aviso_alerta", "avisos_canto", "hor_ativo", "hor_unidades")
 
 @st.cache_resource
 def _armazem_sessoes():
@@ -1402,6 +1403,16 @@ with st.sidebar:
         st.session_state.meteorologista_nome = meteorologista.strip()
         if meteorologista.strip():
             st.query_params["nome"] = meteorologista.strip()
+
+    # Boletim horário: logo abaixo do nome do meteorologista
+    st.toggle("⏰ Boletim horário (3 em 3 h)", key="hor_ativo",
+              help="Gera sozinho, 5 min antes de cada horário (00h, 03h, 06h … 21h), o boletim das próximas 12 h para as unidades escolhidas, "
+                   "com gráficos e texto hora a hora, e avisa no canto direito da tela.")
+    if st.session_state.get("hor_ativo"):
+        _opc_hor = sorted(boletins_bo.UNIDADES, key=_chave_alfabetica)
+        st.session_state["hor_unidades"] = [n for n in st.session_state.get("hor_unidades", []) if n in _opc_hor]
+        st.multiselect("Unidades do boletim horário", _opc_hor, key="hor_unidades", placeholder="Escolha uma ou mais unidades",
+                       help="Só estas unidades são baixadas e geradas (2 consultas por unidade), sem fila.")
 
     df_stations = pd.DataFrame(ESTACOES_PADRAO)
 
@@ -2301,6 +2312,240 @@ def _boletins_fragmento(unidades_base):
     if _boletins_rodando and est is not None and not est["rodando"]:
         st.rerun()
 
+# ======================================================================
+# BOLETIM HORÁRIO (próximas 12 h, de 3 em 3 h) + lembrete no canto direito
+# ======================================================================
+_HTML_HOR_BOTOES = """<!doctype html><html><head><meta charset="utf-8"><style>
+  html,body{margin:0;padding:0;background:transparent;font:13px 'Segoe UI',Arial,sans-serif}
+  button{cursor:pointer;border-radius:8px;border:1px solid #3a4150;background:#232834;color:#f1f1f1;padding:7px 11px;font:inherit}
+  button:hover{background:#2e3544} button.p{background:#25d366;border-color:#25d366;color:#06210f;font-weight:600} button.p:hover{background:#3be07b}
+</style></head><body><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="p" id="wa">__ROTULO__</button><button id="cp">📋 Copiar texto</button></div>
+<script>
+  var IT = __ITEM__;
+  function copiar(t){ var x=document.createElement("textarea"); x.value=t; x.style.cssText="position:fixed;opacity:0"; document.body.appendChild(x); x.select();
+    try{document.execCommand("copy");}catch(e){} document.body.removeChild(x); }
+  document.getElementById("wa").addEventListener("click", function(){
+    var b=this, rot=IT.png?"🤖 Preparar no WhatsApp (imagem + texto)":"🤖 Preparar no WhatsApp", ok=false;
+    function ack(ev){ if(ev.data && ev.data.fonte==="rio-raios-ack") ok=true; }
+    window.addEventListener("message", ack);
+    try{ (window.top||window.parent).postMessage({fonte:"rio-raios",tipo:"preparar",id:IT.id,estacao:IT.estacao,texto:IT.texto,legenda:IT.legenda||"",png:IT.png||""},"*"); }catch(e){}
+    setTimeout(function(){ window.removeEventListener("message",ack);
+      if(!ok){ copiar(IT.completo); b.textContent="Script não detectado - texto copiado (Ctrl+V)"; } else { b.textContent="✔ Enviado ao WhatsApp - confira lá e dê Enter"; }
+      setTimeout(function(){ b.textContent=rot; },4500); },1200);
+  });
+  document.getElementById("cp").addEventListener("click", function(){ var b=this; copiar(IT.completo); b.textContent="✔ Copiado"; setTimeout(function(){ b.textContent="📋 Copiar texto"; },2000); });
+</script></body></html>"""
+
+
+def _hor_estado():
+    return st.session_state.setdefault("hor", {"slots": {}, "pre": None, "ver": None, "dispensado": "", "avisado": {}})
+
+
+def _hor_botoes_whatsapp(chave, nome, texto, png=None, altura=46):
+    """Com PNG: o script cola a imagem no grupo com a legenda (cabeçalho + resumo) e, depois do seu envio, deixa o
+    'Hora a hora' pronto como 2ª mensagem. Sem PNG: só o texto."""
+    item = {"id": f"hor{chave}{boletins_bo.slug(nome)}"[:80], "estacao": nome, "texto": texto, "completo": texto}
+    if png:
+        legenda, resto = bh.dividir_texto(texto)
+        item.update(legenda=legenda, texto=resto, png=base64.b64encode(png).decode("ascii"))
+    html = _HTML_HOR_BOTOES.replace("__ITEM__", json.dumps(item, ensure_ascii=False).replace("</", "<\\/")).replace(
+        "__ROTULO__", "🤖 Preparar no WhatsApp (imagem + texto)" if png else "🤖 Preparar no WhatsApp")
+    components.html(html, height=altura)
+
+
+def _hor_gerar_unidade(chave, nome, somente_cache):
+    """Calcula texto + gráfico de UMA unidade a partir dos dados já baixados (cache) e guarda no slot."""
+    hor = _hor_estado()
+    slot = hor["slots"][chave]
+    lat, lon = unidades_boletim[nome]
+    reg = {"status": "gerando", "enviado": False}
+    slot["unidades"][nome] = reg
+    try:
+        h_bm, h_mod = bh.baixar_unidade(lat, lon, somente_cache=somente_cache)
+        d = bh.calcular(nome, h_bm, h_mod, slot["inicio"])
+        agora = bh.agora_brasilia()
+        reg.update(status="pronto", texto=bh.texto_whatsapp(d, agora), png=bh.grafico_png(d, agora), emitido=agora, enviado=False)
+    except Exception as e:
+        reg.update(status="erro", erro=str(e)[:200])
+
+
+def _hor_iniciar(chave, inicio, envio, nomes):
+    """Começa a gerar o boletim horário das unidades `nomes` (sem fila: só as escolhidas, 2 consultas por unidade)."""
+    hor = _hor_estado()
+    slot = hor["slots"].setdefault(chave, {"inicio": inicio, "envio": envio, "unidades": {}})
+    for n in nomes:
+        slot["unidades"][n] = {"status": "gerando", "enviado": False}
+    for velha in sorted(hor["slots"])[:-4]:      # guarda só os 4 últimos horários (memória)
+        hor["slots"].pop(velha, None)
+    if boletins_bo.API_KEY:                      # chave paga: o servidor baixa (e gera) na hora
+        for n in nomes:
+            _hor_gerar_unidade(chave, n, somente_cache=False)
+        return
+    reqs, urls = [], {}
+    for n in nomes:
+        lat, lon = unidades_boletim[n]
+        for tag, u in (("bm", bh.url_best_match(lat, lon)), ("mod", bh.url_modelos(lat, lon))):
+            if not bh.em_cache(u):
+                rid = f"{n}||{tag}"
+                reqs.append({"id": rid, "url": u})
+                urls[rid] = u
+    if not reqs:
+        for n in nomes:
+            _hor_gerar_unidade(chave, n, somente_cache=True)
+        return
+    # sem chave: o NAVEGADOR de quem está com o app aberto baixa (o limite do Open-Meteo conta no IP dessa pessoa)
+    hor["pre"] = {"id": f"{time.time():.3f}", "chave": chave, "nomes": list(nomes), "reqs": reqs, "urls": urls}
+
+
+def _hor_processar_download():
+    hor = _hor_estado()
+    pre = hor.get("pre")
+    if not pre:
+        return
+    val = _bo_fetch_boletins(reqs=pre["reqs"], pausa_ms=250, assinatura=pre["id"], key=f"horfetch_{pre['id']}", default=None)
+    if val and val.get("tipo") == "fim":
+        for rid, dados in (val.get("results") or {}).items():
+            if isinstance(dados, dict) and "hourly" in dados:
+                bh.guardar(pre["urls"][rid], dados)
+        hor["pre"] = None
+        for n in pre["nomes"]:
+            _hor_gerar_unidade(pre["chave"], n, somente_cache=True)
+        if val.get("abortado"):
+            st.session_state["hor_aviso"] = "O Open-Meteo recusou o acesso a partir do seu navegador/rede (" + str(val["abortado"])[:140] + ")."
+        else:
+            st.session_state.pop("hor_aviso", None)
+        _rerun_fragmento()
+
+
+def _cores_painel():
+    try:
+        escuro = getattr(st.context.theme, "type", "light") == "dark"
+    except Exception:
+        escuro = False
+    return ("#10151d", "#2b3444") if escuro else ("#ffffff", "#c9d1dc")
+
+
+def _hor_lembrete(agora, envio, gerar_em, chave, nomes_sel):
+    """Painel fixo no canto direito: lembra de enviar os boletins horários."""
+    hor = _hor_estado()
+    slot = hor["slots"].get(chave)
+    fundo, borda = _cores_painel()
+    st.markdown(
+        "<style>.st-key-lembrete_horario{position:fixed;top:72px;right:16px;width:min(400px,92vw);max-height:78vh;overflow-y:auto;z-index:999991;"
+        "background:%s;border:1px solid %s;border-radius:12px;padding:10px 12px;box-shadow:0 8px 28px rgba(0,0,0,.35);}</style>" % (fundo, borda),
+        unsafe_allow_html=True)
+    janela = agora >= gerar_em
+    todos_env = bool(slot) and all(slot["unidades"].get(n, {}).get("enviado") for n in nomes_sel) and bool(nomes_sel)
+    with st.container(key="lembrete_horario"):
+        if not nomes_sel:
+            st.markdown("**⏰ Boletim horário** — escolha as unidades na barra lateral.")
+            return
+        if not janela or hor.get("dispensado") == chave or todos_env:
+            falta = int((gerar_em - agora).total_seconds() // 60)
+            if todos_env:
+                st.markdown(f"**⏰ Boletim das {envio:%H:%M}** ✅ enviado. Próximo em {bh.INTERVALO_H} h.")
+            elif hor.get("dispensado") == chave:
+                st.markdown(f"**⏰ Boletim das {envio:%H:%M}** · lembrete fechado")
+                if st.button("Reabrir", key="hor_reabrir"):
+                    hor["dispensado"] = ""
+                    _rerun_fragmento()
+            else:
+                st.markdown(f"**⏰ Próximo boletim horário: {envio:%H:%M}**")
+                st.caption(f"Gera às {gerar_em:%H:%M} (em {falta + 1} min) para {len(nomes_sel)} unidade(s).")
+            return
+        c1, c2 = st.columns([5, 1], vertical_alignment="center")
+        c1.markdown(f"**⏰ Hora de enviar o boletim das {envio:%H:%M}**")
+        if c2.button("✕", key="hor_fechar", help="Fechar este lembrete"):
+            hor["dispensado"] = chave
+            _rerun_fragmento()
+        if st.session_state.get("hor_aviso"):
+            st.warning(st.session_state["hor_aviso"])
+        for n in nomes_sel:
+            reg = (slot or {}).get("unidades", {}).get(n)
+            curto = n.split(" - ")[0]
+            with st.container(border=True):
+                if not reg or reg["status"] == "gerando":
+                    st.markdown(f"⏳ **{curto}** — gerando…")
+                elif reg["status"] == "erro":
+                    st.markdown(f"⚠️ **{curto}** — {reg.get('erro', 'erro')}")
+                    if st.button("Tentar de novo", key=f"hor_retry_{chave}_{boletins_bo.slug(n)}"):
+                        _hor_iniciar(chave, slot["inicio"], slot["envio"], [n])
+                        _rerun_fragmento()
+                else:
+                    st.markdown(f"{'✅' if reg.get('enviado') else '🟢'} **{curto}** — pronto ({reg['emitido']:%H:%M})")
+                    _hor_botoes_whatsapp(chave, n, reg["texto"], reg.get("png"))
+                    _k1, _k2 = st.columns(2)
+                    if _k1.button("👁 Ver gráfico", key=f"hor_ver_{chave}_{boletins_bo.slug(n)}"):
+                        hor["ver"] = (chave, n)
+                    nova = _k2.checkbox("Enviado", value=bool(reg.get("enviado")), key=f"hor_env_{chave}_{boletins_bo.slug(n)}")
+                    if nova != bool(reg.get("enviado")):
+                        reg["enviado"] = nova
+                        _rerun_fragmento()
+
+
+def _hor_secao(nomes_sel):
+    hor = _hor_estado()
+    st.subheader("⏰ Boletim horário")
+    st.caption("Próximas 12 h, hora a hora. Vento: ICON · Chuva: maior valor entre ICON e ECMWF · Raios: previsão heurística · "
+               "Granizo: código de trovoada com granizo / instabilidade forte · Demais: best match.")
+    if not nomes_sel:
+        st.info("Escolha uma ou mais unidades em **Boletim horário**, na barra lateral.")
+        return
+    agora = bh.agora_brasilia()
+    a1, a2 = st.columns([3, 2], vertical_alignment="center")
+    envio, gerar_em = bh.proximo_envio(agora)
+    a1.markdown(f"Próximo envio: **{envio:%H:%M}** (gera às {gerar_em:%H:%M}) · {len(nomes_sel)} unidade(s) selecionada(s)")
+    if a2.button("⚡ Gerar agora (a partir desta hora)", key="hor_agora", use_container_width=True, disabled=bool(hor.get("pre"))):
+        inicio = agora.replace(minute=0, second=0, microsecond=0)
+        _hor_iniciar(f"agora{int(time.time())}", inicio, inicio, nomes_sel)
+        _rerun_fragmento()
+    opcoes = [(c, n) for c in sorted(hor["slots"], reverse=True) for n, r in hor["slots"][c]["unidades"].items() if r.get("status") == "pronto"]
+    if not opcoes:
+        st.caption("Nenhum boletim horário gerado ainda nesta sessão.")
+        return
+    ver = hor.get("ver")
+    idx = opcoes.index(ver) if ver in opcoes else 0
+
+    def _rot(o):
+        sl = hor["slots"][o[0]]
+        return f"{sl['inicio']:%d/%m %Hh} · {o[1]}"
+    esc = st.selectbox("Boletim", opcoes, index=idx, format_func=_rot, key="hor_sel")
+    hor["ver"] = esc
+    reg = hor["slots"][esc[0]]["unidades"][esc[1]]
+    st.image(reg["png"], use_container_width=True)
+    d1, d2 = st.columns(2)
+    d1.download_button("⬇️ Baixar gráfico (PNG)", data=reg["png"], file_name=f"boletim_horario_{boletins_bo.slug(esc[1])}_{hor['slots'][esc[0]]['inicio']:%Y%m%d_%H}h.png",
+                       mime="image/png", key=f"hor_dl_{esc[0]}_{boletins_bo.slug(esc[1])}", use_container_width=True)
+    with d2:
+        _hor_botoes_whatsapp(esc[0] + "v", esc[1], reg["texto"], reg.get("png"))
+    st.code(reg["texto"], language=None)
+
+
+def _horario_fragmento():
+    """Roda a cada 20 s: 5 min antes de cada horário de envio, gera o boletim das unidades escolhidas e mostra o lembrete."""
+    if not st.session_state.get("hor_ativo"):
+        return
+    nomes_sel = [n for n in st.session_state.get("hor_unidades", []) if n in unidades_boletim]
+    hor = _hor_estado()
+    agora = bh.agora_brasilia()
+    envio, gerar_em = bh.proximo_envio(agora)
+    chave = envio.strftime("%Y%m%d%H")
+    if nomes_sel and agora >= gerar_em and not hor.get("pre"):
+        slot = hor["slots"].get(chave)
+        faltam = [n for n in nomes_sel if not (slot and n in slot["unidades"])]
+        if faltam:
+            _hor_iniciar(chave, envio, envio, faltam)
+    slot = hor["slots"].get(chave)
+    if slot and nomes_sel and not hor["avisado"].get(chave) and all(slot["unidades"].get(n, {}).get("status") in ("pronto", "erro") for n in nomes_sel):
+        hor["avisado"][chave] = True
+        st.toast(f"⏰ Boletim horário das {envio:%H:%M} pronto — hora de enviar!", icon="⏰")
+    _hor_processar_download()          # baixa pelo navegador (quando não há chave paga); gera os boletins ao terminar
+    _hor_lembrete(agora, envio, gerar_em, chave, nomes_sel)
+    _hor_secao(nomes_sel)
+
+
+st.divider()
+st.fragment(run_every=20)(_horario_fragmento)()
 st.divider()
 st.fragment(run_every=2 if _boletins_rodando else None)(_boletins_fragmento)(unidades_boletim)
 

@@ -39,7 +39,7 @@ MODELOS = ["ecmwf_ifs025", "icon_seamless", "gfs_seamless"]
 VARIAVEIS = [
     "temperature_2m", "precipitation", "relative_humidity_2m",
     "wind_speed_10m", "wind_direction_10m", "wind_gusts_10m",
-    "uv_index", "cape", "lifted_index", "convective_inhibition",
+    "uv_index", "cape", "lifted_index", "convective_inhibition", "weather_code",
 ]
 DIAS_PREVISAO = 4
 LIMITE_RAJADA_ALERTA = 40  # km/h, para o aviso de "Atenção"
@@ -223,6 +223,27 @@ def prob_raios_horaria(cape, li, cin):
 
 
 # ----------------------------------------------------------------------------
+# GRANIZO
+# ----------------------------------------------------------------------------
+CODIGOS_GRANIZO = (96, 99)   # WMO: trovoada com granizo (fraco / forte)
+
+
+def granizo_horario(hourly):
+    """(previsto, possivel): arrays booleanos hora a hora.
+    previsto = algum modelo indica código WMO 96/99 (trovoada com granizo);
+    possivel = sem código de granizo, mas atmosfera muito instável (CAPE >= 2000 J/kg e Lifted Index <= -5)."""
+    n = len(hourly["time"])
+    prev = np.zeros(n, dtype=bool)
+    for m in MODELOS + [""]:
+        k = f"weather_code_{m}" if m else "weather_code"
+        if k in hourly:
+            prev |= np.isin(_arr(hourly[k]), CODIGOS_GRANIZO)
+    cape, li = consenso(hourly, "cape"), consenso(hourly, "lifted_index")
+    poss = (np.nan_to_num(cape) >= 2000) & (np.nan_to_num(li, nan=0.0) <= -5)
+    return prev, (poss & ~prev)
+
+
+# ----------------------------------------------------------------------------
 # FORMATAÇÃO
 # ----------------------------------------------------------------------------
 def cor(v, lim, invertido=False):
@@ -274,6 +295,7 @@ def boletim_unidade(nome, lat, lon, dias=DIAS_PREVISAO):
     uv = consenso(h, "uv_index")
     raios = prob_raios_horaria(consenso(h, "cape"), consenso(h, "lifted_index"),
                                consenso(h, "convective_inhibition"))
+    gran_prev, gran_poss = granizo_horario(h)
 
     hoje_brasilia = datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%Y-%m-%d")
     dias_unicos = [d for d in dict.fromkeys(datas) if d >= hoje_brasilia][:dias]
@@ -322,11 +344,20 @@ def boletim_unidade(nome, lat, lon, dias=DIAS_PREVISAO):
         uv_max = np.nanmax(uv[m]) if not np.all(np.isnan(uv[m])) else np.nan
         um_med = np.nanmean(umid[m])
 
+        # Granizo: só aparece no boletim quando há previsão (ou possibilidade) naquele dia
+        g_prev, g_poss = gran_prev[m], gran_poss[m]
+        linha_granizo = []
+        if g_prev.any():
+            linha_granizo = [f"🧊 Granizo: previsto ({juntar(periodos_em(hh[g_prev]))})"]
+        elif g_poss.any():
+            linha_granizo = [f"🧊 Granizo: possível ({juntar(periodos_em(hh[g_poss]))})"]
+
         linhas += [
             f"*Dia {dd}*",
             f"🌡️ Máxima: {fmt(tmax)}°C Mínima: {fmt(tmin)}°C",
             f"{cor(np.round(ch), LIM_CHUVA)} Chuva: {fmt(ch)} mm/dia{per_chuva}",
             f"⚡ Probabilidade de raios: {r_max:.0f}% ({juntar(sel_r, cap=True)})",
+            *linha_granizo,
             f"{cor(v_med, LIM_VENTO)} Vento: {fmt(v_med)} km/h {txt_dir}",
             f"{cor(np.round(raj_max), LIM_RAJADA)} Rajadas: {fmt(raj_max)} km/h ({per_raj})",
             f"{cor(np.round(um_med), LIM_UMID, invertido=True)} Umidade: {fmt(um_med)}%",
@@ -350,6 +381,13 @@ def boletim_unidade(nome, lat, lon, dias=DIAS_PREVISAO):
                     "avisaremos imediatamente."
                 )
 
+    if gran_prev[np.array([x == dias_unicos[0] for x in datas])].any() if dias_unicos else False:
+        dd0 = datetime.strptime(dias_unicos[0], "%Y-%m-%d").strftime("%d/%m")
+        linhas.append(
+            "‐------‐---------------------------------\n"
+            f"🧊 *Atenção*: *Hoje ({dd0})*, há previsão de granizo associado a tempestades para a sua unidade. "
+            "Seguimos em monitoramento e, em caso de intensificação, avisaremos imediatamente.")
+        linhas.append("")
     if alerta:
         linhas.append(alerta)
     return "\n".join(linhas).rstrip() + "\n"

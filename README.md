@@ -339,3 +339,13 @@ horário atual e validade de 1 hora; você confere e aperta Enter. No painel do 
 
 Na barra lateral, **🔔 Aviso de alerta de raio**: *Pop-up no meio da tela* (padrão) ou *Canto esquerdo / Canto direito (com rolagem)*. No canto, os avisos novos
 se acumulam num painel fixo com rolagem até você fechar cada um (✕) ou usar "Fechar todos".
+
+## Boletim horário (3 em 3 horas)
+
+Na barra lateral, logo abaixo do nome do meteorologista: **⏰ Boletim horário (3 em 3 h)** + escolha de uma ou mais unidades.
+- Gera sozinho **5 min antes** de 00h, 03h, 06h … 21h (2 consultas ao Open-Meteo por unidade, só das unidades escolhidas, sem fila).
+- Mostra as **próximas 12 h**: gráficos (temperatura, umidade/nebulosidade, chuva, vento, raios/granizo, UV) e texto hora a hora.
+- Fontes: vento = ICON · chuva = maior valor entre ICON e ECMWF · raios = previsão heurística · granizo = código de trovoada com granizo ou instabilidade forte · demais = best match.
+- Lembrete fixo no **canto direito** com "Preparar no WhatsApp" (texto digitado no grupo da unidade; você confere e dá Enter), "Copiar texto" e "Enviado".
+- "⚡ Gerar agora" cria o boletim a partir da hora atual, a qualquer momento. O gráfico pode ser baixado em PNG.
+- Os boletins diários agora incluem a linha **🧊 Granizo** quando há previsão (ou possibilidade) no dia.

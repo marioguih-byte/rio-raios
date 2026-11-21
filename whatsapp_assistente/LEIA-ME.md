@@ -104,3 +104,7 @@ No painel de cada unidade há três botões: **🟢 Emitir alerta verde**, **�
 O alerta continua ativo até você encerrar (🟢 verde / "Tirar") **ou** renovar a validade (emitir de novo, mudar a validade ou "+30 min" no quadro). Se o fim da validade
 passar e **10 minutos depois** nada disso foi feito, o alerta sai sozinho do quadro e dos painéis (fica registrado no histórico como "vencido"), e a unidade
 volta a poder receber um novo alerta se chegarem raios novos.
+
+## v2.8 — boletim horário com imagem
+O botão "🤖 Preparar no WhatsApp (imagem + texto)" do boletim horário faz o script: abrir o grupo da unidade → colar o PNG (abre a pré-visualização) → escrever a legenda (cabeçalho + resumo) → você confere e dá **Enter** → o script deixa o **Hora a hora** digitado como 2ª mensagem → **Enter** de novo.
+Se o navegador não aceitar o colar simulado, o script copia a imagem para a área de transferência: aperte **Ctrl+V** na caixa do grupo que ele escreve a legenda sozinho. Nunca envia sem você apertar Enter.
