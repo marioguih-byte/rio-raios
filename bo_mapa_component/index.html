@@ -7,7 +7,18 @@
       onerror="this.onerror=null;this.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';" />
 <style>
   html, body { margin: 0; padding: 0; height: 100%; background: #0b0f16; }
-  #map { position: relative; width: 100%; height: 650px; background: #0b0f16; }
+  /* #map agora é o quadro que reúne 1, 2 ou 4 mapas (painéis). Os avisos/painéis ficam por cima de tudo. */
+  #map { position: relative; width: 100%; height: 650px; background: #0b0f16; display: grid; gap: 3px; overflow: hidden;
+         grid-template-columns: 1fr; grid-template-rows: 1fr; font-family: "Helvetica Neue", Arial, Helvetica, sans-serif; font-size: 12px; line-height: 1.5; }
+  #map[data-layout="2"] { grid-template-columns: 1fr 1fr; }
+  #map[data-layout="4"] { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+  .painel-mapa { position: relative; min-width: 0; min-height: 0; isolation: isolate; z-index: 0; }
+  .painel-mapa.painel-extra { display: none; }
+  #map[data-layout="2"] #pane1, #map[data-layout="4"] .painel-extra { display: block; }
+  #map[data-layout="2"] .painel-mapa.ativo::after, #map[data-layout="4"] .painel-mapa.ativo::after { content: ""; position: absolute; inset: 0;
+         border: 2px solid rgba(63,194,194,0.85); pointer-events: none; z-index: 700; }
+  .leaflet-bar a.bo-div { display: flex; align-items: center; justify-content: center; }
+  .leaflet-bar a.bo-div.on { background: #d7f3f3; }
   .leaflet-container { background: #cfd6dc !important; }
   .raio-celula-icon { background: transparent !important; border: none !important; }
 
@@ -156,12 +167,14 @@
     font: 12px 'Segoe UI', sans-serif; }
   .leaflet-control-layers-toggle { filter: invert(0.9); }
   .leaflet-control-layers-separator { border-color: #374151 !important; }
-  /* painéis extras da divisão do mapa: só o mapa, sem painéis/legenda/busca */
-  body.sec #raios-status-bar, body.sec #busca-unidade-bar, body.sec #legenda-mapa, body.sec #painel_alertas, body.sec #painel_estacao, body.sec #goes-status { display: none !important; }
 </style>
 </head>
 <body>
-<div id="map">
+<div id="map" data-layout="1">
+  <div id="pane0" class="painel-mapa"></div>
+  <div id="pane1" class="painel-mapa painel-extra"></div>
+  <div id="pane2" class="painel-mapa painel-extra"></div>
+  <div id="pane3" class="painel-mapa painel-extra"></div>
   <div id="raios-status-bar"></div>
   <div id="painel_alertas">
     <div class="al-head"><span>🚨 Alertas e riscos</span><span class="al-fechar" id="al_fechar" title="Fechar">✕</span></div>
@@ -243,6 +256,7 @@
   };
 
   var map = null;
+  var extras = [], principal = null, ctxAtual = null, painelAtivo = null, layoutAtual = 1, ultimosArgs = null, construirExtra = null, desenharExtra = null;
   var PAINEL = 0, SEC = false, fatorAltura = 1, ultimaRegiao = null, regiaoAtiva = false;   // divisão do mapa: painel 0 = principal; >0 = só visualização
   // Altura do mapa: ~86% da altura da janela do navegador (entre 700 e 1100 px); no celular em pé, 560 px.
   // Altura do mapa = alturaPct % da altura da JANELA do navegador, entre 700 e 1400 px (560 px no celular em pé).
@@ -254,6 +268,7 @@
   function larguraJanela() {
     try { return window.parent.innerWidth || window.innerWidth; } catch (e) { return window.innerWidth; }
   }
+  function invalidarTodos() { if (map) map.invalidateSize(); extras.forEach(function (ex) { try { ex.map.invalidateSize(); } catch (e) {} }); }
   var mapaExpandidoFlag = false;
   // Recalcula a altura e aplica no mapa e no quadro do Streamlit (a menos que o mapa esteja ampliado).
   function reajustarAltura() {
@@ -264,7 +279,7 @@
     var el = document.getElementById("map");
     if (el) el.style.height = alturaQuadro + "px";
     Streamlit.setFrameHeight(alturaQuadro);
-    if (map) map.invalidateSize();
+    if (map) invalidarTodos();
   }                       // espelha o estado do botão "mapa maior" (usado fora do iniciarMapa)
   function mapaExpandidoAgora() { return mapaExpandidoFlag; }
   function calcularAlturaBase() {
@@ -388,10 +403,24 @@
     return "#22c55e";
   }
 
+  // Desenha em outro painel reaproveitando as mesmas funções: troca temporariamente as variáveis "do painel atual".
+  function comContexto(ctx, fn) {
+    var s0 = [map, stationsLayer, aneisLayer, raiosLayer, celulasLayer, canvasRenderer, canvasCelulas, canvasEstacoes, canvasAneis, ctxAtual];
+    map = ctx.map; stationsLayer = ctx.stations; aneisLayer = ctx.aneis; raiosLayer = ctx.raios; celulasLayer = ctx.celulas;
+    canvasRenderer = ctx.cRaios; canvasCelulas = ctx.cCel; canvasEstacoes = ctx.cEst; canvasAneis = ctx.cAn; ctxAtual = ctx;
+    try { fn(); } finally {
+      ctx.raios = raiosLayer; ctx.celulas = celulasLayer;
+      map = s0[0]; stationsLayer = s0[1]; aneisLayer = s0[2]; raiosLayer = s0[3]; celulasLayer = s0[4];
+      canvasRenderer = s0[5]; canvasCelulas = s0[6]; canvasEstacoes = s0[7]; canvasAneis = s0[8]; ctxAtual = s0[9];
+    }
+  }
+
   function irParaUnidade(nome) {
     var c = coordsPorNome[nome];
     if (!c || !map) return;
-    map.flyTo([c.lat, c.lon], 10, { animate: true, duration: 0.8 });
+    var alvoMapa = (painelAtivo && painelAtivo.map) || map;          // vai para o painel em que você mexeu por último
+    alvoMapa.flyTo([c.lat, c.lon], 10, { animate: true, duration: 0.8 });
+    if (alvoMapa !== map) return;
     var marcador = marcadoresPorNome[nome];
     if (marcador) setTimeout(function () { abrirPainel(chavePorNome[nome]); }, 350);
   }
@@ -1063,8 +1092,32 @@
     if (!SEC) new BotaoAlertas().addTo(map);
   }
 
+  function definirAtivo(ctx) {
+    painelAtivo = ctx;
+    document.querySelectorAll(".painel-mapa").forEach(function (el) { el.classList.remove("ativo"); });
+    var el = ctx === principal ? document.getElementById("pane0") : ctx.el;
+    if (el) el.classList.add("ativo");
+  }
+  function definirLayout(n) {
+    layoutAtual = n;
+    document.getElementById("map").setAttribute("data-layout", String(n));
+    try { localStorage.setItem("rio_layout_mapa_v1", String(n)); } catch (e) {}
+    for (var i = 1; i < n; i++) {
+      if (!extras[i - 1] && construirExtra) { extras[i - 1] = construirExtra(i); desenharExtra(extras[i - 1]); }
+    }
+    if (ultimosArgs && extras.length) redesenharEstacoes(ultimosArgs.estacoes, ultimosArgs.aneis, ultimosArgs.espessura_aneis);   // o painel principal volta a ser o "dono" dos marcadores
+    document.querySelectorAll(".bo-div").forEach(function (a) { a.classList.toggle("on", a.getAttribute("data-n") === String(n)); });
+    if (n === 1) definirAtivo(principal);
+    setTimeout(function () {
+      invalidarTodos();
+      extras.forEach(function (ex) {
+        if (ex.enquadrar && ex.el.offsetWidth > 0) { ex.enquadrar = false; ex.map.fitBounds([[-34.0, -74.5], [5.5, -32.0]]); }
+      });
+    }, 150);
+  }
+
   function iniciarMapa() {
-    map = L.map("map", { zoomControl: true, minZoom: (SEC || regiaoAtiva) ? 2 : 4, maxZoom: 18, preferCanvas: true, fadeAnimation: false });
+    map = L.map("pane0", { zoomControl: true, minZoom: (SEC || regiaoAtiva) ? 2 : 4, maxZoom: 18, preferCanvas: true, fadeAnimation: false });
     window.__mapaRIO = map;
 
     // ------------------------------------------------------------------------------------------
@@ -1236,6 +1289,50 @@
     aneisLayer = L.layerGroup().addTo(map);
     raiosLayer = L.layerGroup().addTo(map);
     celulasLayer = L.layerGroup().addTo(map);
+    principal = { map: map, stations: stationsLayer, aneis: aneisLayer, raios: raiosLayer, celulas: celulasLayer,
+                  cRaios: canvasRenderer, cCel: canvasCelulas, cEst: canvasEstacoes, cAn: canvasAneis, principal: true, assin: null };
+    ctxAtual = principal; painelAtivo = principal;
+    document.getElementById("pane0").addEventListener("pointerdown", function () { definirAtivo(principal); }, true);
+
+    // Painéis extras (divisão do mapa): mapas independentes dentro do mesmo quadro, com as mesmas camadas.
+    construirExtra = function (i) {
+      var m = L.map("pane" + i, { zoomControl: true, minZoom: 2, maxZoom: 18, preferCanvas: true, fadeAnimation: false });
+      var osm = robustecer(L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", opcoesTiles({
+        attribution: "&copy; OpenStreetMap contributors", maxNativeZoom: 19, maxZoom: 19, subdomains: "abc" })));
+      var esri = robustecer(L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", opcoesTiles({
+        attribution: "Tiles &copy; Esri", maxNativeZoom: 17, maxZoom: 19 })));
+      function gibs(id, nivel) {
+        return robustecer(L.tileLayer("https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/" + id + "/default/default/GoogleMapsCompatible_Level" + nivel + "/{z}/{y}/{x}.png",
+          opcoesTiles({ opacity: 0.6, zIndex: 10, maxNativeZoom: nivel, maxZoom: 11, attribution: ATRIB_GIBS })));
+      }
+      var sats = [gibs(GIBS_ID, 6), gibs("GOES-East_ABI_GeoColor", 7), gibs("GOES-East_ABI_Air_Mass", 6)];
+      var ov = {};
+      ov[SATS[0].rotulo] = sats[0]; ov[SATS[1].rotulo] = sats[1]; ov[SATS[2].rotulo] = sats[2];
+      osm.addTo(m); sats[0].addTo(m);
+      m.on("overlayadd", function (ev) { if (sats.indexOf(ev.layer) >= 0) sats.forEach(function (c) { if (c !== ev.layer && m.hasLayer(c)) m.removeLayer(c); }); });
+      m.createPane("mascaraBR"); m.getPane("mascaraBR").style.zIndex = 260; m.getPane("mascaraBR").style.pointerEvents = "none";
+      L.polygon([mundo].concat(buracos), { pane: "mascaraBR", renderer: L.svg({ pane: "mascaraBR" }), stroke: false,
+        fillColor: "#0b0f16", fillOpacity: 0.28, interactive: false }).addTo(m);
+      m.createPane("aneisPane"); m.getPane("aneisPane").style.zIndex = 380; m.getPane("aneisPane").style.pointerEvents = "none";
+      m.createPane("estacoesPane"); m.getPane("estacoesPane").style.zIndex = 620;
+      var cR = L.canvas({ padding: 0.1 }), cC = L.canvas({ padding: 0.1 });
+      var cE = L.canvas({ pane: "estacoesPane", padding: 0.1 }), cA = L.canvas({ pane: "aneisPane", padding: 0.1 });
+      var uf = L.layerGroup([
+        L.polyline(uf_ll, { color: "#ffffff", weight: 4, opacity: 0.55, interactive: false, renderer: cR }),
+        L.polyline(uf_ll, { color: "#1e293b", weight: 1.6, opacity: 0.95, interactive: false, renderer: cR }) ]).addTo(m);
+      var ctl = L.control.layers({ "🗺️ OpenStreetMap": osm, "🛰️ Satélite (Esri)": esri }, ov, { position: "topright", collapsed: true }).addTo(m);
+      ctl.addOverlay(uf, "🗺️ Contorno das UFs");
+      var ex = { map: m, stations: L.layerGroup().addTo(m), aneis: L.layerGroup().addTo(m), raios: L.layerGroup().addTo(m), celulas: L.layerGroup().addTo(m),
+                 cRaios: cR, cCel: cC, cEst: cE, cAn: cA, principal: false, assin: null, enquadrar: true, el: document.getElementById("pane" + i) };
+      ex.el.addEventListener("pointerdown", function () { definirAtivo(ex); }, true);
+      return ex;
+    };
+    desenharExtra = function (ex) {
+      var a = ultimosArgs; if (!a) return;
+      comContexto(ex, function () { redesenharEstacoes(a.estacoes, a.aneis, a.espessura_aneis); });
+      var assin = JSON.stringify([a.raios, a.celulas, a.janela_min, a.mostrar_deslocamento, a.tamanho_raio]);
+      if (assin !== ex.assin) { ex.assin = assin; comContexto(ex, function () { redesenharRaios(a.raios, a.celulas, a.janela_min, a.mostrar_deslocamento, a.tamanho_raio); }); }
+    };
 
     // Restaura o zoom/posição salvos — como esse mapa é montado só uma
     // vez (o componente não recria o iframe entre atualizações), isso na
@@ -1286,7 +1383,7 @@
       alturaQuadro = mapaExpandido ? ((larguraJanela() < 640) ? Math.round(alturaTela * 0.8) : Math.max(alturaBase + 150, Math.round(alturaTela * 0.92))) : alturaBase;
       document.getElementById("map").style.height = alturaQuadro + "px";
       Streamlit.setFrameHeight(alturaQuadro);
-      setTimeout(function () { map.invalidateSize(); }, 100);
+      setTimeout(function () { invalidarTodos(); }, 100);
       atualizarBotaoTelaCheia();
       atualizarArrasto();
     }
@@ -1324,6 +1421,29 @@
       },
     });
     new BotaoTelaCheia().addTo(map);
+    var BotaoDivisao = L.Control.extend({
+      options: { position: "topleft" },
+      onAdd: function () {
+        var barra = L.DomUtil.create("div", "leaflet-bar");
+        var svgs = {
+          1: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#222" stroke-width="1.8"><rect x="2" y="2" width="12" height="12" rx="1"/></svg>',
+          2: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#222" stroke-width="1.8"><rect x="2" y="2" width="12" height="12" rx="1"/><path d="M8 2v12"/></svg>',
+          4: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#222" stroke-width="1.8"><rect x="2" y="2" width="12" height="12" rx="1"/><path d="M8 2v12M2 8h12"/></svg>' };
+        var tit = { 1: "Mapa único", 2: "Dividir em 2 (lado a lado)", 4: "Dividir em 4" };
+        [1, 2, 4].forEach(function (n) {
+          var a = L.DomUtil.create("a", "bo-div", barra);
+          a.href = "#"; a.setAttribute("role", "button"); a.setAttribute("data-n", String(n)); a.title = tit[n]; a.innerHTML = svgs[n];
+          L.DomEvent.on(a, "click", function (ev) { L.DomEvent.preventDefault(ev); definirLayout(n); });
+        });
+        L.DomEvent.disableClickPropagation(barra);
+        return barra;
+      },
+    });
+    new BotaoDivisao().addTo(map);
+    var layoutSalvo = 1;
+    try { layoutSalvo = parseInt(localStorage.getItem("rio_layout_mapa_v1"), 10) || 1; } catch (e) {}
+    if ([1, 2, 4].indexOf(layoutSalvo) < 0) layoutSalvo = 1;
+    definirLayout(layoutSalvo);
 
     // Celular/tablet: o mapa ocupa boa parte da tela e "prenderia" a rolagem da página. Por isso, com a
     // tela normal, 1 dedo rola a página e o mapa se move/zoom com 2 dedos; em tela cheia ou com o mapa
@@ -1347,7 +1467,7 @@
     function aoMudarTelaCheia() {
       atualizarBotaoTelaCheia();
       atualizarArrasto();
-      setTimeout(function () { map.invalidateSize(); }, 100);
+      setTimeout(function () { invalidarTodos(); }, 100);
     }
     document.addEventListener("fullscreenchange", aoMudarTelaCheia);
     document.addEventListener("webkitfullscreenchange", aoMudarTelaCheia);
@@ -1362,7 +1482,7 @@
 
     // O painel de alertas do Streamlit pode ser aberto/fechado, mudando a largura do mapa.
     if (window.ResizeObserver) {
-      new ResizeObserver(function () { if (map) map.invalidateSize(); }).observe(document.getElementById("map"));
+      new ResizeObserver(function () { if (map) invalidarTodos(); }).observe(document.getElementById("map"));
     }
     document.getElementById("legenda-toggle").addEventListener("click", function () {
       var aberta = document.getElementById("legenda-mapa").classList.toggle("aberta");
@@ -1382,6 +1502,7 @@
     dadosPorChave = {};
     chavePorNome = {};
     var opcoes = "";
+    var ctxLocal = ctxAtual;
     (estacoes || []).forEach(function (e) {
       var texto = (e.dist_min_km === null || e.dist_min_km === undefined)
         ? "sem raios na janela atual" : e.dist_min_km.toFixed(0) + " km do raio mais próximo";
@@ -1405,7 +1526,7 @@
           L.DomEvent.preventDefault(ev.originalEvent);
         }
         this.closeTooltip();
-        if (SEC) { map.flyTo([e.lat, e.lon], Math.max(map.getZoom(), 9), { duration: 0.6 }); return; }
+        if (ctxLocal && !ctxLocal.principal) { ctxLocal.map.flyTo([e.lat, e.lon], Math.max(ctxLocal.map.getZoom(), 9), { duration: 0.6 }); return; }
         abrirPainel(e.estacao);
       });
       marcador.addTo(stationsLayer);
@@ -1552,6 +1673,7 @@
   var ultimaAssinRaios = null;
   function aoRenderizar(event) {
     var args = (event.detail && event.detail.args) || {};
+    ultimosArgs = args;
     if (!map) {
       PAINEL = args.painel || 0; SEC = PAINEL > 0;
       if (SEC) document.body.classList.add("sec");
@@ -1564,12 +1686,13 @@
       if (assinReg !== ultimaRegiao) {
         ultimaRegiao = assinReg;
         var r = args.regiao;
-        setTimeout(function () { map.invalidateSize(); map.fitBounds([[r[0], r[1]], [r[2], r[3]]]); }, 250);
+        setTimeout(function () { invalidarTodos(); map.fitBounds([[r[0], r[1]], [r[2], r[3]]]); }, 250);
       }
     } else { ultimaRegiao = null; }
 
     atualizarStatus(args.status_texto);
     meteorologistaApp = String(args.meteorologista || "");
+    extras.forEach(function (ex) { desenharExtra(ex); });          // painéis extras primeiro; o principal por último
     redesenharEstacoes(args.estacoes, args.aneis, args.espessura_aneis);
     var assinRaios = JSON.stringify([args.raios, args.celulas, args.janela_min, args.mostrar_deslocamento, args.tamanho_raio]);
     if (assinRaios !== ultimaAssinRaios) {   // mesmo conteúdo reenviado (ex.: menu/largura mudou) → não refaz tudo

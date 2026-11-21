@@ -1328,7 +1328,7 @@ div[data-testid="stVerticalBlockBorderWrapper"] { border-radius: 12px !important
 #  - o estado dos alertas fica guardado no servidor, identificado por um código na URL (?sid=...),
 #    e é restaurado quando a mesma URL reabre.
 # ----------------------------------------------------------------------------------------------
-_CHAVES_PERSISTENTES = ("meteorologista_nome", "alertas_raio_ativos", "alertas_unidade", "verde_estado", "som_token", "altura_mapa_pct", "espessura_aneis", "modo_aviso_alerta", "avisos_canto", "hor_ativo", "hor_unidades", "layout_mapa", "reg_painel_0", "reg_painel_1", "reg_painel_2", "reg_painel_3")
+_CHAVES_PERSISTENTES = ("meteorologista_nome", "alertas_raio_ativos", "alertas_unidade", "verde_estado", "som_token", "altura_mapa_pct", "espessura_aneis", "modo_aviso_alerta", "avisos_canto", "hor_ativo", "hor_unidades")
 
 @st.cache_resource
 def _armazem_sessoes():
@@ -1390,21 +1390,6 @@ if "meteorologista_nome" not in st.session_state or not str(st.session_state.get
 if "nome" in st.query_params:
     del st.query_params["nome"]
 
-# Divisão do mapa: regiões [sul, oeste, norte, leste]
-REGIOES_MAPA = {
-    "Brasil (visão geral)": [-34.0, -74.5, 5.5, -32.0],
-    "Norte e Nordeste": [-14.5, -50.5, 1.5, -33.5],
-    "Nordeste": [-14.0, -42.0, -2.0, -34.0],
-    "Norte (Belém)": [-6.0, -54.0, 2.0, -43.0],
-    "Sudeste (RJ · MG · ES)": [-24.3, -46.0, -18.5, -38.5],
-    "Rio de Janeiro e Macaé": [-23.6, -44.5, -21.3, -40.5],
-    "São Paulo e Centro-Oeste": [-25.0, -54.0, -19.0, -44.0],
-    "Sul": [-31.5, -55.0, -24.0, -46.0],
-}
-MAPA_LAYOUTS = ["Normal (1 mapa)", "Lado a lado (2 mapas)", "4 regiões (2×2)"]
-FOCO_LIVRE = "✋ Livre (eu movo e dou zoom no mapa)"
-REGIOES_PADRAO = {2: [FOCO_LIVRE] * 2, 4: [FOCO_LIVRE] * 4}
-
 with st.sidebar:
     st.header("⚙ Configuração")
     meteorologista = st.text_input(
@@ -1463,11 +1448,6 @@ with st.sidebar:
         st.session_state["altura_mapa_pct"] = 86      # padrão (também pode vir restaurado da sessão anterior)
     altura_mapa_pct = st.slider("Altura do mapa (% da altura da janela)", min_value=60, max_value=120, step=1, key="altura_mapa_pct",
                                 help="86% é o padrão. Aumente para deixar o mapa mais alto (entre 700 e 1400 px; no celular em pé fica fixo).")
-    if st.session_state.get("layout_mapa") not in MAPA_LAYOUTS:
-        st.session_state["layout_mapa"] = MAPA_LAYOUTS[0]
-    st.radio("Divisão do mapa", MAPA_LAYOUTS, key="layout_mapa",
-             help="Normal: um mapa só (padrão). Lado a lado: 2 mapas. 4 regiões: 4 mapas em grade 2×2. Em cada painel você escolhe a "
-                  "região e dá zoom/arrasta de forma independente. O painel de alertas e a legenda ficam no primeiro mapa.")
 
 # --------------------------------------------------------------
 # Som de alerta personalizado: se a pessoa subiu um arquivo, ele vira um
@@ -1755,76 +1735,29 @@ def _construir_mapa(df_status, raios_df, celulas_com_trajetoria, estacoes_novas,
     if estacoes_novas:
         st.session_state["som_token"] = f"{time.time():.3f}"
 
-    def _limites_foco(nome):
-        """Região pronta ou foco numa unidade ("📍 nome")."""
-        if nome in REGIOES_MAPA:
-            return REGIOES_MAPA[nome]
-        for e in estacoes_payload:
-            if nome == "📍 " + str(e["nome"]):
-                return [e["lat"] - 0.3, e["lon"] - 0.4, e["lat"] + 0.3, e["lon"] + 0.4]
-        return None
-
-    _opcoes_foco = [FOCO_LIVRE] + list(REGIOES_MAPA) + ["📍 " + str(e["nome"]) for e in sorted(estacoes_payload, key=lambda x: str(x["nome"]).lower())]
-
-    def _um_mapa(painel, regiao_nome=None, fator=1.0):
-        principal = painel == 0
-        return _mapa_raios_component(
-            estacoes=estacoes_payload,
-            alertas=alertas_payload if principal else [],
-            default=None,
-            raios=raios_payload["raios"],
-            celulas=raios_payload["celulas"],
-            aneis=aneis_payload,
-            espessura_aneis=int(espessura_aneis),
-            meteorologista=str(st.session_state.get("meteorologista_nome", "")).strip(),
-            janela_min=raios_minutos,
-            tamanho_raio=TAMANHO_BOLINHA_RAIO,
-            altura_pct=int(st.session_state.get("altura_mapa_pct", 86)),
-            mostrar_deslocamento=bool(mostrar_deslocamento),
-            status_texto=status_texto,
-            estacoes_novas=estacoes_novas if principal else [],
-            # Token do ÚLTIMO alerta novo. Fica nos dados enviados ao mapa até surgir outro alerta: o mapa toca o
-            # som quando vê um token que ainda não tocou. (Antes o token só ia na execução em que o alerta nascia,
-            # e a reexecução imediata que abre o pop-up podia substituir esses dados antes do mapa tocar o som.)
-            tocar_som=bool(st.session_state.get("som_token")) if principal else False,
-            som_token=st.session_state.get("som_token") if principal else None,
-            som_data_uri=som_data_uri if principal else None,
-            painel=painel,
-            regiao=_limites_foco(regiao_nome) if regiao_nome else None,
-            dividido=regiao_nome is not None,
-            fator_altura=fator,
-            key="bo_mapa_raios_live" if principal else f"bo_mapa_raios_p{painel}",
-        )
-
-    layout_mapa = st.session_state.get("layout_mapa", MAPA_LAYOUTS[0])
-    if layout_mapa == MAPA_LAYOUTS[0]:
-        evento = _um_mapa(0)
-    else:
-        n_pain = 2 if layout_mapa == MAPA_LAYOUTS[1] else 4
-        fator = 1.0 if n_pain == 2 else 0.5
-        for i in range(n_pain):
-            _k = f"reg_painel_{i}"
-            if st.session_state.get(_k) not in _opcoes_foco:
-                st.session_state[_k] = REGIOES_PADRAO[n_pain][i]
-
-        def _painel_mapa(i):
-            st.selectbox(f"Foco do mapa {i + 1}", _opcoes_foco, key=f"reg_painel_{i}", label_visibility="collapsed",
-                         help="Livre (padrão): você move e dá zoom como quiser. Se preferir um atalho, escolha uma região ou uma unidade (📍) - dá para "
-                              "digitar para procurar - e depois continue movendo à vontade; o mapa só reenquadra se você trocar o foco aqui.")
-            return _um_mapa(i, st.session_state[f"reg_painel_{i}"], fator)
-
-        evento = None
-        linha1 = st.columns(2, gap="small")
-        with linha1[0]:
-            evento = _painel_mapa(0)
-        with linha1[1]:
-            _painel_mapa(1)
-        if n_pain == 4:
-            linha2 = st.columns(2, gap="small")
-            with linha2[0]:
-                _painel_mapa(2)
-            with linha2[1]:
-                _painel_mapa(3)
+    evento = _mapa_raios_component(
+        estacoes=estacoes_payload,
+        alertas=alertas_payload,
+        default=None,
+        raios=raios_payload["raios"],
+        celulas=raios_payload["celulas"],
+        aneis=aneis_payload,
+        espessura_aneis=int(espessura_aneis),
+        meteorologista=str(st.session_state.get("meteorologista_nome", "")).strip(),
+        janela_min=raios_minutos,
+        tamanho_raio=TAMANHO_BOLINHA_RAIO,
+        altura_pct=int(st.session_state.get("altura_mapa_pct", 86)),
+        mostrar_deslocamento=bool(mostrar_deslocamento),
+        status_texto=status_texto,
+        estacoes_novas=estacoes_novas,
+        # Token do ÚLTIMO alerta novo. Fica nos dados enviados ao mapa até surgir outro alerta: o mapa toca o
+        # som quando vê um token que ainda não tocou. (Antes o token só ia na execução em que o alerta nascia,
+        # e a reexecução imediata que abre o pop-up podia substituir esses dados antes do mapa tocar o som.)
+        tocar_som=bool(st.session_state.get("som_token")),
+        som_token=st.session_state.get("som_token"),
+        som_data_uri=som_data_uri,
+        key="bo_mapa_raios_live",
+    )
 
     # Ações feitas no painel de dentro do mapa (excluir alerta, "quem recebeu"). Cada ação traz um
     # "nonce"; o componente continua devolvendo a última ação nas reexecuções, então só processa se for nova.
