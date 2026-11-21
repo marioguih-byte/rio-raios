@@ -286,7 +286,8 @@ def _carregar_logo():
         return None
 
 
-def grafico_png(d, emitido=None, dpi=150):
+def grafico_png(d, emitido=None, dpi=220, formato="png"):
+    """Gráfico do boletim. formato="png" (raster, 220 dpi ≈ 2640 px de largura) ou "svg" (vetorial: não perde qualidade no zoom)."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -300,7 +301,7 @@ def grafico_png(d, emitido=None, dpi=150):
     cores = {"tinta": "#1b2733", "cinza": "#6b7785", "grade": "#e6ebf1", "fundo": "#ffffff", "card": "#f3f6fa",
              "temp": "#e8590c", "umid": "#1c7ed6", "nuv": "#adb5bd", "vento": "#2b8a3e", "rajada": "#f08c00",
              "gran": "#0c8599"}
-    plt.rcParams.update({"font.family": "DejaVu Sans", "axes.edgecolor": "#d5dce5"})
+    plt.rcParams.update({"font.family": "DejaVu Sans", "axes.edgecolor": "#d5dce5", "svg.fonttype": "path"})
     W, H = 12.0, 20.15
     fig = plt.figure(figsize=(W, H), dpi=dpi, facecolor=cores["fundo"])
 
@@ -311,7 +312,7 @@ def grafico_png(d, emitido=None, dpi=150):
     ax = eixo(0, H - 1.75, W, 1.75)
     ax.axis("off")
     grad = LinearSegmentedColormap.from_list("g", ["#0b2545", "#13518f", "#2a8bc7"])
-    ax.imshow(np.linspace(0, 1, 256).reshape(1, -1), extent=[0, 1, 0, 1], aspect="auto", cmap=grad)
+    ax.imshow(np.linspace(0, 1, 256).reshape(1, -1), extent=[0, 1, 0, 1], aspect="auto", cmap=grad, interpolation="bilinear")
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.text(0.04, 0.62, "BOLETIM HORÁRIO", color="#9fd3ff", fontsize=11, fontweight="bold", va="center")
@@ -491,7 +492,7 @@ def grafico_png(d, emitido=None, dpi=150):
     # ----- rodapé -----
     fig.text(0.5, 0.35 / H, "Raios: previsão heurística (CAPE, Lifted Index, CIN) · Faixa azulada = noite · Fonte: Open-Meteo", ha="center", va="center", fontsize=8, color="#8793a1")
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=dpi, facecolor=fig.get_facecolor())
+    fig.savefig(buf, format=formato, dpi=dpi, facecolor=fig.get_facecolor())
     plt.close(fig)
     return buf.getvalue()
 

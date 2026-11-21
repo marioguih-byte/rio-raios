@@ -2377,7 +2377,7 @@ def _hor_gerar_unidade(chave, nome, somente_cache):
         h_bm, h_mod = bh.baixar_unidade(lat, lon, somente_cache=somente_cache)
         d = bh.calcular(nome, h_bm, h_mod, slot["inicio"])
         agora = bh.agora_brasilia()
-        reg.update(status="pronto", texto=bh.texto_whatsapp(d, agora), png=bh.grafico_png(d, agora), emitido=agora, enviado=False)
+        reg.update(status="pronto", texto=bh.texto_whatsapp(d, agora), png=bh.grafico_png(d, agora), svg=bh.grafico_png(d, agora, formato="svg"), emitido=agora, enviado=False)
     except Exception as e:
         reg.update(status="erro", erro=str(e)[:200])
 
@@ -2521,10 +2521,17 @@ def _hor_secao(nomes_sel):
     esc = st.selectbox("Boletim", opcoes, index=idx, format_func=_rot, key="hor_sel")
     hor["ver"] = esc
     reg = hor["slots"][esc[0]]["unidades"][esc[1]]
-    st.image(reg["png"], use_container_width=True)
-    d1, d2 = st.columns(2)
-    d1.download_button("⬇️ Baixar gráfico (PNG)", data=reg["png"], file_name=f"boletim_horario_{boletins_bo.slug(esc[1])}_{hor['slots'][esc[0]]['inicio']:%Y%m%d_%H}h.png",
-                       mime="image/png", key=f"hor_dl_{esc[0]}_{boletins_bo.slug(esc[1])}", use_container_width=True)
+    try:
+        st.image(reg["svg"][reg["svg"].find(b"<svg"):].decode("utf-8") if reg.get("svg") else reg["png"], use_container_width=True)
+    except Exception:
+        st.image(reg["png"], use_container_width=True)   # SVG = vetorial: nítido em qualquer zoom
+    base_nome = f"boletim_horario_{boletins_bo.slug(esc[1])}_{hor['slots'][esc[0]]['inicio']:%Y%m%d_%H}h"
+    d1, d3, d2 = st.columns([1, 1, 2])
+    d1.download_button("⬇️ PNG", data=reg["png"], file_name=base_nome + ".png", mime="image/png",
+                       key=f"hor_dl_{esc[0]}_{boletins_bo.slug(esc[1])}", use_container_width=True, help="Imagem para enviar no WhatsApp (alta resolução)")
+    if reg.get("svg"):
+        d3.download_button("⬇️ SVG", data=reg["svg"], file_name=base_nome + ".svg", mime="image/svg+xml",
+                           key=f"hor_dlsvg_{esc[0]}_{boletins_bo.slug(esc[1])}", use_container_width=True, help="Vetorial: não perde qualidade com zoom")
     with d2:
         _hor_botoes_whatsapp(esc[0] + "v", esc[1], reg["texto"], reg.get("png"))
     st.code(reg["texto"], language=None)
