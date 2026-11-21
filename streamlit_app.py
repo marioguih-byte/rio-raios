@@ -2526,10 +2526,11 @@ def _hor_secao(nomes_sel):
     esc = st.selectbox("Boletim", opcoes, index=idx, format_func=_rot, key="hor_sel")
     hor["ver"] = esc
     reg = hor["slots"][esc[0]]["unidades"][esc[1]]
-    try:
-        st.image(reg["svg"][reg["svg"].find(b"<svg"):].decode("utf-8") if reg.get("svg") else reg["png"], use_container_width=True)
-    except Exception:
-        st.image(reg["png"], use_container_width=True)   # SVG = vetorial: nítido em qualquer zoom
+    with st.expander("🖼 Gráfico do boletim (clique para retrair/expandir)", expanded=True, key="hor_exp_img"):
+        try:
+            st.image(reg["svg"][reg["svg"].find(b"<svg"):].decode("utf-8") if reg.get("svg") else reg["png"], use_container_width=True)
+        except Exception:
+            st.image(reg["png"], use_container_width=True)   # SVG = vetorial: nítido em qualquer zoom
     base_nome = f"boletim_horario_{boletins_bo.slug(esc[1])}_{hor['slots'][esc[0]]['inicio']:%Y%m%d_%H}h"
     d1, d3, d2 = st.columns([1, 1, 2])
     d1.download_button("⬇️ PNG", data=reg["png"], file_name=base_nome + ".png", mime="image/png",
@@ -2551,7 +2552,13 @@ def _horario_fragmento():
     agora = bh.agora_brasilia()
     envio, gerar_em = bh.proximo_envio(agora)
     chave = envio.strftime("%Y%m%d%H")
-    if nomes_sel and agora >= gerar_em and not hor.get("pre"):
+    # Só gera/avisa se o app já estava aberto (com unidades escolhidas) ANTES do horário de geração: quem entra depois não recebe
+    # geração automática nem lembrete daquele horário (o botão "Gerar agora" continua disponível).
+    armados = hor.setdefault("armado", {})
+    if nomes_sel and agora < gerar_em:
+        armados[chave] = True
+    armado = bool(armados.get(chave))
+    if nomes_sel and armado and agora >= gerar_em and not hor.get("pre"):
         slot = hor["slots"].get(chave)
         faltam = [n for n in nomes_sel if not (slot and n in slot["unidades"])]
         if faltam:
@@ -2561,7 +2568,8 @@ def _horario_fragmento():
         hor["avisado"][chave] = True
         st.toast(f"⏰ Boletim horário das {envio:%H:%M} pronto — hora de enviar!", icon="⏰")
     _hor_processar_download()          # baixa pelo navegador (quando não há chave paga); gera os boletins ao terminar
-    _hor_lembrete(agora, envio, gerar_em, chave, nomes_sel)
+    if armado:
+        _hor_lembrete(agora, envio, gerar_em, chave, nomes_sel)
     _hor_secao(nomes_sel)
 
 
