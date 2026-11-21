@@ -156,6 +156,8 @@
     font: 12px 'Segoe UI', sans-serif; }
   .leaflet-control-layers-toggle { filter: invert(0.9); }
   .leaflet-control-layers-separator { border-color: #374151 !important; }
+  /* painéis extras da divisão do mapa: só o mapa, sem painéis/legenda/busca */
+  body.sec #raios-status-bar, body.sec #busca-unidade-bar, body.sec #legenda-mapa, body.sec #painel_alertas, body.sec #painel_estacao, body.sec #goes-status { display: none !important; }
 </style>
 </head>
 <body>
@@ -241,6 +243,7 @@
   };
 
   var map = null;
+  var PAINEL = 0, SEC = false, fatorAltura = 1, ultimaRegiao = null, regiaoAtiva = false;   // divisão do mapa: painel 0 = principal; >0 = só visualização
   // Altura do mapa: ~86% da altura da janela do navegador (entre 700 e 1100 px); no celular em pé, 560 px.
   // Altura do mapa = alturaPct % da altura da JANELA do navegador, entre 700 e 1400 px (560 px no celular em pé).
   // alturaPct vem da barra lateral do app (padrão 86).
@@ -265,12 +268,13 @@
   }                       // espelha o estado do botão "mapa maior" (usado fora do iniciarMapa)
   function mapaExpandidoAgora() { return mapaExpandidoFlag; }
   function calcularAlturaBase() {
-    if (larguraJanela() < 640) return 560;
+    if (larguraJanela() < 640) return fatorAltura >= 1 ? 560 : Math.max(320, Math.round(560 * fatorAltura));
     var h = 0;
     try { h = window.parent.innerHeight; } catch (e) {}      // o app e o mapa são da mesma origem
     if (!h) h = window.screen.height ? window.screen.height * 0.9 : 0;
     if (!h) return 820;
-    return Math.max(700, Math.min(1400, Math.round(h * alturaPct / 100)));
+    var cheia = Math.max(700, Math.min(1400, Math.round(h * alturaPct / 100)));
+    return fatorAltura >= 1 ? cheia : Math.max(320, Math.round(cheia * fatorAltura));
   }
   var alturaBase = calcularAlturaBase();
   var alturaQuadro = alturaBase;
@@ -1056,11 +1060,11 @@
         return barra;
       },
     });
-    new BotaoAlertas().addTo(map);
+    if (!SEC) new BotaoAlertas().addTo(map);
   }
 
   function iniciarMapa() {
-    map = L.map("map", { zoomControl: true, minZoom: 4, maxZoom: 18, preferCanvas: true, fadeAnimation: false });
+    map = L.map("map", { zoomControl: true, minZoom: (SEC || regiaoAtiva) ? 2 : 4, maxZoom: 18, preferCanvas: true, fadeAnimation: false });
     window.__mapaRIO = map;
 
     // ------------------------------------------------------------------------------------------
@@ -1201,7 +1205,7 @@
 
     var bb = { lat_min: -34.0, lat_max: 5.5, lon_min: -74.5, lon_max: -32.0 };
     map.fitBounds([[bb.lat_min, bb.lon_min], [bb.lat_max, bb.lon_max]]);
-    map.setMaxBounds([[bb.lat_min - 8, bb.lon_min - 8], [bb.lat_max + 8, bb.lon_max + 8]]);
+    if (!SEC && !regiaoAtiva) map.setMaxBounds([[bb.lat_min - 8, bb.lon_min - 8], [bb.lat_max + 8, bb.lon_max + 8]]);
 
     // Foco no Brasil: o resto do mapa continua visível, só levemente esmaecido fora do território.
     map.createPane("mascaraBR");
@@ -1237,11 +1241,12 @@
     // vez (o componente não recria o iframe entre atualizações), isso na
     // prática só importa na primeira carga da página.
     try {
-      var salvo = JSON.parse(localStorage.getItem("blueocean_raios_view_v1") || "null");
-      if (salvo && typeof salvo.lat === "number") map.setView([salvo.lat, salvo.lng], salvo.zoom);
+      var salvo = JSON.parse(localStorage.getItem("blueocean_raios_view_v1" + (SEC ? "_x" : "")) || "null");
+      if (!SEC && salvo && typeof salvo.lat === "number") map.setView([salvo.lat, salvo.lng], salvo.zoom);
     } catch (e) {}
     map.on("moveend zoomend", function () {
       try {
+        if (SEC || regiaoAtiva) return;        // painéis de região não gravam a vista (o normal continua do jeito que você deixou)
         var c = map.getCenter();
         localStorage.setItem("blueocean_raios_view_v1", JSON.stringify({ lat: c.lat, lng: c.lng, zoom: map.getZoom() }));
       } catch (e) {}
@@ -1400,6 +1405,7 @@
           L.DomEvent.preventDefault(ev.originalEvent);
         }
         this.closeTooltip();
+        if (SEC) { map.flyTo([e.lat, e.lon], Math.max(map.getZoom(), 9), { duration: 0.6 }); return; }
         abrirPainel(e.estacao);
       });
       marcador.addTo(stationsLayer);
@@ -1546,7 +1552,21 @@
   var ultimaAssinRaios = null;
   function aoRenderizar(event) {
     var args = (event.detail && event.detail.args) || {};
+    if (!map) {
+      PAINEL = args.painel || 0; SEC = PAINEL > 0;
+      if (SEC) document.body.classList.add("sec");
+    }
+    if (typeof args.fator_altura === "number") fatorAltura = args.fator_altura;
+    regiaoAtiva = !!args.regiao || !!args.dividido;          // mapa dividido: pan e zoom totalmente livres
     if (!map) iniciarMapa();
+    if (args.regiao) {                                  // divisão do mapa: enquadra a região escolhida (só quando ela muda)
+      var assinReg = JSON.stringify(args.regiao);
+      if (assinReg !== ultimaRegiao) {
+        ultimaRegiao = assinReg;
+        var r = args.regiao;
+        setTimeout(function () { map.invalidateSize(); map.fitBounds([[r[0], r[1]], [r[2], r[3]]]); }, 250);
+      }
+    } else { ultimaRegiao = null; }
 
     atualizarStatus(args.status_texto);
     meteorologistaApp = String(args.meteorologista || "");
@@ -1574,7 +1594,7 @@
     // O Streamlit reenvia os mesmos dados ao mapa quando a largura muda (abrir/fechar o menu lateral, o
     // painel de alertas, redimensionar a janela...); sem o "token" o som tocaria de novo a cada vez.
     // O painel da unidade abre apenas quando a pessoa clica na unidade.
-    if (args.som_token && audio && args.som_token !== ultimoSomToken) {
+    if (!SEC && args.som_token && audio && args.som_token !== ultimoSomToken) {
       ultimoSomToken = args.som_token;
       try { sessionStorage.setItem("rio_som_token", ultimoSomToken); } catch (e) {}
       tocarSomAlerta();

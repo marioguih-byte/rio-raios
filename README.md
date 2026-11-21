@@ -349,3 +349,6 @@ Na barra lateral, logo abaixo do nome do meteorologista: **⏰ Boletim horário 
 - Lembrete fixo no **canto direito** com "Preparar no WhatsApp" (texto digitado no grupo da unidade; você confere e dá Enter), "Copiar texto" e "Enviado".
 - "⚡ Gerar agora" cria o boletim a partir da hora atual, a qualquer momento. O gráfico pode ser baixado em PNG.
 - Os boletins diários agora incluem a linha **🧊 Granizo** quando há previsão (ou possibilidade) no dia.
+
+## Divisão do mapa
+Na barra lateral, em **🗺️ Mapa → Divisão do mapa**: **Normal** (padrão, 1 mapa), **Lado a lado** (2 mapas) ou **4 regiões (2×2)**. Em cada painel há um seletor de região (Brasil, Norte e Nordeste, Nordeste, Norte, Sudeste, Rio e Macaé, São Paulo e Centro-Oeste, Sul) e o zoom/arrasto é independente. O painel de alertas, a legenda, a busca e o som ficam só no primeiro mapa; nos demais, clicar numa unidade dá zoom nela.
