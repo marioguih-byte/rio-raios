@@ -1356,8 +1356,6 @@ if "_estado_restaurado" not in st.session_state:
         for _k in _CHAVES_PERSISTENTES:
             if _k in _salvo and _k not in st.session_state:
                 st.session_state[_k] = copy.deepcopy(_salvo[_k])
-    if not str(st.session_state.get("meteorologista_nome", "")).strip() and str(st.query_params.get("nome", "")).strip():
-        st.session_state["meteorologista_nome"] = str(st.query_params.get("nome")).strip()
 
 if "alertas_raio_ativos" not in st.session_state: st.session_state.alertas_raio_ativos = []
 if "alertas_unidade" not in st.session_state: st.session_state.alertas_unidade = {}
@@ -1380,7 +1378,6 @@ if "meteorologista_nome" not in st.session_state or not str(st.session_state.get
             nome = str(nome).strip()
             if nome:
                 st.session_state.meteorologista_nome = nome
-                st.query_params["nome"] = nome
                 _salvar_estado()
                 st.rerun()
             else:
@@ -1389,8 +1386,9 @@ if "meteorologista_nome" not in st.session_state or not str(st.session_state.get
     _dialog_meteorologista_inicial()
     st.stop()
 
-if str(st.session_state.get("meteorologista_nome", "")).strip() and st.query_params.get("nome") != st.session_state["meteorologista_nome"]:
-    st.query_params["nome"] = st.session_state["meteorologista_nome"]
+# O nome NÃO vai mais na URL: quem receber o link precisa informar o próprio nome (e remove "nome" de links antigos).
+if "nome" in st.query_params:
+    del st.query_params["nome"]
 
 with st.sidebar:
     st.header("⚙ Configuração")
@@ -1401,11 +1399,8 @@ with st.sidebar:
     )
     if meteorologista.strip() != st.session_state.get("meteorologista_nome", ""):
         st.session_state.meteorologista_nome = meteorologista.strip()
-        if meteorologista.strip():
-            st.query_params["nome"] = meteorologista.strip()
 
     # Boletim horário: logo abaixo do nome do meteorologista
-    st.caption("Versão do app: 21/11 18h10 · lembrete horário v3")
     st.toggle("⏰ Boletim horário (3 em 3 h)", key="hor_ativo",
               help="Gera sozinho, 5 min antes de cada horário (00h, 03h, 06h … 21h), o boletim das próximas 12 h para as unidades escolhidas, "
                    "com gráficos e texto hora a hora, e avisa no canto direito da tela.")
