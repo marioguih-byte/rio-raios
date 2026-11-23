@@ -103,6 +103,18 @@
     .al-card { padding: 12px; }
     .leaflet-control-layers-list label { padding: 4px 0; }
   }
+  #painel-riscos { display: none; position: absolute; z-index: 1150; top: 10px; left: 56px; width: 270px; max-width: calc(100% - 70px);
+    background: rgba(17,21,28,0.96); color: #e5e7eb; border: 1px solid #2a303b; border-radius: 10px; padding: 10px 12px; font: 12.5px 'Segoe UI', sans-serif; }
+  #painel-riscos h4 { margin: 0 0 6px; font-size: 13.5px; display: flex; justify-content: space-between; align-items: center; }
+  #painel-riscos .pr-x { cursor: pointer; color: #9aa3b2; padding: 0 6px; font-size: 16px; }
+  #painel-riscos label.pr-l { display: flex; align-items: center; gap: 8px; padding: 3px 0; cursor: pointer; }
+  #painel-riscos .pr-sw { width: 14px; height: 14px; border-radius: 50%; border: 3px solid; box-sizing: border-box; flex: none; }
+  #painel-riscos .pr-n { margin-left: auto; color: #9aa3b2; font-size: 11.5px; }
+  #painel-riscos select { background: #111827; color: #e5e7eb; border: 1px solid #374151; border-radius: 4px; padding: 2px 4px; }
+  #painel-riscos .pr-peq { color: #8b93a3; font-size: 11px; line-height: 1.4; margin-top: 6px; }
+  #painel-riscos .pr-sec { margin-top: 8px; }
+  .leaflet-bar a.bo-riscos { display: flex; align-items: center; justify-content: center; font-size: 17px; text-decoration: none; }
+  .leaflet-bar a.bo-riscos.on { background: #3fc2c2; color: #fff; }
   #toast-mapa { display: none; position: absolute; z-index: 1300; left: 50%; bottom: 56px; transform: translateX(-50%);
     background: rgba(17,24,39,0.95); color: #fff; padding: 7px 14px; border-radius: 8px; font: 12.5px 'Segoe UI', sans-serif; }
   .leaflet-bar a.bo-tela-cheia { display: flex; align-items: center; justify-content: center; }
@@ -192,6 +204,16 @@
   <div id="busca-unidade-bar">
     <input id="busca-unidade-input" list="busca-unidade-lista" placeholder="🔎 Buscar unidade…" autocomplete="off" />
     <datalist id="busca-unidade-lista"></datalist>
+  </div>
+  <div id="painel-riscos">
+    <h4><span>◎ Círculos de risco</span><span class="pr-x" id="pr_fechar" title="Fechar">✕</span></h4>
+    <div id="pr_lista"></div>
+    <div class="pr-sec">Janela: próximas
+      <select id="pr_janela"><option value="3">3 h</option><option value="6">6 h</option><option value="12">12 h</option><option value="24">24 h</option></select>
+    </div>
+    <div class="pr-peq" id="pr_status">—</div>
+    <div class="pr-peq">Linha <b>contínua grossa</b> = risco forte · <b>tracejada</b> = atenção.<br/>
+      Rajada: ≥ 41 / ≥ 62 km/h · Chuva (3 h): ≥ 5 / ≥ 20 mm · Raios: ≥ 40 / ≥ 70 % · Granizo: possível / previsto.</div>
   </div>
   <div id="painel_estacao">
     <div class="pe-head">
@@ -659,6 +681,188 @@
     limparGraficos();
   }
 
+
+  // ----------------------------------------------------------------
+  // Círculos de risco ao redor das unidades (rajada, chuva, raios, granizo), cada um com a sua cor.
+  // A previsão vem do Open-Meteo, direto do navegador, em lotes de unidades.
+  // ----------------------------------------------------------------
+  var RISCOS = [
+    { id: "rajada",  nome: "Rajada de vento", cor: "#e91e63", raio: 17.5 },
+    { id: "chuva",   nome: "Precipitação",    cor: "#1e88e5", raio: 22 },
+    { id: "raios",   nome: "Raios",           cor: "#7c4dff", raio: 13 },
+    { id: "granizo", nome: "Granizo",         cor: "#00bfa5", raio: 26.5 },
+  ];
+  var riscoCfg = { ativos: { rajada: true, chuva: true, raios: true, granizo: true }, janela: 6, ligado: false };
+  try { var _rc = JSON.parse(localStorage.getItem("rio_riscos_v1") || "null"); if (_rc) riscoCfg = Object.assign(riscoCfg, _rc); } catch (e) {}
+  var riscoDados = { ts: 0, porChave: {}, carregando: false, erro: "", sig: "" };
+  var riscoAval = {};            // chave -> { rajada:{nivel,txt}, ... } na janela escolhida
+  var riscoSigDesenho = "";
+
+  function salvarRiscoCfg() { try { localStorage.setItem("rio_riscos_v1", JSON.stringify(riscoCfg)); } catch (e) {} }
+  function chaveHoraBrasilia() {
+    var t = new Date().toLocaleString("sv-SE", { timeZone: "America/Sao_Paulo" });   // "YYYY-MM-DD HH:MM:SS"
+    return t.slice(0, 10) + "T" + t.slice(11, 13) + ":00";
+  }
+  function numArr(a) { return (a || []).map(function (v) { return (v === null || v === undefined) ? NaN : v; }); }
+  function probRaios(cape, li, cin) {
+    var cs = Math.min(1, Math.max(0, (isNaN(cape) ? 0 : cape) / 2500));
+    var ls = isNaN(li) ? NaN : Math.min(1, Math.max(0, (2 - li) / 8));
+    var base = isNaN(ls) ? cs : 0.6 * cs + 0.4 * ls;
+    var pen = 1 - 0.6 * Math.min(1, Math.abs(isNaN(cin) ? 0 : cin) / 200);
+    return 100 * base * pen;
+  }
+
+  function processarLote(unidades, jA, jB, idx0chave) {
+    var A = Array.isArray(jA) ? jA : [jA], B = Array.isArray(jB) ? jB : [jB];
+    unidades.forEach(function (u, k) {
+      var ha = (A[k] || {}).hourly, hb = (B[k] || {}).hourly;
+      if (!ha || !hb) return;
+      var i0 = ha.time.indexOf(idx0chave), j0 = hb.time.indexOf(idx0chave);
+      if (i0 < 0 || j0 < 0) return;
+      var N = 24;
+      var raj = numArr(ha["wind_gusts_10m_icon_seamless"] || ha["wind_gusts_10m"]).slice(i0, i0 + N);
+      var pi = numArr(ha["precipitation_icon_seamless"]).slice(i0, i0 + N), pe = numArr(ha["precipitation_ecmwf_ifs025"]).slice(i0, i0 + N);
+      var ch = raj.map(function (_, i) { var a = pi[i], b = pe[i]; return Math.max(isNaN(a) ? 0 : a, isNaN(b) ? 0 : b); });
+      var cape = numArr(hb.cape).slice(j0, j0 + N), li = numArr(hb.lifted_index).slice(j0, j0 + N), cin = numArr(hb.convective_inhibition).slice(j0, j0 + N);
+      var cod = numArr(hb.weather_code).slice(j0, j0 + N);
+      var rai = cape.map(function (c, i) { return probRaios(c, li[i], cin[i]); });
+      var gp = cod.map(function (c) { return c === 96 || c === 99; });
+      var gq = cape.map(function (c, i) { return !gp[i] && (c || 0) >= 2000 && (isNaN(li[i]) ? 0 : li[i]) <= -5 && rai[i] >= 50; });
+      riscoDados.porChave[u.estacao] = { raj: raj, ch: ch, rai: rai, gp: gp, gq: gq };
+    });
+  }
+
+  function carregarRiscos(forcar) {
+    if (!riscoCfg.ligado || !ultimosArgs || !ultimosArgs.estacoes) return;
+    if (riscoDados.carregando) return;
+    if (!forcar && Date.now() - riscoDados.ts < 20 * 60 * 1000 && Object.keys(riscoDados.porChave).length) return;
+    var unidades = ultimosArgs.estacoes.slice();
+    riscoDados.carregando = true; riscoDados.erro = ""; atualizarPainelRiscos();
+    var chave0 = chaveHoraBrasilia(), LOTE = 25, lotes = [];
+    for (var i = 0; i < unidades.length; i += LOTE) lotes.push(unidades.slice(i, i + LOTE));
+    var novo = {}, antigo = riscoDados.porChave; riscoDados.porChave = novo;
+    function coords(l) { return "latitude=" + l.map(function (u) { return u.lat.toFixed(4); }).join(",") + "&longitude=" + l.map(function (u) { return u.lon.toFixed(4); }).join(","); }
+    var comum = "&wind_speed_unit=kmh&timezone=America%2FSao_Paulo&forecast_days=3";
+    Promise.all(lotes.map(function (l) {
+      var uA = "https://api.open-meteo.com/v1/forecast?" + coords(l) + "&hourly=precipitation,wind_gusts_10m&models=icon_seamless,ecmwf_ifs025" + comum;
+      var uB = "https://api.open-meteo.com/v1/forecast?" + coords(l) + "&hourly=cape,lifted_index,convective_inhibition,weather_code" + comum;
+      return Promise.all([fetch(uA), fetch(uB)]).then(function (rs) {
+        rs.forEach(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); });
+        return Promise.all([rs[0].json(), rs[1].json()]);
+      }).then(function (js) { processarLote(l, js[0], js[1], chave0); });
+    })).then(function () {
+      riscoDados.ts = Date.now(); riscoDados.carregando = false;
+      if (!Object.keys(riscoDados.porChave).length) { riscoDados.porChave = antigo; riscoDados.erro = "A previsão não cobre o horário atual."; }
+      reavaliarRiscos(); desenharRiscosTodos(true); atualizarPainelRiscos();
+    }).catch(function (e) {
+      riscoDados.carregando = false; riscoDados.porChave = Object.keys(antigo).length ? antigo : novo;
+      riscoDados.erro = "Não foi possível obter a previsão (" + e.message + ").";
+      reavaliarRiscos(); desenharRiscosTodos(true); atualizarPainelRiscos();
+    });
+  }
+
+  function reavaliarRiscos() {
+    var H = riscoCfg.janela;
+    riscoAval = {};
+    Object.keys(riscoDados.porChave).forEach(function (k) {
+      var d = riscoDados.porChave[k], r = {};
+      var rj = d.raj.slice(0, H), mx = -1, ix = 0;
+      rj.forEach(function (v, i) { if (!isNaN(v) && v > mx) { mx = v; ix = i; } });
+      if (mx >= 0) r.rajada = { nivel: mx >= 62 ? 2 : mx >= 41 ? 1 : 0, txt: "rajada " + Math.round(mx) + " km/h (+" + ix + " h)" };
+      var best = 0, ib = 0;
+      for (var i = 0; i < Math.min(H, d.ch.length); i++) {
+        var s3 = 0; for (var j = i; j < Math.min(i + 3, d.ch.length); j++) s3 += d.ch[j];
+        if (s3 > best) { best = s3; ib = i; }
+      }
+      r.chuva = { nivel: best >= 20 ? 2 : best >= 5 ? 1 : 0, txt: "chuva " + best.toFixed(1).replace(".", ",") + " mm em 3 h (+" + ib + " h)" };
+      var rm = Math.max.apply(null, d.rai.slice(0, H));
+      r.raios = { nivel: rm >= 70 ? 2 : rm >= 40 ? 1 : 0, txt: "raios até " + Math.round(rm) + "%" };
+      var gpv = d.gp.slice(0, H).some(Boolean), gqv = d.gq.slice(0, H).some(Boolean);
+      r.granizo = { nivel: gpv ? 2 : gqv ? 1 : 0, txt: gpv ? "granizo previsto" : "granizo possível" };
+      riscoAval[k] = r;
+    });
+  }
+
+  function riscoTooltip(chave) {
+    if (!riscoCfg.ligado) return "";
+    var r = riscoAval[chave]; if (!r) return "";
+    var linhas = [];
+    RISCOS.forEach(function (rk) {
+      var a = r[rk.id];
+      if (riscoCfg.ativos[rk.id] && a && a.nivel > 0)
+        linhas.push('<span style="color:' + rk.cor + ';">●</span> ' + a.txt + (a.nivel === 2 ? " <b>(forte)</b>" : " (atenção)"));
+    });
+    return linhas.length ? "<br/>" + linhas.join("<br/>") : "";
+  }
+
+  function contextosTodos() { return [principal].concat(extras).filter(Boolean); }
+
+  function desenharRiscosCtx(ctx) {
+    if (!ctx || !ctx.map) return;
+    var m = ctx.map;
+    if (!m.getPane("riscosPane")) { m.createPane("riscosPane"); m.getPane("riscosPane").style.zIndex = 605; m.getPane("riscosPane").style.pointerEvents = "none"; }
+    if (!ctx.riscosLayer) { ctx.riscosLayer = L.layerGroup().addTo(m); ctx.rRiscos = L.svg({ pane: "riscosPane" }); }
+    ctx.riscosLayer.clearLayers();
+    if (!riscoCfg.ligado || !ultimosArgs) return;
+    (ultimosArgs.estacoes || []).forEach(function (e) {
+      var r = riscoAval[e.estacao]; if (!r) return;
+      RISCOS.forEach(function (rk) {
+        var a = r[rk.id];
+        if (!riscoCfg.ativos[rk.id] || !a || a.nivel < 1) return;
+        var forte = a.nivel === 2;
+        L.circleMarker([e.lat, e.lon], { radius: rk.raio, color: "#ffffff", weight: forte ? 7 : 5.5, opacity: 0.75, fill: false, interactive: false, pane: "riscosPane", renderer: ctx.rRiscos }).addTo(ctx.riscosLayer);
+        L.circleMarker([e.lat, e.lon], { radius: rk.raio, color: rk.cor, weight: forte ? 4 : 2.6, opacity: 1, fill: false, dashArray: forte ? null : "6 4",
+          interactive: false, pane: "riscosPane", renderer: ctx.rRiscos }).addTo(ctx.riscosLayer);
+      });
+    });
+  }
+
+  function desenharRiscosTodos(forcar) {
+    var sig = JSON.stringify([riscoCfg, riscoDados.ts, contextosTodos().length, (ultimosArgs && ultimosArgs.estacoes || []).length]);
+    if (!forcar && sig === riscoSigDesenho) return;
+    riscoSigDesenho = sig;
+    contextosTodos().forEach(desenharRiscosCtx);
+  }
+
+  function atualizarPainelRiscos() {
+    var box = document.getElementById("painel-riscos"); if (!box) return;
+    box.style.display = riscoCfg.ligado ? "block" : "none";
+    document.querySelectorAll(".bo-riscos").forEach(function (a) { a.classList.toggle("on", !!riscoCfg.ligado); });
+    var contagem = {};
+    Object.keys(riscoAval).forEach(function (k) { RISCOS.forEach(function (rk) { var a = riscoAval[k][rk.id]; if (a && a.nivel > 0) contagem[rk.id] = (contagem[rk.id] || 0) + 1; }); });
+    document.getElementById("pr_lista").innerHTML = RISCOS.map(function (rk) {
+      return '<label class="pr-l"><input type="checkbox" data-r="' + rk.id + '"' + (riscoCfg.ativos[rk.id] ? " checked" : "") + '/>' +
+        '<span class="pr-sw" style="border-color:' + rk.cor + ';"></span>' + rk.nome + '<span class="pr-n">' + (contagem[rk.id] || 0) + ' unid.</span></label>';
+    }).join("");
+    document.querySelectorAll("#pr_lista input").forEach(function (cb) {
+      cb.addEventListener("change", function () { riscoCfg.ativos[cb.getAttribute("data-r")] = cb.checked; salvarRiscoCfg(); desenharRiscosTodos(true); });
+    });
+    document.getElementById("pr_janela").value = String(riscoCfg.janela);
+    var st = document.getElementById("pr_status");
+    if (riscoDados.carregando) st.textContent = "Carregando previsão das unidades…";
+    else if (riscoDados.erro) st.innerHTML = '<span style="color:#ff8a80;">' + esc(riscoDados.erro) + '</span> <a href="#" id="pr_tentar" style="color:#3fc2c2;">Tentar de novo</a>';
+    else if (riscoDados.ts) st.textContent = "Previsão atualizada às " + new Date(riscoDados.ts).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }) + " (Brasília)";
+    var t = document.getElementById("pr_tentar");
+    if (t) t.addEventListener("click", function (ev) { ev.preventDefault(); carregarRiscos(true); });
+  }
+
+  function definirRiscosLigado(v) {
+    riscoCfg.ligado = !!v; salvarRiscoCfg();
+    if (riscoCfg.ligado) carregarRiscos(false);
+    atualizarPainelRiscos(); desenharRiscosTodos(true);
+  }
+
+  function iniciarPainelRiscos() {
+    document.getElementById("pr_fechar").addEventListener("click", function () { definirRiscosLigado(false); });
+    document.getElementById("pr_janela").addEventListener("change", function () {
+      riscoCfg.janela = parseInt(this.value, 10) || 6; salvarRiscoCfg(); reavaliarRiscos(); desenharRiscosTodos(true); atualizarPainelRiscos();
+    });
+    L.DomEvent.disableClickPropagation(document.getElementById("painel-riscos"));
+    L.DomEvent.disableScrollPropagation(document.getElementById("painel-riscos"));
+    setInterval(function () { if (riscoCfg.ligado) { carregarRiscos(false); } }, 5 * 60 * 1000);
+    atualizarPainelRiscos();
+  }
+
   function abrirPainel(chave) {
     var d = dadosPorChave[chave];
     if (!d) return;
@@ -1107,6 +1311,7 @@
     }
     if (ultimosArgs && extras.length) redesenharEstacoes(ultimosArgs.estacoes, ultimosArgs.aneis, ultimosArgs.espessura_aneis);   // o painel principal volta a ser o "dono" dos marcadores
     document.querySelectorAll(".bo-div").forEach(function (a) { a.classList.toggle("on", a.getAttribute("data-n") === String(n)); });
+    if (typeof desenharRiscosTodos === "function") desenharRiscosTodos(true);
     if (n === 1) definirAtivo(principal);
     setTimeout(function () {
       invalidarTodos();
@@ -1119,6 +1324,7 @@
   function iniciarMapa() {
     map = L.map("pane0", { zoomControl: true, minZoom: (SEC || regiaoAtiva) ? 2 : 4, maxZoom: 18, preferCanvas: true, fadeAnimation: false });
     window.__mapaRIO = map;
+    window.__rioDbg = function () { return { principal: principal, extras: extras, riscoTooltip: riscoTooltip }; };
 
     // ------------------------------------------------------------------------------------------
     // Camadas de tiles. Opções comuns pra o mapa não piscar nem ficar com buracos ao arrastar ou dar zoom:
@@ -1440,6 +1646,20 @@
       },
     });
     new BotaoDivisao().addTo(map);
+    var BotaoRiscos = L.Control.extend({
+      options: { position: "topleft" },
+      onAdd: function () {
+        var barra = L.DomUtil.create("div", "leaflet-bar");
+        var a = L.DomUtil.create("a", "bo-riscos", barra);
+        a.href = "#"; a.setAttribute("role", "button"); a.title = "Círculos de risco (rajada, chuva, raios, granizo)"; a.textContent = "◎";
+        L.DomEvent.on(a, "click", function (ev) { L.DomEvent.preventDefault(ev); definirRiscosLigado(!riscoCfg.ligado); });
+        L.DomEvent.disableClickPropagation(barra);
+        return barra;
+      },
+    });
+    new BotaoRiscos().addTo(map);
+    iniciarPainelRiscos();
+    if (riscoCfg.ligado) setTimeout(function () { carregarRiscos(false); }, 800);
     var layoutSalvo = 1;
     try { layoutSalvo = parseInt(localStorage.getItem("rio_layout_mapa_v1"), 10) || 1; } catch (e) {}
     if ([1, 2, 4].indexOf(layoutSalvo) < 0) layoutSalvo = 1;
@@ -1510,7 +1730,7 @@
         radius: 8, color: "#000000", weight: 2.2, opacity: 1, fill: true, fillColor: e.risco_color, fillOpacity: 1, renderer: canvasEstacoes,
       });
       // Tooltip somente durante o hover; nunca fica preso após sair do marcador.
-      marcador.bindTooltip(e.risco_emoji + " " + e.nome + " — " + texto, {
+      marcador.bindTooltip(function () { return e.risco_emoji + " " + e.nome + " — " + texto + riscoTooltip(e.estacao); }, {
         sticky: false,
         permanent: false,
         interactive: false,
@@ -1526,7 +1746,7 @@
           L.DomEvent.preventDefault(ev.originalEvent);
         }
         this.closeTooltip();
-        if (ctxLocal && !ctxLocal.principal) { ctxLocal.map.flyTo([e.lat, e.lon], Math.max(ctxLocal.map.getZoom(), 9), { duration: 0.6 }); return; }
+        if (ctxLocal) definirAtivo(ctxLocal);
         abrirPainel(e.estacao);
       });
       marcador.addTo(stationsLayer);
@@ -1704,6 +1924,7 @@
     }
     reajustarAltura();   // 1º render: a altura certa já vale antes do primeiro setFrameHeight
     atualizarLegenda(args.aneis);
+    if (riscoCfg.ligado) { carregarRiscos(false); desenharRiscosTodos(false); }
     dadosAlertas = { estacoes: args.estacoes || [], alertas: args.alertas || [] };
     renderPainelAlertas();
 

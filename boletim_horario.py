@@ -227,6 +227,13 @@ def _hm(h):
     return f"{h.hour:02d}h"
 
 
+def _dir(graus):
+    """' (SE)' a partir de graus, ou '' se não houver direção."""
+    if graus is None or (isinstance(graus, float) and math.isnan(graus)):
+        return ""
+    return f" ({boletins_bo.pontos_cardeais(graus)})"
+
+
 def _faixa_horas(horarios, mascara):
     hs = [horarios[i] for i in range(len(horarios)) if mascara[i]]
     if not hs:
@@ -239,13 +246,25 @@ def texto_whatsapp(d, emitido=None):
     hs, nome = d["horarios"], d["nome"]
     n = len(hs)
     i_ch, i_raj, i_rai = int(np.argmax(d["chuva"])), int(np.nanargmax(d["rajada"])), int(np.argmax(d["raios"]))
+    i_vt = int(np.nanargmax(d["vento"]))
+    dir_raj = _dir(d["direc"][i_raj])
+    dir_vt = _dir(d["direc"][i_vt])
+    lim_at, lim_fo = boletins_bo.LIM_RAJADA
     linhas = [f"_*Boletim horário - {nome}*_", f"🕒 Emitido às {emitido:%H:%M} (Brasília) · próximas {HORAS_A_FRENTE} h, de {_hm(hs[0])} a {_hm(hs[-1])}", "",
-              "*Resumo*",
-              f"🌡️ Temperatura: {_f(np.nanmin(d['temp']))} a {_f(np.nanmax(d['temp']))}°C",
-              f"{_dot_chuva(d['chuva'][i_ch])} Chuva: {_f(d['chuva'].sum(), 1)} mm em {HORAS_A_FRENTE} h"
-              + (f" (pico {_f(d['chuva'][i_ch], 1)} mm às {_hm(hs[i_ch])})" if d["chuva"][i_ch] >= 0.1 else ""),
-              f"{_dot_raj(d['rajada'][i_raj])} Rajada máxima: {_f(d['rajada'][i_raj])} km/h às {_hm(hs[i_raj])}",
-              f"{_dot_raios(d['raios'][i_rai])} Probabilidade de raios: até {_f(d['raios'][i_rai])}% às {_hm(hs[i_rai])}"]
+              "*Vento e rajada*",
+              f"{_dot_raj(d['rajada'][i_raj])} Rajada máxima: {_f(d['rajada'][i_raj])} km/h{dir_raj} às {_hm(hs[i_raj])}",
+              f"{boletins_bo.cor(np.round(d['vento'][i_vt]), boletins_bo.LIM_VENTO)} Vento médio máximo: {_f(d['vento'][i_vt])} km/h{dir_vt} às {_hm(hs[i_vt])}"]
+    if (d["rajada"] >= lim_fo).any():
+        linhas.append(f"🔴 Rajada forte (≥ {lim_fo} km/h): {_faixa_horas(hs, d['rajada'] >= lim_fo)}")
+    if ((d["rajada"] >= lim_at) & (d["rajada"] < lim_fo)).any():
+        linhas.append(f"🟡 Rajada de atenção ({lim_at}–{lim_fo - 1} km/h): {_faixa_horas(hs, (d['rajada'] >= lim_at) & (d['rajada'] < lim_fo))}")
+    if not (d["rajada"] >= lim_at).any():
+        linhas.append(f"🟢 Sem rajadas acima de {lim_at - 1} km/h no período")
+    linhas += ["", "*Demais variáveis*",
+               f"🌡️ Temperatura: {_f(np.nanmin(d['temp']))} a {_f(np.nanmax(d['temp']))}°C",
+               f"{_dot_chuva(d['chuva'][i_ch])} Chuva: {_f(d['chuva'].sum(), 1)} mm em {HORAS_A_FRENTE} h"
+               + (f" (pico {_f(d['chuva'][i_ch], 1)} mm às {_hm(hs[i_ch])})" if d["chuva"][i_ch] >= 0.1 else ""),
+               f"{_dot_raios(d['raios'][i_rai])} Probabilidade de raios: até {_f(d['raios'][i_rai])}% às {_hm(hs[i_rai])}"]
     if d["gran_prev"].any():
         linhas.append(f"🧊 Granizo: previsto ({_faixa_horas(hs, d['gran_prev'])})")
     elif d["gran_poss"].any():
@@ -258,10 +277,11 @@ def texto_whatsapp(d, emitido=None):
         if i > 0 and h.hour < hs[i - PASSO_TEXTO].hour:
             linhas.append(f"— {h:%d/%m} —")
         dir_txt = boletins_bo.pontos_cardeais(d["direc"][i]) if not math.isnan(d["direc"][i]) else ""
+        vento_txt = f"{_dot_raj(np.nanmax(raj_j))} *vento {_f(d['vento'][i])} {dir_txt} · raj. {_f(np.nanmax(raj_j))} km/h*".replace("  ", " ")
         partes = [f"*{_hm(h)}* {icone_tempo(d['codigo'][i], h.hour)} {_f(d['temp'][i])}°C",
-                  f"💧{_f(d['umid'][i])}%",
+                  vento_txt,
                   f"{_dot_chuva(np.max(ch_j))} {_f(ch_j.sum(), 1)} mm",
-                  f"{_dot_raj(np.nanmax(raj_j))} vento {_f(d['vento'][i])} {dir_txt}, raj. {_f(np.nanmax(raj_j))} km/h".replace("  ", " "),
+                  f"💧{_f(d['umid'][i])}%",
                   f"⚡{_f(np.max(rai_j))}%"]
         if d["uv"][i] >= 1:
             partes.append(f"UV {_f(d['uv'][i])}")
@@ -270,7 +290,7 @@ def texto_whatsapp(d, emitido=None):
         elif d["gran_poss"][j].any():
             partes.append("🧊 granizo possível")
         linhas.append(" · ".join(partes))
-    linhas += ["", "_Chuva: acumulado de 3 h · Rajada, raios e granizo: máximo de cada janela de 3 h_"]
+    linhas += ["", "_Vento: no início da janela · Rajada, raios e granizo: máximo de cada janela de 3 h · Chuva: acumulado de 3 h_"]
     return "\n".join(linhas) + "\n"
 
 
@@ -302,7 +322,7 @@ def grafico_png(d, emitido=None, dpi=220, formato="png"):
              "temp": "#e8590c", "umid": "#1c7ed6", "nuv": "#adb5bd", "vento": "#2b8a3e", "rajada": "#f08c00",
              "gran": "#0c8599"}
     plt.rcParams.update({"font.family": "DejaVu Sans", "axes.edgecolor": "#d5dce5", "svg.fonttype": "path"})
-    W, H = 12.0, 20.15
+    W, H = 12.0, 20.3
     fig = plt.figure(figsize=(W, H), dpi=dpi, facecolor=cores["fundo"])
 
     def eixo(l, b, w, h, **kw):
@@ -335,28 +355,32 @@ def grafico_png(d, emitido=None, dpi=220, formato="png"):
     i_ch, i_raj, i_rai = int(np.argmax(d["chuva"])), int(np.nanargmax(d["rajada"])), int(np.argmax(d["raios"]))
     gran = "Previsto" if d["gran_prev"].any() else ("Possível" if d["gran_poss"].any() else "Não")
     gran_sub = _faixa_horas(hs, d["gran_prev"] | d["gran_poss"]) or "sem indicação"
-    kpis = [("TEMPERATURA", f"{_f(np.nanmin(d['temp']))}–{_f(np.nanmax(d['temp']))}°C", "mín – máx", cores["temp"]),
+    i_vt = int(np.nanargmax(d["vento"]))
+    sem = {"🟢": "#2b8a3e", "🟡": "#e8a200", "🔴": "#e03131"}
+    kpis = [("RAJADA MÁX.", f"{_f(d['rajada'][i_raj])} km/h", f"às {_hm(hs[i_raj])}{_dir(d['direc'][i_raj])}", sem[_dot_raj(d["rajada"][i_raj])]),
+            ("VENTO MÉDIO MÁX.", f"{_f(d['vento'][i_vt])} km/h", f"às {_hm(hs[i_vt])}{_dir(d['direc'][i_vt])}",
+             sem[boletins_bo.cor(np.round(d["vento"][i_vt]), boletins_bo.LIM_VENTO)]),
             ("CHUVA", f"{_f(d['chuva'].sum(), 1)} mm", f"pico {_f(d['chuva'][i_ch], 1)} mm às {_hm(hs[i_ch])}" if d["chuva"][i_ch] >= 0.1 else "sem chuva relevante",
              "#1971c2"),
-            ("RAJADA MÁX.", f"{_f(d['rajada'][i_raj])} km/h", f"às {_hm(hs[i_raj])}", {"🟢": "#2b8a3e", "🟡": "#e8a200", "🔴": "#e03131"}[_dot_raj(d["rajada"][i_raj])]),
-            ("RAIOS (heurística)", f"até {_f(d['raios'][i_rai])}%", f"às {_hm(hs[i_rai])}", {"🟢": "#2b8a3e", "🟡": "#e8a200", "🔴": "#e03131"}[_dot_raios(d["raios"][i_rai])]),
-            ("GRANIZO", gran, gran_sub, cores["gran"] if gran != "Não" else "#868e96")]
+            ("RAIOS (heurística)", f"até {_f(d['raios'][i_rai])}%", f"às {_hm(hs[i_rai])}", sem[_dot_raios(d["raios"][i_rai])]),
+            ("GRANIZO", gran, gran_sub, cores["gran"] if gran != "Não" else "#868e96"),
+            ("TEMPERATURA", f"{_f(np.nanmin(d['temp']))}–{_f(np.nanmax(d['temp']))}°C", "mín – máx", cores["temp"])]
     ax = eixo(0.45, H - 3.15, W - 0.9, 1.2)
     ax.axis("off")
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
-    larg, esp = (1 - 0.012 * 4) / 5, 0.012
+    larg, esp = (1 - 0.010 * 5) / 6, 0.010
     for k, (tit, val, sub, cor_) in enumerate(kpis):
         x0 = k * (larg + esp)
         ax.add_patch(Rectangle((x0, 0), larg, 1, fc=cores["card"], ec="#e1e7ee", lw=1, transform=ax.transAxes))
         ax.add_patch(Rectangle((x0, 0.93), larg, 0.07, fc=cor_, ec="none", transform=ax.transAxes))
-        ax.text(x0 + larg / 2, 0.80, tit, ha="center", va="center", fontsize=7.6, color=cores["cinza"], fontweight="bold")
-        ax.text(x0 + larg / 2, 0.47, val, ha="center", va="center", fontsize=15 if len(val) < 11 else 12.5, color=cor_, fontweight="bold")
-        ax.text(x0 + larg / 2, 0.15, sub, ha="center", va="center", fontsize=7.8, color=cores["cinza"])
+        ax.text(x0 + larg / 2, 0.80, tit, ha="center", va="center", fontsize=6.8, color=cores["cinza"], fontweight="bold")
+        ax.text(x0 + larg / 2, 0.47, val, ha="center", va="center", fontsize=13.5 if len(val) < 10 else 11.5, color=cor_, fontweight="bold")
+        ax.text(x0 + larg / 2, 0.15, sub, ha="center", va="center", fontsize=7.2, color=cores["cinza"])
 
     # ----- painéis -----
     L, Wp = 0.95, W - 0.95 - 0.5
-    alturas = [("temp", 1.85), ("umid", 1.65), ("chuva", 1.85), ("vento", 2.2), ("raios", 1.85), ("uv", 1.3)]
+    alturas = [("vento", 3.1), ("temp", 1.7), ("chuva", 1.7), ("umid", 1.5), ("raios", 1.7), ("uv", 1.2)]
     topo, folga = H - 3.55, 0.78
     eixos = {}
     y = topo
@@ -374,7 +398,7 @@ def grafico_png(d, emitido=None, dpi=220, formato="png"):
         a.tick_params(axis="y", length=0, labelsize=8.5, colors=cores["cinza"])
         a.tick_params(axis="x", length=0, labelsize=8.5, colors=cores["cinza"])
         a.set_xticks(x)
-        a.set_xticklabels(rot if nome_ == "uv" else [""] * n)
+        a.set_xticklabels(rot if nome_ in ("uv", "vento") else [""] * n)
         for i, h in enumerate(hs):                                    # faixa clara para a noite e marca de virada de dia
             if h.hour < 6 or h.hour >= 18:
                 a.axvspan(i - 0.5, i + 0.5, color="#eef2f8", zorder=0, lw=0)
@@ -441,7 +465,17 @@ def grafico_png(d, emitido=None, dpi=220, formato="png"):
         if lim < vmax:
             a.axhline(lim, color=c_, lw=1, ls=(0, (6, 4)), zorder=1, alpha=0.8)
             a.text(-0.55, lim, f"{lim} km/h", color=c_, fontsize=7.6, va="bottom", ha="left")
+    for i in range(n):                                              # fundo colorido nas horas com rajada de atenção/forte
+        if d["rajada"][i] >= boletins_bo.LIM_RAJADA[1]:
+            a.axvspan(i - 0.5, i + 0.5, color="#ffc9c9", alpha=0.55, zorder=0.5, lw=0)
+        elif d["rajada"][i] >= boletins_bo.LIM_RAJADA[0]:
+            a.axvspan(i - 0.5, i + 0.5, color="#ffec99", alpha=0.6, zorder=0.5, lw=0)
     rotular(a, x, d["rajada"], lambda v: f"{v:.0f}", "#b45f06", dy=7, passo=1)
+    rotular(a, x, d["vento"], lambda v: f"{v:.0f}", cores["vento"], dy=-14, passo=1)
+    for i in range(n):
+        if not math.isnan(d["direc"][i]):
+            a.text(i, 0.03, boletins_bo.pontos_cardeais(d["direc"][i]), transform=a.get_xaxis_transform(), ha="center", va="bottom",
+                   fontsize=7.4, color="#4b5563", fontweight="bold", zorder=6)
     for i in range(n):                                              # setas: para onde o vento sopra
         if math.isnan(d["direc"][i]):
             continue
@@ -449,9 +483,9 @@ def grafico_png(d, emitido=None, dpi=220, formato="png"):
         a.annotate("", xy=(i, 1.07), xycoords=a.get_xaxis_transform(), xytext=(-math.sin(ang) * 13, -math.cos(ang) * 13),
                    textcoords="offset points", arrowprops=dict(arrowstyle="-|>", color=cores["vento"], lw=1.5, mutation_scale=9, shrinkA=0, shrinkB=0),
                    annotation_clip=False)
-    a.text(0, 1.2, "Vento  (km/h)", transform=a.transAxes, fontsize=11.5, fontweight="bold", color=cores["tinta"], va="bottom")
-    a.text(1, 1.2, "linha verde = vento médio · tracejado laranja = rajada · setas = para onde sopra", transform=a.transAxes,
-           fontsize=8.4, color=cores["cinza"], va="bottom", ha="right")
+    a.text(0, 1.2, "Vento e rajada  (km/h)", transform=a.transAxes, fontsize=13, fontweight="bold", color=cores["tinta"], va="bottom")
+    a.text(1, 1.2, "verde: vento médio · laranja: rajada · seta: para onde sopra · letra: de onde vem · fundo amarelo/vermelho: rajada de atenção/forte", transform=a.transAxes,
+           fontsize=7.6, color=cores["cinza"], va="bottom", ha="right")
 
     # 5) raios + granizo
     a = eixos["raios"]
