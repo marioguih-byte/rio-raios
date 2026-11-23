@@ -106,5 +106,5 @@ passar e **10 minutos depois** nada disso foi feito, o alerta sai sozinho do qua
 volta a poder receber um novo alerta se chegarem raios novos.
 
 ## Boletim horário no WhatsApp
-"🤖 Preparar no WhatsApp" abre o grupo da unidade e digita o texto (você confere e dá **Enter**). "🖼 Copiar imagem" copia o PNG do boletim: depois é só colar (**Ctrl+V**) na conversa e enviar junto. Se o navegador não permitir copiar a imagem, o PNG é baixado para você anexar.
+"🤖 Preparar no WhatsApp" abre o grupo da unidade e digita o texto (você confere e dá **Enter**). O boletim horário é só texto (sem imagem); "📋 Copiar texto" copia para colar onde quiser.
 Os avisos do script aparecem no canto inferior direito por 7 s e fecham no ✕.

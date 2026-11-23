@@ -1403,7 +1403,7 @@ with st.sidebar:
     # Boletim horário: logo abaixo do nome do meteorologista
     st.toggle("⏰ Boletim horário (3 em 3 h)", key="hor_ativo",
               help="Gera sozinho, 5 min antes de cada horário (00h, 03h, 06h … 21h), o boletim das próximas 12 h para as unidades escolhidas, "
-                   "com gráficos e texto hora a hora, e avisa no canto direito da tela.")
+                   "em texto (janelas de 3 h, com foco em vento e rajada), e avisa no canto direito da tela.")
     if st.session_state.get("hor_ativo"):
         _opc_hor = sorted(boletins_bo.UNIDADES, key=_chave_alfabetica)
         st.session_state["hor_unidades"] = [n for n in st.session_state.get("hor_unidades", []) if n in _opc_hor]
@@ -2315,7 +2315,7 @@ _HTML_HOR_BOTOES = """<!doctype html><html><head><meta charset="utf-8"><style>
   html,body{margin:0;padding:0;background:transparent;font:13px 'Segoe UI',Arial,sans-serif}
   button{cursor:pointer;border-radius:8px;border:1px solid #3a4150;background:#232834;color:#f1f1f1;padding:7px 11px;font:inherit}
   button:hover{background:#2e3544} button.p{background:#25d366;border-color:#25d366;color:#06210f;font-weight:600} button.p:hover{background:#3be07b}
-</style></head><body><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="p" id="wa">🤖 Preparar no WhatsApp</button><button id="cp">📋 Copiar texto</button>__BT_IMG__</div>
+</style></head><body><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="p" id="wa">🤖 Preparar no WhatsApp</button><button id="cp">📋 Copiar texto</button></div>
 <script>
   var IT = __ITEM__;
   function copiar(t){ var x=document.createElement("textarea"); x.value=t; x.style.cssText="position:fixed;opacity:0"; document.body.appendChild(x); x.select();
@@ -2330,21 +2330,6 @@ _HTML_HOR_BOTOES = """<!doctype html><html><head><meta charset="utf-8"><style>
       setTimeout(function(){ b.textContent=rot; },4500); },1200);
   });
   document.getElementById("cp").addEventListener("click", function(){ var b=this; copiar(IT.texto); b.textContent="✔ Copiado"; setTimeout(function(){ b.textContent="📋 Copiar texto"; },2000); });
-  var bi=document.getElementById("bi");
-  if(bi) bi.addEventListener("click", async function(){
-    var b=this, rot="🖼 Copiar imagem";
-    try{
-      var bin=atob(IT.png), u=new Uint8Array(bin.length); for(var i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i);
-      var blob=new Blob([u],{type:"image/png"});
-      await navigator.clipboard.write([new ClipboardItem({"image/png":blob})]);
-      b.textContent="✔ Imagem copiada - cole no WhatsApp (Ctrl+V)";
-    }catch(e){
-      // sem permissão para copiar imagem: baixa o arquivo para anexar manualmente
-      try{ var a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([u],{type:"image/png"})); a.download="boletim-horario.png"; document.body.appendChild(a); a.click(); a.remove(); }catch(x){}
-      b.textContent="Não consegui copiar - PNG baixado";
-    }
-    setTimeout(function(){ b.textContent=rot; },4500);
-  });
 </script></body></html>"""
 
 
@@ -2352,18 +2337,15 @@ def _hor_estado():
     return st.session_state.setdefault("hor", {"slots": {}, "pre": None, "ver": None, "dispensado": "", "avisado": {}})
 
 
-def _hor_botoes_whatsapp(chave, nome, texto, png=None, altura=46):
-    """Botões: preparar o texto no WhatsApp, copiar o texto e copiar a imagem (PNG) para colar com Ctrl+V."""
+def _hor_botoes_whatsapp(chave, nome, texto, altura=46):
+    """Botões: preparar o texto no WhatsApp e copiar o texto."""
     item = {"id": f"hor{chave}{boletins_bo.slug(nome)}"[:80], "estacao": nome, "texto": texto}
-    if png:
-        item["png"] = base64.b64encode(png).decode("ascii")
-    html = _HTML_HOR_BOTOES.replace("__ITEM__", json.dumps(item, ensure_ascii=False).replace("</", "<\\/")).replace(
-        "__BT_IMG__", '<button id="bi" title="Copia a imagem para colar (Ctrl+V) na conversa">🖼 Copiar imagem</button>' if png else "")
+    html = _HTML_HOR_BOTOES.replace("__ITEM__", json.dumps(item, ensure_ascii=False).replace("</", "<\\/"))
     components.html(html, height=altura)
 
 
 def _hor_gerar_unidade(chave, nome, somente_cache):
-    """Calcula texto + gráfico de UMA unidade a partir dos dados já baixados (cache) e guarda no slot."""
+    """Calcula o texto de UMA unidade a partir dos dados já baixados (cache) e guarda no slot."""
     hor = _hor_estado()
     slot = hor["slots"][chave]
     lat, lon = unidades_boletim[nome]
@@ -2373,7 +2355,7 @@ def _hor_gerar_unidade(chave, nome, somente_cache):
         h_bm, h_mod = bh.baixar_unidade(lat, lon, somente_cache=somente_cache)
         d = bh.calcular(nome, h_bm, h_mod, slot["inicio"])
         agora = bh.agora_brasilia()
-        reg.update(status="pronto", texto=bh.texto_whatsapp(d, agora), png=bh.grafico_png(d, agora), svg=bh.grafico_png(d, agora, formato="svg"), emitido=agora, enviado=False)
+        reg.update(status="pronto", texto=bh.texto_whatsapp(d, agora), emitido=agora, enviado=False)
     except Exception as e:
         reg.update(status="erro", erro=str(e)[:200])
 
@@ -2482,9 +2464,9 @@ def _hor_lembrete(agora, envio, gerar_em, chave, nomes_sel):
                         _rerun_fragmento()
                 else:
                     st.markdown(f"{'✅' if reg.get('enviado') else '🟢'} **{curto}** — pronto ({reg['emitido']:%H:%M})")
-                    _hor_botoes_whatsapp(chave, n, reg["texto"], reg.get("png"))
+                    _hor_botoes_whatsapp(chave, n, reg["texto"])
                     _k1, _k2 = st.columns(2)
-                    if _k1.button("👁 Ver gráfico", key=f"hor_ver_{chave}_{boletins_bo.slug(n)}"):
+                    if _k1.button("👁 Ver texto", key=f"hor_ver_{chave}_{boletins_bo.slug(n)}"):
                         hor["ver"] = (chave, n)
                     nova = _k2.checkbox("Enviado", value=bool(reg.get("enviado")), key=f"hor_env_{chave}_{boletins_bo.slug(n)}")
                     if nova != bool(reg.get("enviado")):
@@ -2495,8 +2477,8 @@ def _hor_lembrete(agora, envio, gerar_em, chave, nomes_sel):
 def _hor_secao(nomes_sel):
     hor = _hor_estado()
     st.subheader("⏰ Boletim horário")
-    st.caption("Próximas 12 h, hora a hora. Vento: ICON · Chuva: maior valor entre ICON e ECMWF · Raios: previsão heurística · "
-               "Granizo: código de trovoada com granizo / instabilidade forte · Demais: best match.")
+    st.caption("Texto para o WhatsApp, em janelas de 3 h nas próximas 12 h, com foco em vento e rajada. Vento: ICON · Chuva: maior valor entre ICON e ECMWF · "
+               "Raios: previsão heurística · Granizo: código de trovoada com granizo / instabilidade forte · Demais: best match.")
     if not nomes_sel:
         st.info("Escolha uma ou mais unidades em **Boletim horário**, na barra lateral.")
         return
@@ -2521,20 +2503,7 @@ def _hor_secao(nomes_sel):
     esc = st.selectbox("Boletim", opcoes, index=idx, format_func=_rot, key="hor_sel")
     hor["ver"] = esc
     reg = hor["slots"][esc[0]]["unidades"][esc[1]]
-    with st.expander("🖼 Gráfico do boletim (clique para retrair/expandir)", expanded=True, key="hor_exp_img"):
-        try:
-            st.image(reg["svg"][reg["svg"].find(b"<svg"):].decode("utf-8") if reg.get("svg") else reg["png"], use_container_width=True)
-        except Exception:
-            st.image(reg["png"], use_container_width=True)   # SVG = vetorial: nítido em qualquer zoom
-    base_nome = f"boletim_horario_{boletins_bo.slug(esc[1])}_{hor['slots'][esc[0]]['inicio']:%Y%m%d_%H}h"
-    d1, d3, d2 = st.columns([1, 1, 2])
-    d1.download_button("⬇️ PNG", data=reg["png"], file_name=base_nome + ".png", mime="image/png",
-                       key=f"hor_dl_{esc[0]}_{boletins_bo.slug(esc[1])}", use_container_width=True, help="Imagem para enviar no WhatsApp (alta resolução)")
-    if reg.get("svg"):
-        d3.download_button("⬇️ SVG", data=reg["svg"], file_name=base_nome + ".svg", mime="image/svg+xml",
-                           key=f"hor_dlsvg_{esc[0]}_{boletins_bo.slug(esc[1])}", use_container_width=True, help="Vetorial: não perde qualidade com zoom")
-    with d2:
-        _hor_botoes_whatsapp(esc[0] + "v", esc[1], reg["texto"], reg.get("png"))
+    _hor_botoes_whatsapp(esc[0] + "v", esc[1], reg["texto"])
     st.code(reg["texto"], language=None)
 
 
