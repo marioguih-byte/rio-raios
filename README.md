@@ -344,7 +344,7 @@ se acumulam num painel fixo com rolagem até você fechar cada um (✕) ou usar 
 
 Na barra lateral, logo abaixo do nome do meteorologista: **⏰ Boletim horário (3 em 3 h)** + escolha de uma ou mais unidades.
 - Gera sozinho **5 min antes** de 00h, 03h, 06h … 21h (2 consultas ao Open-Meteo por unidade, só das unidades escolhidas, sem fila).
-- **Só texto, sem imagem**, no mesmo formato do boletim diário (emojis de cor, uma linha por variável), em 4 janelas de 3 h nas próximas 12 h. Vento e rajadas vêm primeiro e em negrito em cada janela; há aviso de "Atenção" para rajadas acima de 40 km/h e para granizo previsto.
+- **Só texto, sem imagem**, no formato do **boletim clássico** (dia a dia, mesmos emojis e linhas), enviado de 3 em 3 h. A ênfase em vento e rajada aparece de dois jeitos: um bloco no topo com as próximas 12 h (vento médio e máximo, rajada máxima e horas acima de 40 km/h) e, em cada dia, Vento e Rajadas primeiro e em negrito, com o pico e os períodos acima de 40 km/h. Os avisos de "Atenção" (rajada e granizo) são os mesmos do boletim clássico.
 - Lembrete fixo no **canto direito** com "Preparar no WhatsApp" (texto digitado no grupo da unidade; você confere e dá Enter), "Copiar texto" e "Enviado".
 - "⚡ Gerar agora" cria o boletim a partir da hora atual, a qualquer momento.
 - Os boletins diários agora incluem a linha **🧊 Granizo** quando há previsão (ou possibilidade) no dia.

@@ -65,7 +65,7 @@ def proximo_envio(agora=None):
 # ----------------------------------------------------------------------------
 def _params_base(lat, lon):
     return {"latitude": round(float(lat), 4), "longitude": round(float(lon), 4), "timezone": "America/Sao_Paulo",
-            "forecast_days": 3, "wind_speed_unit": "kmh"}
+            "forecast_days": boletins_bo.DIAS_PREVISAO, "wind_speed_unit": "kmh"}
 
 
 def url_best_match(lat, lon):
@@ -132,6 +132,40 @@ def _a(h, chave):
     return np.array([np.nan if x is None else x for x in v], dtype=float)
 
 
+def _serie_completa(h_bm, h_mod):
+    """Todas as horas baixadas (dias inteiros), com as mesmas regras de modelo do boletim horário."""
+    tb, tm = list(h_bm["time"]), list(h_mod["time"])
+    pos_m = {t: j for j, t in enumerate(tm)}
+    comum = [(i, pos_m[t]) for i, t in enumerate(tb) if t in pos_m]
+    ib, im = np.array([c[0] for c in comum]), np.array([c[1] for c in comum])
+    tempo = [tb[i] for i in ib]
+    n = len(tempo)
+
+    def bm(v):
+        a = _a(h_bm, v)
+        return np.full(n, np.nan) if a is None else a[ib]
+
+    def mod(v, m):
+        a = _a(h_mod, f"{v}_{m}")
+        return None if a is None else a[im]
+
+    cand = [x for x in (mod("precipitation", MODELO_ICON), mod("precipitation", MODELO_ECMWF)) if x is not None]
+    vento, rajada = mod("wind_speed_10m", MODELO_VENTO), mod("wind_gusts_10m", MODELO_VENTO)
+    if not cand or vento is None or rajada is None:
+        raise RuntimeError("Sem dados de chuva/vento (ICON/ECMWF)")
+    direc = mod("wind_direction_10m", MODELO_VENTO)
+    cape, li, cin = bm("cape"), bm("lifted_index"), bm("convective_inhibition")
+    raios = boletins_bo.prob_raios_horaria(cape, li, cin)
+    codigo = bm("weather_code")
+    gran_prev = np.isin(codigo, boletins_bo.CODIGOS_GRANIZO)
+    gran_poss = (np.nan_to_num(cape) >= 2000) & (np.nan_to_num(li, nan=0.0) <= -5) & (raios >= 50) & ~gran_prev
+    return {"tempo": tempo, "datas": [t[:10] for t in tempo], "horas": np.array([int(t[11:13]) for t in tempo]),
+            "temp": bm("temperature_2m"), "umid": bm("relative_humidity_2m"), "uv": bm("uv_index"),
+            "chuva": np.nan_to_num(np.nanmax(np.vstack(cand), axis=0)), "vento": vento,
+            "direc": np.full(n, np.nan) if direc is None else direc, "rajada": rajada, "raios": raios,
+            "gran_prev": gran_prev, "gran_poss": gran_poss}
+
+
 def calcular(nome, h_bm, h_mod, inicio, horas=HORAS_A_FRENTE):
     """Reúne as variáveis hora a hora de `inicio` até `inicio + horas` (13 pontos). `inicio`: datetime de Brasília."""
     chave_ini = inicio.strftime("%Y-%m-%dT%H:00")
@@ -172,6 +206,7 @@ def calcular(nome, h_bm, h_mod, inicio, horas=HORAS_A_FRENTE):
     gran_poss = (np.nan_to_num(cape) >= 2000) & (np.nan_to_num(li, nan=0.0) <= -5) & (raios >= 50) & ~gran_prev
     uv = np.nan_to_num(bm("uv_index"))
     return {
+        "completo": _serie_completa(h_bm, h_mod),
         "nome": nome, "inicio": horarios[0], "horarios": horarios,
         "temp": bm("temperature_2m"), "umid": bm("relative_humidity_2m"), "nuvens": bm("cloud_cover"), "uv": uv,
         "chuva": np.nan_to_num(chuva), "chuva_icon": ch_icon, "chuva_ecmwf": ch_ecmwf,
@@ -254,46 +289,87 @@ def _vento_medio_dir(vento, direc):
 
 
 def texto_whatsapp(d, emitido=None):
-    """Mesmo formato do boletim diário (emojis de cor, uma linha por variável), em janelas de 3 h e com foco em vento e rajada."""
+    """Boletim CLÁSSICO (mesmo formato do boletim diário, dia a dia), enviado de 3 em 3 h, com ênfase em vento e rajada:
+    bloco de destaque com as próximas 12 h e, em cada dia, vento e rajadas primeiro, em negrito."""
     emitido = emitido or agora_brasilia()
-    hs, nome = d["horarios"], d["nome"]
-    n = len(hs)
+    c, nome, hs = d["completo"], d["nome"], d["horarios"]
     lim_at, lim_fo = boletins_bo.LIM_RAJADA
-    linhas = [f"_*Boletim horário de previsão do tempo - {nome}*_",
-              f"🕒 Emitido às {emitido:%H:%M} (Brasília) · próximas {HORAS_A_FRENTE} h, de {_hm(hs[0])} a {_hm(hs[-1])}", ""]
-    for i in range(0, n - 1, PASSO_TEXTO):
-        j = slice(i, min(i + PASSO_TEXTO, n - 1))                 # janela de 3 h: horas i, i+1, i+2
-        h_ini = hs[i]
-        h_fim = h_ini + timedelta(hours=PASSO_TEXTO)
-        rj, ch, rai = d["rajada"][j], d["chuva"][j], d["raios"][j]
-        i_raj = int(np.nanargmax(rj))
-        v_med, txt_dir = _vento_medio_dir(d["vento"][j], d["direc"][j])
-        titulo = f"*{_hm(h_ini)} às {_hm(h_fim)}*" + (f" ({h_ini:%d/%m})" if (i == 0 or h_ini.hour < hs[i - PASSO_TEXTO].hour) else "")
-        linhas += [titulo,
-                   f"{boletins_bo.cor(v_med, boletins_bo.LIM_VENTO)} *Vento: {_f(v_med)} km/h {txt_dir}*",
-                   f"{_dot_raj(np.nanmax(rj))} *Rajadas: {_f(np.nanmax(rj))} km/h (às {_hm(hs[i + i_raj])})*",
-                   f"🌡️ Temperatura: {_f(np.nanmin(d['temp'][j]))} a {_f(np.nanmax(d['temp'][j]))}°C" if round(np.nanmin(d["temp"][j])) != round(np.nanmax(d["temp"][j])) else f"🌡️ Temperatura: {_f(np.nanmax(d['temp'][j]))}°C",
-                   f"{_dot_chuva(ch.sum())} Chuva: {_f(ch.sum(), 1)} mm",
-                   f"⚡ Probabilidade de raios: {_f(np.max(rai))}%"]
-        if d["gran_prev"][j].any():
-            linhas.append("🧊 Granizo: previsto")
-        elif d["gran_poss"][j].any():
-            linhas.append("🧊 Granizo: possível")
-        linhas.append(f"💧 Umidade: {_f(np.nanmean(d['umid'][j]))}%")
-        if np.max(d["uv"][j]) >= 1:
-            linhas.append(f"☀️ Índice UV: {_f(np.max(d['uv'][j]))}")
-        linhas.append("")
-    # avisos (mesmo texto do boletim diário), com os horários das janelas afetadas
-    fortes = d["rajada"] > boletins_bo.LIMITE_RAJADA_ALERTA
-    if fortes.any():
+    alerta_lim = boletins_bo.LIMITE_RAJADA_ALERTA
+    fmt, cor = boletins_bo.fmt, boletins_bo.cor
+    linhas = [f"_*Boletim de previsão do tempo - {nome}*_", f"🕒 Emitido às {emitido:%H:%M} (Brasília)", ""]
+
+    # --- destaque: vento e rajada nas próximas 12 h ---
+    rj, vt = d["rajada"], d["vento"]
+    i_raj, i_vt = int(np.nanargmax(rj)), int(np.nanargmax(vt))
+    v_med, txt_dir = _vento_medio_dir(vt, d["direc"])
+    linhas += [f"💨 *Vento e rajadas - próximas {HORAS_A_FRENTE} h ({_hm(hs[0])} às {_hm(hs[-1])})*",
+               f"{cor(v_med, boletins_bo.LIM_VENTO)} *Vento: média de {fmt(v_med)} km/h {txt_dir}, máximo de {fmt(np.nanmax(vt))} km/h às {_hm(hs[i_vt])}*",
+               f"{cor(np.round(np.nanmax(rj)), boletins_bo.LIM_RAJADA)} *Rajadas: até {fmt(np.nanmax(rj))} km/h às {_hm(hs[i_raj])}*"]
+    if (rj > alerta_lim).any():
+        linhas.append(f"⚠️ Rajadas acima de {alerta_lim} km/h: {_faixa_horas(hs, rj > alerta_lim)}")
+    else:
+        linhas.append(f"✅ Sem rajadas acima de {alerta_lim} km/h no período")
+    linhas.append("")
+
+    # --- dias, no formato do boletim clássico ---
+    hoje = emitido.strftime("%Y-%m-%d")
+    dias = [x for x in dict.fromkeys(c["datas"]) if x >= hoje][:boletins_bo.DIAS_PREVISAO]
+    alerta = None
+    for idx, dia in enumerate(dias):
+        m = np.array([x == dia for x in c["datas"]])
+        hh = c["horas"][m]
+        dd = datetime.strptime(dia, "%Y-%m-%d").strftime("%d/%m")
+        tmax, tmin = np.nanmax(c["temp"][m]), np.nanmin(c["temp"][m])
+
+        ch = np.nansum(c["chuva"][m])
+        per_chuva = ""
+        if ch >= 1:
+            por_per = {p: np.nansum(c["chuva"][m][[boletins_bo.periodo_de(x) == p for x in hh]]) for p, _, _ in boletins_bo.PERIODOS}
+            sel = [p for p, _, _ in boletins_bo.PERIODOS if por_per[p] >= 0.2 * ch]
+            per_chuva = f" ({boletins_bo.juntar(sel)})"
+
+        v_dia, dir_dia = _vento_medio_dir(c["vento"][m], c["direc"][m])
+        raj_dia = c["rajada"][m]
+        raj_max = np.nanmax(raj_dia)
+        i_pico = int(np.nanargmax(raj_dia))
+        per_raj = boletins_bo.FRASE_PERIODO[boletins_bo.periodo_de(int(hh[i_pico]))]
+        acima = boletins_bo.periodos_em(hh[raj_dia > alerta_lim])
+
+        rr = c["raios"][m]
+        r_max = np.max(rr)
+        sel_r = boletins_bo.periodos_em(hh[rr >= max(20.0, 0.75 * r_max)]) or boletins_bo.periodos_em([hh[int(np.argmax(rr))]])
+        uv_max = np.nanmax(c["uv"][m]) if not np.all(np.isnan(c["uv"][m])) else np.nan
+        um_med = np.nanmean(c["umid"][m])
+        g_prev, g_poss = c["gran_prev"][m], c["gran_poss"][m]
+        gran = []
+        if g_prev.any():
+            gran = [f"🧊 Granizo: previsto ({boletins_bo.juntar(boletins_bo.periodos_em(hh[g_prev]))})"]
+        elif g_poss.any():
+            gran = [f"🧊 Granizo: possível ({boletins_bo.juntar(boletins_bo.periodos_em(hh[g_poss]))})"]
+
+        linhas += [f"*Dia {dd}*",
+                   f"{cor(v_dia, boletins_bo.LIM_VENTO)} *Vento: {fmt(v_dia)} km/h {dir_dia}*",
+                   f"{cor(np.round(raj_max), boletins_bo.LIM_RAJADA)} *Rajadas: {fmt(raj_max)} km/h ({per_raj}, pico às {int(hh[i_pico]):02d}h)*"]
+        if acima:
+            linhas.append(f"      ↳ acima de {alerta_lim} km/h: {boletins_bo.juntar(acima)}")
+        linhas += [f"🌡️ Máxima: {fmt(tmax)}°C Mínima: {fmt(tmin)}°C",
+                   f"{cor(np.round(ch), boletins_bo.LIM_CHUVA)} Chuva: {fmt(ch)} mm/dia{per_chuva}",
+                   f"⚡ Probabilidade de raios: {r_max:.0f}% ({boletins_bo.juntar(sel_r, cap=True)})",
+                   *gran,
+                   f"{cor(np.round(um_med), boletins_bo.LIM_UMID, invertido=True)} Umidade: {fmt(um_med)}%",
+                   f"{cor(np.round(uv_max), boletins_bo.LIM_UV)} Índice UV: {fmt(uv_max)}", ""]
+        if idx == 0 and acima:
+            txt_p = f"no período da {acima[0]}" if len(acima) == 1 else "nos períodos de " + ", ".join(acima[:-1]) + f" e {acima[-1]}"
+            alerta = ("‐------‐---------------------------------\n"
+                      f"⚠️ *Atenção*⚠️: *Hoje ({dd})*, há previsão de rajadas acima de {alerta_lim} km/h {txt_p} para a sua unidade. "
+                      "Seguimos em monitoramento e, em caso de intensificação, avisaremos imediatamente.")
+    if dias and c["gran_prev"][np.array([x == dias[0] for x in c["datas"]])].any():
+        dd0 = datetime.strptime(dias[0], "%Y-%m-%d").strftime("%d/%m")
         linhas += ["‐------‐---------------------------------",
-                   f"⚠️ *Atenção*⚠️: nas próximas {HORAS_A_FRENTE} h há previsão de rajadas acima de {boletins_bo.LIMITE_RAJADA_ALERTA} km/h "
-                   f"({_faixa_horas(hs, fortes)}, máxima de {_f(np.nanmax(d['rajada']))} km/h) para a sua unidade. "
-                   "Seguimos em monitoramento e, em caso de intensificação, avisaremos imediatamente."]
-    if d["gran_prev"].any():
-        linhas += ["‐------‐---------------------------------",
-                   f"🧊 *Atenção*: há previsão de granizo associado a tempestades ({_faixa_horas(hs, d['gran_prev'])}) para a sua unidade. "
-                   "Seguimos em monitoramento e, em caso de intensificação, avisaremos imediatamente."]
+                   f"🧊 *Atenção*: *Hoje ({dd0})*, há previsão de granizo associado a tempestades para a sua unidade. "
+                   "Seguimos em monitoramento e, em caso de intensificação, avisaremos imediatamente.", ""]
+    if alerta:
+        linhas.append(alerta)
     return "\n".join(linhas).rstrip() + "\n"
 
 

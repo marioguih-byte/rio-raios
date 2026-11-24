@@ -1403,7 +1403,7 @@ with st.sidebar:
     # Boletim horário: logo abaixo do nome do meteorologista
     st.toggle("⏰ Boletim horário (3 em 3 h)", key="hor_ativo",
               help="Gera sozinho, 5 min antes de cada horário (00h, 03h, 06h … 21h), o boletim das próximas 12 h para as unidades escolhidas, "
-                   "em texto (janelas de 3 h, com foco em vento e rajada), e avisa no canto direito da tela.")
+                   "no formato do boletim clássico, com ênfase em vento e rajada, e avisa no canto direito da tela.")
     if st.session_state.get("hor_ativo"):
         _opc_hor = sorted(boletins_bo.UNIDADES, key=_chave_alfabetica)
         st.session_state["hor_unidades"] = [n for n in st.session_state.get("hor_unidades", []) if n in _opc_hor]
@@ -2477,7 +2477,7 @@ def _hor_lembrete(agora, envio, gerar_em, chave, nomes_sel):
 def _hor_secao(nomes_sel):
     hor = _hor_estado()
     st.subheader("⏰ Boletim horário")
-    st.caption("Texto para o WhatsApp, em janelas de 3 h nas próximas 12 h, com foco em vento e rajada. Vento: ICON · Chuva: maior valor entre ICON e ECMWF · "
+    st.caption("Boletim clássico (dia a dia) enviado de 3 em 3 h, com destaque para vento e rajada nas próximas 12 h. Vento: ICON · Chuva: maior valor entre ICON e ECMWF · "
                "Raios: previsão heurística · Granizo: código de trovoada com granizo / instabilidade forte · Demais: best match.")
     if not nomes_sel:
         st.info("Escolha uma ou mais unidades em **Boletim horário**, na barra lateral.")
