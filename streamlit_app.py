@@ -32,6 +32,7 @@ try:   # chave paga do Open-Meteo (opcional): Settings > Secrets:  OPEN_METEO_AP
 except Exception:
     pass
 import boletins_bo  # script de boletins (WhatsApp), incorporado sem alterações
+import relatorios_mensais as rm  # relatórios mensais em PDF (upload → identificação → PDFs)
 import boletim_horario as bh  # boletim horário (próximas 12 h, de 3 em 3 h)
 
 def _carregar_icone_pagina():
@@ -2541,5 +2542,107 @@ st.divider()
 st.fragment(run_every=20)(_horario_fragmento)()
 st.divider()
 st.fragment(run_every=2 if _boletins_rodando else None)(_boletins_fragmento)(unidades_boletim)
+
+# ======================================================================
+# RELATÓRIOS MENSAIS (PDF)
+# ======================================================================
+def _rel_secao():
+    with st.expander("📄 Relatórios mensais (PDF)", expanded=False):
+        st.caption("Envie os arquivos do mês (o .zip com as pastas das unidades, ou os arquivos soltos: CSVs de boletins, "
+                   "dados de 3 h e alertas, e as telas de previsão e de raios). O RIO reconhece cada arquivo e gera um PDF por unidade, "
+                   "no mesmo layout dos relatórios anteriores.")
+        envios = st.file_uploader("Arquivos do mês", accept_multiple_files=True, type=["zip", "csv", "png", "jpg", "jpeg", "webp"], key="rel_upload")
+        if not envios:
+            return
+        assinatura = tuple((e.name, e.size) for e in envios)
+        if st.session_state.get("rel_assinatura") != assinatura:
+            with st.spinner("Identificando os arquivos..."):
+                st.session_state["rel_res"] = rm.identificar([(e.name, e.getvalue()) for e in envios])
+            st.session_state["rel_assinatura"] = assinatura
+            st.session_state.pop("rel_saida", None)
+        res = st.session_state["rel_res"]
+        un = res["unidades"]
+        if not un:
+            st.warning("Não reconheci nenhuma unidade nesses arquivos.")
+            return
+
+        # arquivos que não souberam de qual unidade são
+        if res["sem_unidade"]:
+            st.warning(f"{len(res['sem_unidade'])} arquivo(s) sem unidade reconhecida. Indique a qual unidade pertencem:")
+            for i, item in enumerate(list(res["sem_unidade"])):
+                c1, c2, c3 = st.columns([3, 3, 1])
+                c1.write(f"{'🖼️' if item['tipo'] == 'imagem' else '📄'} {item['nome']}")
+                escolha = c2.selectbox("Unidade", ["—"] + rm.UNIDADES, key=f"rel_sem_{i}_{item['nome']}", label_visibility="collapsed")
+                if c3.button("Atribuir", key=f"rel_atr_{i}_{item['nome']}") and escolha != "—":
+                    rm.atribuir_sem_unidade(res, i, escolha)
+                    st.session_state.pop("rel_saida", None)
+                    st.rerun()
+
+        linhas = []
+        for u in rm.UNIDADES:
+            d = un.get(u)
+            if not d:
+                linhas.append({"Unidade": u, "Situação": "❌ sem arquivos", "Boletins": "—", "Dados 3 h": "—", "Alertas": "—", "Previsão": "—", "Raios": "—"})
+                continue
+            ok, falta = rm.situacao(d)
+            linhas.append({"Unidade": u, "Situação": "✅ pronta" if ok else "⚠️ falta " + ", ".join(falta),
+                           "Boletins": "✔" if d["boletins"] else "—", "Dados 3 h": "✔" if d["dados"] else "—",
+                           "Alertas": "✔" if d["alertas"] else ("vazio" if d["alertas_vazio"] else "nenhum"),
+                           "Previsão": "✔" if d["img_prev"] else "—", "Raios": "✔" if d["img_raio"] else "—"})
+        tabela = pd.DataFrame(linhas)
+        prontas = [u for u in rm.UNIDADES if u in un and rm.situacao(un[u])[0]]
+        st.write(f"**{len(prontas)} de {len(rm.UNIDADES)}** unidades prontas · logo {'encontrada nos arquivos' if res['logo'] else 'padrão do RIO'}")
+        st.dataframe(tabela, hide_index=True, width="stretch", height=min(520, 36 + 35 * len(tabela)))
+        avisos = [f"{u}: {a}" for u, d in un.items() for a in d["avisos"]]
+        if avisos:
+            with st.expander(f"Observações ({len(avisos)})"):
+                for a in avisos:
+                    st.write("• " + a)
+        if res["ignorados"]:
+            with st.expander(f"Arquivos ignorados ({len(res['ignorados'])})"):
+                st.write("\n".join(f"- {n}" for n in res["ignorados"][:200]))
+
+        # dados da capa
+        ini, fim = res["periodo"] or (None, None)
+        c1, c2 = st.columns(2)
+        contratante = c1.text_input("Contratante", "Petrobrás", key="rel_contratante")
+        local = c2.text_input("Local (capa)", "Macaé, RJ, Brasil", key="rel_local")
+        c3, c4 = st.columns(2)
+        periodo = c3.text_input("Período", rm.formatar_periodo(ini, fim) if ini else "", key=f"rel_periodo_{ini}_{fim}")
+        data_cap = c4.text_input("Data da capa", rm.data_capa(fim) if fim else "", key=f"rel_datacapa_{ini}_{fim}")
+        logo_up = st.file_uploader("Logo (opcional — se não enviar, uso a que veio nos arquivos ou a padrão)", type=["png", "jpg", "jpeg"], key="rel_logo")
+        escolhidas = st.multiselect("Unidades a gerar", [u for u in rm.UNIDADES if u in un], default=prontas, key=f"rel_sel_{len(prontas)}")
+
+        if st.button("Gerar relatórios", type="primary", disabled=not (escolhidas and periodo and data_cap), key="rel_gerar"):
+            logo = logo_up.getvalue() if logo_up else res["logo"]
+            barra = st.progress(0.0, text="Gerando...")
+            pdfs, erros = {}, []
+            for i, u in enumerate(escolhidas):
+                barra.progress(i / len(escolhidas), text=f"Gerando {u} ({i + 1}/{len(escolhidas)})")
+                try:
+                    pdfs[rm.nome_arquivo_pdf(u)] = rm.gerar_da_identificacao(u, un[u], logo, contratante, periodo, local, data_cap)
+                except Exception as e:  # noqa: BLE001
+                    erros.append(f"{u}: {e}")
+            barra.progress(1.0, text="Pronto")
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+                for nome, b in pdfs.items():
+                    z.writestr(nome, b)
+            st.session_state["rel_saida"] = {"pdfs": pdfs, "zip": buf.getvalue(), "erros": erros, "periodo": periodo}
+
+        saida = st.session_state.get("rel_saida")
+        if saida:
+            for e in saida["erros"]:
+                st.error(e)
+            if saida["pdfs"]:
+                st.success(f"{len(saida['pdfs'])} relatório(s) gerado(s).")
+                st.download_button("⬇️ Baixar todos (.zip)", saida["zip"], file_name="RELATORIOS_MENSAIS.zip", mime="application/zip", key="rel_dl_zip")
+                with st.expander("Baixar individualmente"):
+                    for nome, b in saida["pdfs"].items():
+                        st.download_button(f"📄 {nome}", b, file_name=nome, mime="application/pdf", key=f"rel_dl_{nome}")
+
+
+st.divider()
+_rel_secao()
 
 _salvar_estado()

@@ -49,6 +49,13 @@ mapa não carrega.
   **O arquivo `boletins_bo.py` precisa subir pro GitHub junto com o
   `streamlit_app.py`.**
 
+## Relatórios mensais (PDF)
+No fim da página há a seção **📄 Relatórios mensais (PDF)**. Envie o .zip do mês (pastas por unidade) ou os arquivos soltos; o RIO reconhece sozinho:
+- **CSVs** (boletins, dados de 3 h, alertas) pelo cabeçalho e pelo nome (`relatorio_mensal_..._AAAA-MM-DD_AAAA-MM-DD`), e a **unidade** pela pasta/nome;
+- **telas de previsão e de raios** pela cor (a tela de raios é escura; também vale o nome `*_raio`), e a **logo** pelo nome `logo`;
+- o **período** e a data da capa saem das datas dos arquivos (editáveis). Arquivos sem unidade reconhecida podem ser atribuídos à mão.
+Depois é só "Gerar relatórios": baixa-se um .zip com um PDF por unidade (ou cada PDF separado), no layout do script `Geração Relatórios Mensais (novo layout)`. Código em `relatorios_mensais.py`; precisa de `reportlab` (já no requirements) e usa Liberation Serif (incluída em `assets/fonts`) quando não há Times New Roman.
+
 ## Alertas e riscos dentro do mapa
 
 - Botão 🚨 no canto superior esquerdo do mapa (abaixo da tela cheia), com contador de unidades em
