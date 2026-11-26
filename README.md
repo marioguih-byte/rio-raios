@@ -56,6 +56,9 @@ No fim da página há a seção **📄 Relatórios mensais (PDF)**. Envie o .zip
 - o **período** e a data da capa saem das datas dos arquivos (editáveis). Arquivos sem unidade reconhecida podem ser atribuídos à mão.
 Depois é só "Gerar relatórios": baixa-se um .zip com um PDF por unidade (ou cada PDF separado), no layout do script `Geração Relatórios Mensais (novo layout)`. Código em `relatorios_mensais.py`; precisa de `reportlab` (já no requirements) e usa Liberation Serif (incluída em `assets/fonts`) quando não há Times New Roman.
 
+## Senha de acesso
+A tela inicial pede o nome do meteorologista **e a senha**. A senha fica guardada apenas como hash (`_SENHA_SHA256` em `streamlit_app.py`); para trocá-la, gere o SHA-256 da nova senha e substitua o valor.
+
 ## Alertas e riscos dentro do mapa
 
 - Botão 🚨 no canto superior esquerdo do mapa (abaixo da tela cheia), com contador de unidades em

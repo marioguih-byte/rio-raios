@@ -4,6 +4,8 @@
 # ======================================================================
 import base64
 import copy
+import hashlib
+import hmac
 import io
 import json
 import math
@@ -1329,7 +1331,7 @@ div[data-testid="stVerticalBlockBorderWrapper"] { border-radius: 12px !important
 #  - o estado dos alertas fica guardado no servidor, identificado por um código na URL (?sid=...),
 #    e é restaurado quando a mesma URL reabre.
 # ----------------------------------------------------------------------------------------------
-_CHAVES_PERSISTENTES = ("meteorologista_nome", "alertas_raio_ativos", "alertas_unidade", "verde_estado", "som_token", "altura_mapa_pct", "espessura_aneis", "modo_aviso_alerta", "avisos_canto", "hor_ativo", "hor_unidades")
+_CHAVES_PERSISTENTES = ("meteorologista_nome", "rio_autenticado", "alertas_raio_ativos", "alertas_unidade", "verde_estado", "som_token", "altura_mapa_pct", "espessura_aneis", "modo_aviso_alerta", "avisos_canto", "hor_ativo", "hor_unidades")
 
 @st.cache_resource
 def _armazem_sessoes():
@@ -1362,9 +1364,13 @@ if "alertas_raio_ativos" not in st.session_state: st.session_state.alertas_raio_
 if "alertas_unidade" not in st.session_state: st.session_state.alertas_unidade = {}
 if "verde_estado" not in st.session_state: st.session_state.verde_estado = {}
 
+_SENHA_SHA256 = "bb487cbc9f95cb2894adaf8d1a39771c601077eb7299814b21f7b70778da8194"  # SHA-256 da senha de acesso (a senha em si não fica no código)
+
 # Na primeira abertura, identifica imediatamente o meteorologista responsável.
 # O restante da interface só é exibido depois da confirmação do nome.
-if "meteorologista_nome" not in st.session_state or not str(st.session_state.get("meteorologista_nome", "")).strip():
+if (not st.session_state.get("rio_autenticado")
+        or "meteorologista_nome" not in st.session_state
+        or not str(st.session_state.get("meteorologista_nome", "")).strip()):
     @st.dialog("👤 Identificação do Meteorologista")
     def _dialog_meteorologista_inicial():
         st.markdown("### Bem-vindo ao RIO")
@@ -1375,14 +1381,19 @@ if "meteorologista_nome" not in st.session_state or not str(st.session_state.get
             placeholder="Digite seu nome",
             label_visibility="visible",
         )
+        senha = st.text_input("Senha", type="password", key="rio_senha_input", placeholder="Digite a senha")
         if st.button("Entrar no monitoramento", type="primary", use_container_width=True):
             nome = str(nome).strip()
-            if nome:
+            if not nome:
+                st.warning("Digite o nome do meteorologista para continuar.")
+            elif not hmac.compare_digest(hashlib.sha256(senha.encode("utf-8")).hexdigest(), _SENHA_SHA256):
+                st.error("Senha incorreta.")
+            else:
                 st.session_state.meteorologista_nome = nome
+                st.session_state.rio_autenticado = True
+                st.session_state.pop("rio_senha_input", None)
                 _salvar_estado()
                 st.rerun()
-            else:
-                st.warning("Digite o nome do meteorologista para continuar.")
 
     _dialog_meteorologista_inicial()
     st.stop()
