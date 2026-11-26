@@ -81,7 +81,7 @@ UNIDADES = [
     "Refinaria Presidente Bernardes - RPBC", "Refinaria Presidente Getúlio Vargas - REPAR",
     "Unidade de Tratamento de Gás de Cabiúnas - UTGCAB", "Unidade de Tratamento de Gás de Cacimbas - UTGC",
     "Unidade de Tratamento de Gás de Caraguatatuba - UTGCA", "Boaventura, Itaboraí - RJ",
-    "Unidade de Tratamento de Gás Sul Capixaba - UTGSUL", "UTE Canoas - UTE CAN", "UTE Cubatão - UTE CBT",
+    "Unidade de Tratamento de Gás Sul Capixaba - UTGSUL", "UFN-III - Unidade de Fertilizantes Nitrogenados III", "UTE Canoas - UTE CAN", "UTE Cubatão - UTE CBT",
     "UTE Ibirité - UTE IBT", "UTE Juiz de Fora - UTE JF", "UTE Nova Piratininga - UTE NPI",
     "UTE Seropédica/Baixada Fluminense - UTE SRP/BF", "UTE Termobahia - UTE TBA", "UTE Termocamaçari - UTE TCA",
     "UTE Termoceará - UTE TCE", "UTE Termomacaé - UTE TMA", "UTE Termorio - UTE TRI", "UTE Três Lagoas - UTE TLG",
@@ -89,6 +89,9 @@ UNIDADES = [
 ]
 # Outros nomes pelos quais uma unidade aparece nas pastas e nos arquivos (comparados sem acento/pontuação).
 ALIAS_UNIDADES = {"Boaventura, Itaboraí - RJ": ["utgitb", "unidade de tratamento de gas de itaborai", "boaventura"]}
+
+# Arquivos que não são de nenhuma unidade (mapa geral, testes): ignorados em silêncio.
+IGNORAR_NOMES = ("americadosul", "testtaker")
 
 MESES = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
 MARGEM_ESQ, MARGEM_DIR, MARGEM_TOPO, MARGEM_BASE = 25, 25, 26, 22
@@ -210,7 +213,7 @@ def _corrigir_nome_zip(info):
     return n.replace("\\", "/")
 
 
-def identificar(entradas):
+def identificar(entradas, imagem_unica="auto"):
     """Reconhece cada arquivo e agrupa por unidade.
 
     Retorna dict com: 'unidades' {nome: {boletins, dados, alertas, img_prev, img_raio, avisos}},
@@ -226,6 +229,9 @@ def identificar(entradas):
         nome = os.path.basename(caminho)
         pasta = [p for p in caminho.split("/")[:-1] if p]
         ext = os.path.splitext(nome)[1].lower()
+        if any(k in _norm(nome) for k in IGNORAR_NOMES):
+            ignorados.append(caminho)
+            continue
 
         if ext in _EXT_IMG:
             if "logo" in _norm(nome):
@@ -282,14 +288,17 @@ def identificar(entradas):
 
     # imagens de cada unidade: a mais escura é a tela de raios, a mais clara é a de previsão
     for u, d in un.items():
-        d["img_prev"], d["img_raio"] = _separar_imagens(d["imagens"], d["avisos"])
+        d["img_prev"], d["img_raio"] = _separar_imagens(d["imagens"], d["avisos"], imagem_unica)
     periodo = (min(datas), max(datas)) if datas else None
-    return {"unidades": un, "logo": logo, "periodo": periodo, "sem_unidade": sem_unidade, "ignorados": ignorados}
+    return {"imagem_unica": imagem_unica, "unidades": un, "logo": logo, "periodo": periodo, "sem_unidade": sem_unidade, "ignorados": ignorados}
 
 
-def _separar_imagens(imgs, avisos):
+def _separar_imagens(imgs, avisos, imagem_unica="auto"):
+    """imagem_unica: quando há só uma imagem sem dica no nome — 'auto' (pelo brilho), 'raio' ou 'prev'."""
     if not imgs:
         return None, None
+    if len(imgs) == 1 and imgs[0]["dica"] is None and imagem_unica in ("raio", "prev"):
+        return (None, imgs[0]) if imagem_unica == "raio" else (imgs[0], None)
     raio = next((i for i in imgs if i["dica"] == "raio"), None)
     prev = next((i for i in imgs if i["dica"] == "prev"), None)
     resto = [i for i in imgs if i is not raio and i is not prev]
@@ -316,21 +325,16 @@ def atribuir_sem_unidade(res, indice, unidade):
     if item["tipo"] == "imagem":
         d["imagens"].append({k: item[k] for k in ("nome", "bytes", "brilho", "dica")})
         d["avisos"] = [a for a in d["avisos"] if "imagens na pasta" not in a]
-        d["img_prev"], d["img_raio"] = _separar_imagens(d["imagens"], d["avisos"])
+        d["img_prev"], d["img_raio"] = _separar_imagens(d["imagens"], d["avisos"], res.get("imagem_unica", "auto"))
     else:
         d[item["csv_tipo"]] = {"nome": item["nome"], "bytes": item["bytes"]}
 
 
 def situacao(d):
-    """(completo?, [o que falta])"""
-    falta = []
-    if not d.get("boletins"):
-        falta.append("boletins")
-    if not d.get("dados"):
-        falta.append("dados 3 h")
-    if not d.get("img_prev"):
-        falta.append("tela de previsão")
-    return (not falta), falta
+    """(pode gerar?, [o que falta de obrigatório], [o que falta de opcional])"""
+    falta = [n for n, k in (("boletins", "boletins"), ("dados 3 h", "dados")) if not d.get(k)]
+    opcional = [n for n, k in (("tela de previsão", "img_prev"), ("tela de raios", "img_raio")) if not d.get(k)]
+    return (not falta), falta, opcional
 
 
 # ---------------------------------------------------------------- período e datas em português
@@ -549,9 +553,12 @@ def gerar_pdf(config):
           Paragraph("1. Página principal de acesso para as informações e produtos disponibilizados:", st["secao"]),
           Paragraph(f"<u>{URL}</u>", st["corpo"]), Spacer(1, 4 * mm)]
 
-    for img, legenda in [(config.get("img1"), "Figura 1 – Tela do Sistema de Previsão"),
-                         (config.get("img2"), "Figura 2 – Tela do Sistema de Monitoramento de Raios")]:
+    n_fig = 0
+    for img, legenda in [(config.get("img1"), "Tela do Sistema de Previsão"),
+                         (config.get("img2"), "Tela do Sistema de Monitoramento de Raios")]:
         if img:
+            n_fig += 1
+            legenda = f"Figura {n_fig} – {legenda}"
             try:
                 f += [_imagem(img, 0.76 * LARGURA_UTIL * mm), Paragraph(legenda, st["legenda"]), Spacer(1, 1 * mm)]
             except Exception:

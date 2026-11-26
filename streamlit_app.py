@@ -2565,10 +2565,13 @@ def _rel_secao():
         envios = st.file_uploader("Arquivos do mês", accept_multiple_files=True, type=["zip", "csv", "png", "jpg", "jpeg", "webp"], key="rel_upload")
         if not envios:
             return
-        assinatura = tuple((e.name, e.size) for e in envios)
+        modo_txt = st.radio("Quando a unidade tem só uma imagem (sem 'raio' ou 'previsão' no nome), ela é:",
+                            ["Detectar sozinho", "Tela de raios", "Tela de previsão"], horizontal=True, key="rel_modo_img")
+        modo = {"Detectar sozinho": "auto", "Tela de raios": "raio", "Tela de previsão": "prev"}[modo_txt]
+        assinatura = (tuple((e.name, e.size) for e in envios), modo)
         if st.session_state.get("rel_assinatura") != assinatura:
             with st.spinner("Identificando os arquivos..."):
-                st.session_state["rel_res"] = rm.identificar([(e.name, e.getvalue()) for e in envios])
+                st.session_state["rel_res"] = rm.identificar([(e.name, e.getvalue()) for e in envios], modo)
             st.session_state["rel_assinatura"] = assinatura
             st.session_state.pop("rel_saida", None)
         res = st.session_state["rel_res"]
@@ -2595,8 +2598,9 @@ def _rel_secao():
             if not d:
                 linhas.append({"Unidade": u, "Situação": "❌ sem arquivos", "Boletins": "—", "Dados 3 h": "—", "Alertas": "—", "Previsão": "—", "Raios": "—"})
                 continue
-            ok, falta = rm.situacao(d)
-            linhas.append({"Unidade": u, "Situação": "✅ pronta" if ok else "⚠️ falta " + ", ".join(falta),
+            ok, falta, opc = rm.situacao(d)
+            situ = ("❌ falta " + ", ".join(falta)) if not ok else ("✅ pronta" if not opc else "✅ pronta (sem " + ", ".join(opc) + ")")
+            linhas.append({"Unidade": u, "Situação": situ,
                            "Boletins": "✔" if d["boletins"] else "—", "Dados 3 h": "✔" if d["dados"] else "—",
                            "Alertas": "✔" if d["alertas"] else ("vazio" if d["alertas_vazio"] else "nenhum"),
                            "Previsão": "✔" if d["img_prev"] else "—", "Raios": "✔" if d["img_raio"] else "—"})
