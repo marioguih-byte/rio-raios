@@ -2635,14 +2635,14 @@ def _rel_secao():
         logo_up = st.file_uploader("Logo (opcional — se não enviar, uso a que veio nos arquivos ou a padrão)", type=["png", "jpg", "jpeg"], key="rel_logo")
         escolhidas = st.multiselect("Unidades a gerar", [u for u in rm.UNIDADES if u in un], default=prontas, key=f"rel_sel_{len(prontas)}")
 
-        if st.button("Gerar relatórios", type="primary", disabled=not (escolhidas and periodo and data_cap), key="rel_gerar"):
+        def _gerar(chave, troca, rotulo):
             logo = logo_up.getvalue() if logo_up else res["logo"]
             barra = st.progress(0.0, text="Gerando...")
             pdfs, erros = {}, []
             for i, u in enumerate(escolhidas):
                 barra.progress(i / len(escolhidas), text=f"Gerando {u} ({i + 1}/{len(escolhidas)})")
                 try:
-                    pdfs[rm.nome_arquivo_pdf(u)] = rm.gerar_da_identificacao(u, un[u], logo, contratante, periodo, local, data_cap)
+                    pdfs[rm.nome_arquivo_pdf(u)] = rm.gerar_da_identificacao(u, un[u], logo, contratante, periodo, local, data_cap, troca)
                 except Exception as e:  # noqa: BLE001
                     erros.append(f"{u}: {e}")
             barra.progress(1.0, text="Pronto")
@@ -2650,19 +2650,29 @@ def _rel_secao():
             with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
                 for nome, b in pdfs.items():
                     z.writestr(nome, b)
-            st.session_state["rel_saida"] = {"pdfs": pdfs, "zip": buf.getvalue(), "erros": erros, "periodo": periodo}
+            st.session_state[chave] = {"pdfs": pdfs, "zip": buf.getvalue(), "erros": erros, "rotulo": rotulo}
 
-        saida = st.session_state.get("rel_saida")
-        if saida:
+        pode = bool(escolhidas and periodo and data_cap)
+        cb1, cb2 = st.columns(2)
+        if cb1.button("Gerar relatórios", type="primary", disabled=not pode, key="rel_gerar"):
+            _gerar("rel_saida", None, "padrão")
+        if cb2.button("Gerar versão alternativa (Samuel/Larissa)", disabled=not pode, key="rel_gerar_alt",
+                      help="Nos boletins e alertas: fins de semana das 6h às 18h aparece só Mayara; nos demais horários, Vittor vira Samuel e João vira Larissa. A tabela da equipe não muda."):
+            _gerar("rel_saida_alt", rm.TROCA_ALTERNATIVA, "versão alternativa")
+
+        for chave, sufixo in (("rel_saida", ""), ("rel_saida_alt", "_ALTERNATIVA")):
+            saida = st.session_state.get(chave)
+            if not saida:
+                continue
             for e in saida["erros"]:
                 st.error(e)
             if saida["pdfs"]:
-                st.success(f"{len(saida['pdfs'])} relatório(s) gerado(s).")
-                st.download_button("⬇️ Baixar todos (.zip)", saida["zip"], file_name="RELATORIOS_MENSAIS.zip", mime="application/zip", key="rel_dl_zip")
-                with st.expander("Baixar individualmente"):
+                st.success(f"{len(saida['pdfs'])} relatório(s) gerado(s) — {saida['rotulo']}.")
+                st.download_button(f"⬇️ Baixar todos (.zip) — {saida['rotulo']}", saida["zip"], file_name=f"RELATORIOS_MENSAIS{sufixo}.zip",
+                                   mime="application/zip", key=f"rel_dl_zip{sufixo}")
+                with st.expander(f"Baixar individualmente — {saida['rotulo']}"):
                     for nome, b in saida["pdfs"].items():
-                        st.download_button(f"📄 {nome}", b, file_name=nome, mime="application/pdf", key=f"rel_dl_{nome}")
-
+                        st.download_button(f"📄 {nome}", b, file_name=nome, mime="application/pdf", key=f"rel_dl{sufixo}_{nome}")
 
 st.divider()
 _rel_secao()

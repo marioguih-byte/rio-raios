@@ -68,6 +68,46 @@ EQUIPE = [
     ["Vittor Courbassier", "Estagiário de Meteorologia", "+55 12 98876-0623"],
     ["Joao Miotto", "Estagiário de Meteorologia", "+55 48 99950-6505"],
 ]
+# Versão alternativa: nos boletins e nos alertas, o nome dos estagiários é trocado.
+#  - fins de semana (sábado e domingo) das 06:00 às 18:00 = turno da Mayara: aparece só "Mayara Lins";
+#  - nos demais horários: Vittor -> Samuel Amorim, João -> Larissa Portella.
+# A tabela da equipe continua igual.
+TROCA_ALTERNATIVA = {"vittorcourbassier": "Samuel Amorim", "vitorcourbassier": "Samuel Amorim", "joaomiotto": "Larissa Portella"}
+TURNO_MAYARA = ("Mayara Lins", 6, 18)       # nome, hora inicial, hora final (inclusive, até 18:00)
+
+
+def _turno_mayara(texto):
+    """True se a data/hora ('dd/mm/aaaa, HH:MM') cai num sábado ou domingo entre 06:00 e 18:00."""
+    m = re.match(r"\s*(\d{2})/(\d{2})/(\d{4})[ ,T]+(\d{1,2}):(\d{2})", str(texto))
+    if not m:
+        return False
+    try:
+        dt = datetime(int(m.group(3)), int(m.group(2)), int(m.group(1)), int(m.group(4)), int(m.group(5)))
+    except ValueError:
+        return False
+    minutos = dt.hour * 60 + dt.minute
+    return dt.weekday() >= 5 and TURNO_MAYARA[1] * 60 <= minutos <= TURNO_MAYARA[2] * 60
+
+
+def trocar_meteorologistas(linhas, troca, col_data=None):
+    """Cópia das linhas com a coluna 'Meteorologista' trocada (nomes comparados sem acento/caixa).
+    Quando col_data é informada, nos horários do turno da Mayara os estagiários viram só o nome dela."""
+    if not troca:
+        return linhas
+    col = _coluna(linhas, "meteorologista")
+    if not col:
+        return linhas
+    col_d = _coluna(linhas, col_data) if col_data else None
+    saida = []
+    for l in linhas:
+        atual = l.get(col, "")
+        novo = troca.get(_norm(atual), atual)
+        if col_d and _norm(atual) in troca and _turno_mayara(l.get(col_d, "")):
+            novo = TURNO_MAYARA[0]
+        saida.append({**l, col: novo})
+    return saida
+
+
 ENDERECO = "Condomínio do Edifício Heitor Diniz. Av. Rui Barbosa, 1043 - Sala 602 – Centro - Macaé – RJ"
 EMPRESA = "Blue Ocean – Meio Ambiente e Infraestrutura"
 URL = "https://previsoesbrblueocean.com.br/"
@@ -605,7 +645,9 @@ def gerar_pdf(config):
     """config: contratante, unidade, periodo, local, data, logo (bytes), img1/img2 (bytes|None),
     boletins/dados/alertas (listas de dicts). Devolve os bytes do PDF."""
     st = estilos()
-    boletins, dados, alertas = config.get("boletins") or [], config.get("dados") or [], config.get("alertas") or []
+    troca = config.get("troca_meteorologistas")
+    boletins, dados = trocar_meteorologistas(config.get("boletins") or [], troca, "Emitido em"), config.get("dados") or []
+    alertas = trocar_meteorologistas(config.get("alertas") or [], troca, "Data/Hora")
     logo = io.BytesIO(config["logo"]) if config.get("logo") else LOGO_PADRAO
     saida = io.BytesIO()
     doc = BaseDocTemplate(saida, pagesize=A4, title=f"Relatório Mensal - {config['unidade']} - {config['periodo']}", author=EMPRESA,
@@ -690,8 +732,9 @@ def nome_arquivo_pdf(unidade):
     return f"RELATORIO_MENSAL_{n}.pdf"
 
 
-def gerar_da_identificacao(unidade, d, logo, contratante, periodo, local, data):
+def gerar_da_identificacao(unidade, d, logo, contratante, periodo, local, data, troca_meteorologistas=None):
     return gerar_pdf({
+        "troca_meteorologistas": troca_meteorologistas,
         "contratante": contratante, "unidade": unidade, "periodo": periodo, "local": local, "data": data, "logo": logo,
         "img1": d["img_prev"]["bytes"] if d.get("img_prev") else None,
         "img2": d["img_raio"]["bytes"] if d.get("img_raio") else None,
