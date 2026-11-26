@@ -2656,8 +2656,7 @@ def _rel_secao():
         cb1, cb2 = st.columns(2)
         if cb1.button("Gerar relatórios", type="primary", disabled=not pode, key="rel_gerar"):
             _gerar("rel_saida", None, "padrão")
-        if cb2.button("Gerar versão alternativa (Samuel/Larissa)", disabled=not pode, key="rel_gerar_alt",
-                      help="Nos boletins e alertas: fins de semana das 6h às 18h aparece só Mayara; nos demais horários, Vittor vira Samuel e João vira Larissa. A tabela da equipe não muda."):
+        if cb2.button("Gerar versão alternativa", disabled=not pode, key="rel_gerar_alt"):
             _gerar("rel_saida_alt", rm.TROCA_ALTERNATIVA, "versão alternativa")
 
         for chave, sufixo in (("rel_saida", ""), ("rel_saida_alt", "_ALTERNATIVA")):
