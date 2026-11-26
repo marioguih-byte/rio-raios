@@ -11,3 +11,4 @@ matplotlib==3.10.8
 shapely==2.1.2
 reportlab>=4.2
 pillow>=10.0
+pytesseract>=0.3.10

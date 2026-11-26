@@ -88,7 +88,8 @@ UNIDADES = [
     "UTE Vale do Açu - UTE VLA",
 ]
 # Outros nomes pelos quais uma unidade aparece nas pastas e nos arquivos (comparados sem acento/pontuação).
-ALIAS_UNIDADES = {"Boaventura, Itaboraí - RJ": ["utgitb", "unidade de tratamento de gas de itaborai", "boaventura"]}
+ALIAS_UNIDADES = {"Boaventura, Itaboraí - RJ": ["utgitb", "unidade de tratamento de gas de itaborai", "boaventura"],
+                  "UFN-III - Unidade de Fertilizantes Nitrogenados III": ["ufniii", "ufn iii"]}
 
 # Arquivos que não são de nenhuma unidade (mapa geral, testes): ignorados em silêncio.
 IGNORAR_NOMES = ("americadosul", "testtaker")
@@ -126,6 +127,84 @@ def achar_unidade(texto):
         if p > pontos:
             melhor, pontos = u, p
     return melhor
+
+
+# ---------------------------------------------------------------- unidade pelo título da tela de previsão (OCR)
+def ocr_disponivel():
+    try:
+        import pytesseract
+        pytesseract.get_tesseract_version()
+        return True
+    except Exception:
+        return False
+
+
+def _siglas():
+    """sigla (parte depois do último ' - ') -> unidade. Só as que não são ambíguas."""
+    m = {}
+    for u in UNIDADES:
+        if " - " in u:
+            ult = u.rsplit(" - ", 1)[1]
+            if ult == ult.upper():                    # só siglas (RNEST, UTE CAN...), não nomes como "Macaé"
+                m.setdefault(_norm(ult), []).append(u)
+    return {k: v[0] for k, v in m.items() if len(v) == 1 and len(k) >= 3}
+
+
+def unidade_por_texto(texto):
+    """Unidade a partir do texto lido no título da tela (nome completo ou só a sigla)."""
+    linhas = [l.strip() for l in str(texto).splitlines() if l.strip() and not re.search(r"madrugada|manh[ãa]|tarde|noite", l, re.I)][:3]
+    cands = list(linhas)
+    if len(linhas) >= 2:
+        cands += [" ".join(linhas[:2])]
+    if len(linhas) >= 3:
+        cands += [" ".join(linhas[:3])]
+    siglas = _siglas()
+    for c in cands:                                   # sigla exata (UTE CAN, RNEST, UTGC...)
+        n = _norm(c)
+        if n in siglas:
+            return siglas[n]
+    for c in cands:                                   # tirando um "ruído" solto no fim ("RNEST E", "UTE TBA |")
+        t = re.sub(r"\s+\S$", "", c.strip())
+        if _norm(t) in siglas:
+            return siglas[_norm(t)]
+    import difflib
+    melhor, nota = None, 0.0                          # nome completo, tolerando letras erradas do OCR
+    for c in cands:
+        n = _norm(c)
+        if len(n) < 6:
+            continue
+        for u in UNIDADES:
+            r = difflib.SequenceMatcher(None, n, _NORM_UNIDADES[u]).ratio()
+            if r > nota:
+                melhor, nota = u, r
+    if nota >= 0.8:
+        return melhor
+    for c in reversed(cands):
+        if len(_norm(c)) >= 8:
+            u = achar_unidade(c)
+            if u:
+                return u
+    return None
+
+
+def ocr_unidade(dados):
+    """Lê o título (canto superior esquerdo) da tela de previsão e devolve a unidade, ou None."""
+    if not ocr_disponivel():
+        return None
+    try:
+        import pytesseract
+        from PIL import Image as PILImage
+        im = PILImage.open(io.BytesIO(dados)).convert("L")
+        w, h = im.size
+        c = im.crop((0, 0, int(w * 0.64), int(h * 0.30)))
+        c = c.resize((c.width * 2, c.height * 2))
+        try:
+            txt = pytesseract.image_to_string(c, lang="por", config="--psm 6")
+        except Exception:
+            txt = pytesseract.image_to_string(c, config="--psm 6")
+        return unidade_por_texto(txt)
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------- leitura de arquivos
@@ -221,6 +300,7 @@ def identificar(entradas, imagem_unica="auto"):
     arquivos = expandir_entradas(entradas)
     un, sem_unidade, ignorados, logo = {}, [], [], None
     datas = []
+    ocr_lidas = 0
 
     def da_unidade(u):
         return un.setdefault(u, {"boletins": None, "dados": None, "alertas": None, "imagens": [], "alertas_vazio": False, "avisos": []})
@@ -241,6 +321,10 @@ def identificar(entradas, imagem_unica="auto"):
             if not u:
                 partes = re.split(r"[_\- ]+", os.path.splitext(nome)[0])
                 u = achar_unidade(" ".join(p for p in partes if _norm(p) not in ("raio", "raios")))
+            if not u:
+                u = ocr_unidade(dados)          # captura de tela com nome genérico: lê o título da tela
+                if u:
+                    ocr_lidas += 1
             try:
                 br = _brilho(dados)
             except Exception:
@@ -290,7 +374,7 @@ def identificar(entradas, imagem_unica="auto"):
     for u, d in un.items():
         d["img_prev"], d["img_raio"] = _separar_imagens(d["imagens"], d["avisos"], imagem_unica)
     periodo = (min(datas), max(datas)) if datas else None
-    return {"imagem_unica": imagem_unica, "unidades": un, "logo": logo, "periodo": periodo, "sem_unidade": sem_unidade, "ignorados": ignorados}
+    return {"ocr_lidas": ocr_lidas, "imagem_unica": imagem_unica, "unidades": un, "logo": logo, "periodo": periodo, "sem_unidade": sem_unidade, "ignorados": ignorados}
 
 
 def _separar_imagens(imgs, avisos, imagem_unica="auto"):

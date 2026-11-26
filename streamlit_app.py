@@ -2581,11 +2581,18 @@ def _rel_secao():
             return
 
         # arquivos que não souberam de qual unidade são
+        if res.get("ocr_lidas"):
+            st.info(f"{res['ocr_lidas']} captura(s) de tela tiveram a unidade identificada pelo título da própria tela.")
+        elif any(i["tipo"] == "imagem" for i in res["sem_unidade"]) and not rm.ocr_disponivel():
+            st.caption("Dica: instale o Tesseract (pacote `tesseract-ocr`) para o RIO ler o título das capturas de tela e identificar a unidade sozinho.")
         if res["sem_unidade"]:
             st.warning(f"{len(res['sem_unidade'])} arquivo(s) sem unidade reconhecida. Indique a qual unidade pertencem:")
             for i, item in enumerate(list(res["sem_unidade"])):
                 c1, c2, c3 = st.columns([3, 3, 1])
-                c1.write(f"{'🖼️' if item['tipo'] == 'imagem' else '📄'} {item['nome']}")
+                if item["tipo"] == "imagem":
+                    c1.image(item["bytes"], caption=item["nome"], width=220)
+                else:
+                    c1.write(f"📄 {item['nome']}")
                 escolha = c2.selectbox("Unidade", ["—"] + rm.UNIDADES, key=f"rel_sem_{i}_{item['nome']}", label_visibility="collapsed")
                 if c3.button("Atribuir", key=f"rel_atr_{i}_{item['nome']}") and escolha != "—":
                     rm.atribuir_sem_unidade(res, i, escolha)

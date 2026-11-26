@@ -1,2 +1,2 @@
-libnetcdf-dev
-libhdf5-dev
+tesseract-ocr
+tesseract-ocr-por
